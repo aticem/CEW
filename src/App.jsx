@@ -1266,7 +1266,7 @@ function App() {
 
   useEffect(() => {
     mapRef.current = L.map('map', {
-      zoomControl: true,
+      zoomControl: false,
       preferCanvas: true,
       // Animations can feel laggy with lots of canvas layers
       zoomAnimation: false,
@@ -1299,158 +1299,206 @@ function App() {
   // Seçimi temizle
 
 
+  // Field-ready UI constants (industrial, glove-friendly)
+  const BTN_BASE =
+    'relative inline-flex h-12 w-12 items-center justify-center rounded-none border-2 text-slate-100 shadow-[0_5px_0_rgba(0,0,0,0.50)] transition-transform active:translate-y-[2px] active:shadow-[0_3px_0_rgba(0,0,0,0.50)] focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400 disabled:opacity-50 disabled:cursor-not-allowed';
+  const BTN_SMALL_BASE =
+    'relative inline-flex h-9 w-9 items-center justify-center rounded-none border-2 text-slate-100 shadow-[0_4px_0_rgba(0,0,0,0.50)] transition-transform active:translate-y-[2px] active:shadow-[0_2px_0_rgba(0,0,0,0.50)] focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400 disabled:opacity-50 disabled:cursor-not-allowed';
+  const BTN_NEUTRAL = `${BTN_BASE} bg-slate-800 border-slate-500 hover:bg-slate-700 hover:border-slate-400`;
+  const BTN_ACTIVE = `${BTN_BASE} bg-sky-500 border-sky-200 text-black hover:bg-sky-400`;
+  const BTN_PRIMARY = `${BTN_BASE} bg-amber-500 border-amber-300 text-black hover:bg-amber-400`;
+  const BTN_DANGER = `${BTN_BASE} bg-red-600 border-red-300 text-white hover:bg-red-500`;
+  const BTN_SMALL_NEUTRAL = `${BTN_SMALL_BASE} bg-slate-800 border-slate-500 hover:bg-slate-700 hover:border-slate-400`;
+  const ICON = 'h-6 w-6';
+  const ICON_SMALL = 'h-5 w-5';
+
+  const overallTotal = totalPlus + totalMinus;
+  const completedTotal = completedPlus + completedMinus;
+  const completedPct = overallTotal > 0 ? (completedTotal / overallTotal) * 100 : 0;
+  const remainingPlus = Math.max(0, totalPlus - completedPlus);
+  const remainingMinus = Math.max(0, totalMinus - completedMinus);
+  const remainingTotal = Math.max(0, overallTotal - completedTotal);
+
+  const [dwgUrl, setDwgUrl] = useState('');
+  useEffect(() => {
+    fetch('/DC_CABLE_PULLING _PROGRESS_TRACKING/link')
+      .then((r) => r.text())
+      .then((t) => setDwgUrl((t || '').trim()))
+      .catch(() => setDwgUrl('/DC_CABLE_PULLING _PROGRESS_TRACKING/link'));
+  }, []);
+
   return (
     <div className="app">
       {/* Header with Buttons and Counters */}
-      <div className="header">
-        {/* Counters on the left */}
-        <div className="counters">
-        <div className="counter-group">
-          <div className="group-title">Total</div>
-          <div className="counter positive">
-            <span className="counter-label">+DC Cable</span>
-            <span className="counter-value">{totalPlus.toFixed(0)} m</span>
+      <div className="sticky top-0 left-0 z-[1100] w-full min-h-[92px] border-b-2 border-slate-700 bg-slate-900 px-4 py-0 sm:px-6 relative flex items-center">
+        <div className="w-full">
+        <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+          {/* Counters (left) */}
+          <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start translate-x-2">
+            <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 p-3">
+              <div className="grid w-full grid-cols-[max-content_1fr] items-center gap-x-4 gap-y-2">
+                <span className="text-xs font-bold text-slate-200">+DC Cable</span>
+                <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{totalPlus.toFixed(0)} m</span>
+
+                <span className="text-xs font-bold text-slate-200">-DC Cable</span>
+                <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{totalMinus.toFixed(0)} m</span>
+
+                <span className="text-xs font-bold text-slate-200">Total</span>
+                <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{(totalPlus + totalMinus).toFixed(0)} m</span>
+              </div>
+            </div>
+
+            <div className="min-w-[260px] border-2 border-slate-700 bg-slate-800 p-3">
+              <div className="grid w-full grid-cols-[max-content_1fr] items-center gap-x-4 gap-y-2">
+                <span className="text-xs font-bold text-slate-200">+DC Cable</span>
+                <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{completedPlus.toFixed(0)} m</span>
+
+                <span className="text-xs font-bold text-slate-200">-DC Cable</span>
+                <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{completedMinus.toFixed(0)} m</span>
+
+                <span className="text-xs font-black text-emerald-400">Completed ({completedPct.toFixed(2)}%)</span>
+                <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{completedTotal.toFixed(0)} m</span>
+              </div>
+            </div>
+
+            <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 p-3">
+              <div className="grid w-full grid-cols-[max-content_1fr] items-center gap-x-4 gap-y-2">
+                <span className="text-xs font-bold text-slate-200">+DC Cable</span>
+                <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{remainingPlus.toFixed(0)} m</span>
+
+                <span className="text-xs font-bold text-slate-200">-DC Cable</span>
+                <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{remainingMinus.toFixed(0)} m</span>
+
+                <span className="text-xs font-bold text-slate-200">Remaining</span>
+                <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{remainingTotal.toFixed(0)} m</span>
+              </div>
+            </div>
           </div>
-          <div className="counter negative">
-            <span className="counter-label">-DC Cable</span>
-            <span className="counter-value">{totalMinus.toFixed(0)} m</span>
+
+          {/* Controls (right) */}
+          <div className="flex flex-shrink-0 items-center gap-2 justify-self-end -translate-x-2">
+            {noteMode && selectedNotes.size > 0 && (
+              <button onClick={deleteSelectedNotes} className={BTN_DANGER} title="Delete Selected" aria-label="Delete Selected">
+                <svg className={ICON} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                  <line x1="10" y1="11" x2="10" y2="17"/>
+                  <line x1="14" y1="11" x2="14" y2="17"/>
+                </svg>
+              </button>
+            )}
+
+            <div className="mx-1 h-10 w-[2px] bg-slate-600" />
+
+            <button onClick={undoNotes} disabled={!canUndoNotes} className={BTN_SMALL_NEUTRAL} title="Undo (Ctrl+Z)" aria-label="Undo">
+              <svg className={ICON_SMALL} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 14l-4-4 4-4" />
+                <path d="M5 10h9a6 6 0 010 12h-1" />
+              </svg>
+            </button>
+
+            <button onClick={redoNotes} disabled={!canRedoNotes} className={BTN_SMALL_NEUTRAL} title="Redo (Ctrl+Y / Ctrl+Shift+Z)" aria-label="Redo">
+              <svg className={ICON_SMALL} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M15 14l4-4-4-4" />
+                <path d="M19 10H10a6 6 0 000 12h1" />
+              </svg>
+            </button>
+
+            <button
+              onClick={() => setModalOpen(true)}
+              disabled={selectedPolygons.size === 0 || noteMode}
+              className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+              title="Submit Work"
+              aria-label="Submit Work"
+            >
+              Submit
+            </button>
+
+            <button
+              onClick={() => setHistoryOpen(true)}
+              disabled={dailyLog.length === 0 && notes.length === 0}
+              className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+              title="History"
+              aria-label="History"
+            >
+              History
+            </button>
+
+            <button
+              onClick={() => exportToExcel(dailyLog)}
+              disabled={dailyLog.length === 0}
+              className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+              title="Export Excel"
+              aria-label="Export Excel"
+            >
+              Export
+            </button>
+
+            {dailyLog.length > 0 && (
+              <button onClick={resetLog} className={BTN_DANGER} title="Reset All" aria-label="Reset All">
+                <svg className={ICON} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                </svg>
+              </button>
+            )}
           </div>
-          <div className="counter total">
-            <span className="counter-label">Total</span>
-            <span className="counter-value">{(totalPlus + totalMinus).toFixed(0)} m</span>
-          </div>
-        </div>
-        
-        <div className="counter-group">
-          <div className="group-title">Completed ({selectedPolygons.size} tables)</div>
-          <div className="counter positive">
-            <span className="counter-label">+DC Cable</span>
-            <span className="counter-value">{completedPlus.toFixed(0)} m</span>
-          </div>
-          <div className="counter negative">
-            <span className="counter-label">-DC Cable</span>
-            <span className="counter-value">{completedMinus.toFixed(0)} m</span>
-          </div>
-          <div className="counter total">
-            <span className="counter-label">Total</span>
-            <span className="counter-value">{(completedPlus + completedMinus).toFixed(0)} m</span>
-          </div>
-        </div>
-        
-        <div className="counter-group">
-          <div className="group-title">Remaining</div>
-          <div className="counter remaining">
-            <span className="counter-value">{((totalPlus + totalMinus) - (completedPlus + completedMinus)).toFixed(0)} m</span>
-          </div>
-        </div>
         </div>
 
-        {/* Action Buttons on the right */}
-        <div className="action-buttons">
+        {/* Legend / DWG / Notes (right aligned, vertically centered on screen) */}
+        <div className="fixed right-3 sm:right-5 top-[40%] -translate-y-1/2 z-[1090] flex flex-col items-end gap-2">
+          <div className="border-2 border-slate-700 bg-slate-900 px-4 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
+            <div className="text-base font-black uppercase tracking-wide text-white">Legend</div>
+            <div className="mt-2 border-2 border-slate-700 bg-slate-800 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span className="h-3 w-3 border-2 border-white bg-transparent" aria-hidden="true" />
+                <span className="text-[11px] font-bold uppercase tracking-wide text-white">Uncompleted</span>
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
+                <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Completed</span>
+              </div>
+            </div>
+          </div>
+
+          <a
+            href={dwgUrl || '/DC_CABLE_PULLING _PROGRESS_TRACKING/link'}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-6 items-center justify-center border-2 border-slate-700 bg-slate-900 px-2 text-[10px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
+            title="Open Original DWG"
+          >
+            Original DWG
+          </a>
+        </div>
+
+        {/* NOTE (between header and legend, right-aligned with legend/DWG) */}
+        <div className="fixed right-3 sm:right-5 top-[20%] z-[1090]">
           <button
+            type="button"
             onClick={() => {
-              setNoteMode(!noteMode);
-              if (noteMode) setSelectedNotes(new Set());
+              setNoteMode((prev) => {
+                const next = !prev;
+                if (!next) setSelectedNotes(new Set());
+                return next;
+              });
             }}
-            className={`btn-icon ${noteMode ? 'btn-icon-active' : ''}`}
+            aria-pressed={noteMode}
+            aria-label={noteMode ? 'Exit Notes' : 'Notes'}
             title={noteMode ? 'Exit Notes' : 'Notes'}
+            className="relative inline-flex h-6 items-center justify-center border-2 border-slate-700 bg-slate-900 px-2 text-[10px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
           >
-            <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <ellipse cx="16" cy="28" rx="4" ry="2" fill="rgba(0,0,0,0.2)"/>
-              <path d="M16 4C11.6 4 8 7.6 8 12c0 6 8 14 8 14s8-8 8-14c0-4.4-3.6-8-8-8z" fill="url(#pinGrad)" stroke="#b91c1c" strokeWidth="1"/>
-              <circle cx="16" cy="12" r="3" fill="white"/>
-              <defs>
-                <linearGradient id="pinGrad" x1="8" y1="4" x2="24" y2="26">
-                  <stop stopColor="#f87171"/>
-                  <stop offset="1" stopColor="#dc2626"/>
-                </linearGradient>
-              </defs>
-            </svg>
-            {noteMode && selectedNotes.size > 0 && <span className="badge">{selectedNotes.size}</span>}
-          </button>
-          
-          {noteMode && selectedNotes.size > 0 && (
-            <button onClick={deleteSelectedNotes} className="btn-icon" title="Delete Selected">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
-                <line x1="10" y1="11" x2="10" y2="17"/>
-                <line x1="14" y1="11" x2="14" y2="17"/>
-              </svg>
-            </button>
-          )}
-          
-          <div className="btn-divider"></div>
-
-          <button
-            onClick={undoNotes}
-            disabled={!canUndoNotes}
-            className={`btn-icon ${!canUndoNotes ? 'disabled' : ''}`}
-            title="Undo (Ctrl+Z)"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M9 14l-4-4 4-4" />
-              <path d="M5 10h9a6 6 0 010 12h-1" />
+            Note
+            {/* Red corner indicator */}
+            <svg className="absolute -right-1 -top-1 h-2 w-2" viewBox="0 0 12 12" aria-hidden="true">
+              <circle cx="6" cy="6" r="4" fill="#e23a3a" stroke="#7a0f0f" strokeWidth="2" />
             </svg>
           </button>
-
-          <button
-            onClick={redoNotes}
-            disabled={!canRedoNotes}
-            className={`btn-icon ${!canRedoNotes ? 'disabled' : ''}`}
-            title="Redo (Ctrl+Y / Ctrl+Shift+Z)"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M15 14l4-4-4-4" />
-              <path d="M19 10H10a6 6 0 000 12h1" />
-            </svg>
-          </button>
-          
-          <button
-            onClick={() => setModalOpen(true)}
-            disabled={selectedPolygons.size === 0 || noteMode}
-            className={`btn-icon ${(selectedPolygons.size === 0 || noteMode) ? 'disabled' : ''}`}
-            title="Submit Work"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M9 12l2 2 4-4"/>
-              <circle cx="12" cy="12" r="10"/>
-            </svg>
-          </button>
-          
-          <button
-            onClick={() => setHistoryOpen(true)}
-            disabled={dailyLog.length === 0 && notes.length === 0}
-            className={`btn-icon ${(dailyLog.length === 0 && notes.length === 0) ? 'disabled' : ''}`}
-            title="History"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12 6 12 12 16 14"/>
-            </svg>
-          </button>
-          
-          <button
-            onClick={() => exportToExcel(dailyLog)}
-            disabled={dailyLog.length === 0}
-            className={`btn-icon ${dailyLog.length === 0 ? 'disabled' : ''}`}
-            title="Export Excel"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-              <polyline points="7 10 12 15 17 10"/>
-              <line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
-          </button>
-
-          {dailyLog.length > 0 && (
-            <button onClick={resetLog} className="btn-icon" title="Reset All">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
-              </svg>
-            </button>
-          )}
         </div>
-        
+        </div>
+      </div>
+
+      {/* Title under header */}
+      <div className="w-full border-0 bg-[#0b1220] py-2 text-center text-base font-black uppercase tracking-[0.22em] text-slate-200">
+        DC CABLE PULLING PROGRESS TRACKING
       </div>
 
       <div className="map-wrapper">

@@ -13,7 +13,7 @@
 
 .modal-content {
   background: white;
-  border-radius: 12px;
+  border-radius: 0px;
   padding: 24px;
   width: 90%;
   max-width: 500px;
@@ -48,7 +48,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: 0px;
   transition: all 0.2s;
 }
 
@@ -73,7 +73,7 @@
   width: 100%;
   padding: 10px 12px;
   border: 2px solid #d1d5db;
-  border-radius: 6px;
+  border-radius: 0px;
   font-size: 14px;
   transition: border-color 0.2s;
   box-sizing: border-box;
@@ -87,7 +87,7 @@
 .form-summary {
   background: #f9fafb;
   border: 2px solid #e5e7eb;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 16px;
   margin: 20px 0;
 }
@@ -124,7 +124,7 @@
 .modal-actions button {
   padding: 10px 24px;
   border: none;
-  border-radius: 6px;
+  border-radius: 0px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;

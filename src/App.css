@@ -13,10 +13,16 @@ body {
   min-height: 100vh;
 }
 
+/* Rugged industrial: square corners everywhere (no rounded UI) */
+.app * {
+  border-radius: 0 !important;
+}
+
 .app {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  height: 100vh;
 }
 
 /* Header - Contains buttons and counters */
@@ -282,12 +288,26 @@ body {
 .map-wrapper {
   position: relative;
   flex: 1;
+  min-height: 0;
+  border-top: 0 !important;
 }
 
 #map {
-  height: 100vh;
+  height: 100%;
   width: 100%;
   background: #0b1220; /* dark navy */
+  border: 0 !important;
+  outline: none !important;
+}
+
+/* Leaflet can apply focus outlines/borders when clicking the map */
+.leaflet-container {
+  background: #0b1220 !important;
+  outline: none !important;
+  border: 0 !important;
+}
+.leaflet-container:focus {
+  outline: none !important;
 }
 
 /* Note marker tooltip (Leaflet) */
