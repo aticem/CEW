@@ -47,9 +47,14 @@ L.TextLabel = L.CircleMarker.extend({
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    ctx.lineWidth = fontSize / 8;
-    ctx.strokeStyle = 'rgba(255,255,255,0.8)';
-    ctx.strokeText(this.options.text, 0, 0);
+    // Make text look less "bold/fill-heavy":
+    // - A bright stroke thickens glyphs; use a thin dark stroke instead.
+    // - Skip stroke at small sizes (expensive + visually noisy).
+    if (fontSize >= 10) {
+      ctx.lineWidth = Math.max(0.55, fontSize / 18);
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      ctx.strokeText(this.options.text, 0, 0);
+    }
     
     ctx.fillText(this.options.text, 0, 0);
     
@@ -64,10 +69,11 @@ L.textLabel = function (latlng, options) {
 // ═══════════════════════════════════════════════════════════════
 // GLOBAL CANVAS RENDERER
 // ═══════════════════════════════════════════════════════════════
-const canvasRenderer = L.canvas({ padding: 0.5 });
+// Smaller padding = less canvas redraw area => better performance on large datasets
+const canvasRenderer = L.canvas({ padding: 0.1 });
 
 // ═══════════════════════════════════════════════════════════════
-// GEOJSON FILE CONFIG
+// GEOJSON DOSYALARI KONFİGÜRASYONU
 // ═══════════════════════════════════════════════════════════════
 const GEOJSON_FILES = [
   { 
@@ -99,7 +105,7 @@ const GEOJSON_FILES = [
 ];
 
 // ═══════════════════════════════════════════════════════════════
-// HELPERS
+// YARDIMCI FONKSİYONLAR
 // ═══════════════════════════════════════════════════════════════
 function calculateLineAngle(coords) {
   if (!coords || coords.length < 2) return 0;
@@ -125,7 +131,7 @@ function calculateLineAngle(coords) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ID NORMALIZATION
+// ID NORMALİZASYONU
 // ═══════════════════════════════════════════════════════════════
 const normalizeId = (id) => (id ? id.toString().replace(/\s+/g, '').toLowerCase().trim() : '');
 
@@ -183,6 +189,9 @@ function App() {
   const polygonById = useRef({}); // uniqueId -> {layer, stringId}
   const boxRectRef = useRef(null);
   const draggingRef = useRef(null);
+  const rafRef = useRef(null);
+  const stringTextPointsRef = useRef([]); // [{lat,lng,text,angle,stringId}]
+  const stringTextLayerRef = useRef(null); // L.LayerGroup
   
   const [status, setStatus] = useState('Initializing map...');
   const [lengthData, setLengthData] = useState({}); // Length data from CSV
@@ -257,7 +266,45 @@ function App() {
   const markerClickedRef = useRef(false); // Track if a marker was just clicked
 
   const getTodayYmd = () => new Date().toISOString().split('T')[0];
-  const getNoteYmd = (note) => note?.noteDate || (note?.createdAt ? new Date(note.createdAt).toISOString().split('T')[0] : getTodayYmd());
+  const getNoteYmd = (note) =>
+    note?.noteDate ||
+    (note?.createdAt ? new Date(note.createdAt).toISOString().split('T')[0] : getTodayYmd());
+
+  // Performance knobs (labels are the #1 cost in this app)
+  const STRING_LABEL_MIN_ZOOM = 18; // only render string_text IDs when zoomed in
+  const STRING_LABEL_MAX = 2500; // hard cap to avoid blowing up canvas on huge datasets
+
+  const scheduleStringTextLabelUpdate = useCallback(() => {
+    if (!mapRef.current || !stringTextLayerRef.current) return;
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      const map = mapRef.current;
+      const layer = stringTextLayerRef.current;
+      const zoom = map.getZoom();
+
+      layer.clearLayers();
+
+      if (zoom < STRING_LABEL_MIN_ZOOM) return;
+
+      const bounds = map.getBounds().pad(0.15);
+      let count = 0;
+      for (const pt of stringTextPointsRef.current) {
+        if (count >= STRING_LABEL_MAX) break;
+        if (!bounds.contains([pt.lat, pt.lng])) continue;
+        count++;
+        const label = L.textLabel([pt.lat, pt.lng], {
+          text: pt.text,
+          renderer: canvasRenderer,
+          textBaseSize: 11,
+          refZoom: 20,
+          textStyle: '300',
+          textColor: 'rgba(255,255,255,0.92)',
+          rotation: pt.angle || 0
+        });
+        label.addTo(layer);
+      }
+    });
+  }, []);
   
   // Hooks for daily log and export
   const { dailyLog, addRecord, resetLog } = useDailyLog();
@@ -344,7 +391,7 @@ function App() {
         L.DomEvent.stopPropagation(e);
         markerClickedRef.current = true;
         
-        // Open note popup directly on marker click
+        // Open popup immediately when marker is clicked
         setEditingNote(note);
         setNoteText(note.text || '');
         setNoteDate(getNoteYmd(note));
@@ -429,7 +476,7 @@ function App() {
     setNotes(prev => [...prev, newNote]);
     // Don't open popup on create - user clicks the marker to edit
   };
-  
+
   const handleNotePhotoSelected = (file) => {
     if (!file) return;
     if (!file.type?.startsWith('image/')) {
@@ -452,7 +499,7 @@ function App() {
     };
     reader.readAsDataURL(file);
   };
-
+  
   // Save note text
   const saveNote = () => {
     if (!editingNote) return;
@@ -491,13 +538,13 @@ function App() {
     setSelectedNotes(new Set());
   };
 
-  // Load CSV
+  // CSV yükle
   useEffect(() => {
     fetch('/DC_CABLE_PULLING _PROGRESS_TRACKING/dc_strings.csv')
       .then(res => res.text())
       .then(text => {
         const rows = text.split(/\r?\n/).slice(1);
-        const dict = {}; // For each ID: { plus: number[], minus: number[] }
+        const dict = {}; // Her ID için {plus: [], minus: []} array'leri tutacak
         rows.forEach(r => {
           const parts = r.split(',');
           if (parts.length >= 2) {
@@ -532,7 +579,7 @@ function App() {
         
         console.log('CSV loaded:', Object.keys(dict).length, 'entries');
       })
-      .catch(err => console.error('CSV failed to load:', err));
+      .catch(err => console.error('CSV yüklenemedi:', err));
   }, []);
 
   // Calculate counters when selection changes
@@ -592,12 +639,23 @@ function App() {
       const polygonInfo = polygonById.current[polygonId];
       if (polygonInfo && polygonInfo.layer && polygonInfo.layer.setStyle) {
         const isSelected = currentSelected.has(polygonId);
-        polygonInfo.layer.setStyle({
-          color: isSelected ? '#22c55e' : '#2563eb',
-          fillColor: isSelected ? '#22c55e' : '#3b82f6',
-          fillOpacity: isSelected ? 0.7 : 0.4,
-          weight: 2
-        });
+        // IMPORTANT: when unselecting, restore the exact base style used by the layer
+        // so it doesn't appear "whiter" after toggling.
+        polygonInfo.layer.setStyle(
+          isSelected
+            ? {
+                color: '#22c55e',
+                weight: 2,
+                fill: false,
+                fillOpacity: 0
+              }
+            : {
+                color: 'rgba(255,255,255,0.35)',
+                weight: 1.05,
+                fill: false,
+                fillOpacity: 0
+              }
+        );
       }
     });
     
@@ -613,13 +671,18 @@ function App() {
     layersRef.current = [];
     polygonById.current = {};
     polygonIdCounter.current = 0;
+    stringTextPointsRef.current = [];
+    if (stringTextLayerRef.current) {
+      try { stringTextLayerRef.current.remove(); } catch (e) {}
+      stringTextLayerRef.current = null;
+    }
     
     const allBounds = L.latLngBounds();
     let totalFeatures = 0;
     let textCount = 0;
     const collectedPoints = [];
     
-    // Collect string text points (used as label positions)
+    // String text'leri topla (text konumları için)
     const stringTextMap = {}; // stringId -> {lat, lng, angle, text}
 
     for (const file of GEOJSON_FILES) {
@@ -629,9 +692,10 @@ function App() {
         const data = await response.json();
         totalFeatures += data.features?.length || 0;
 
-        // Special handling for string_text - ONLY text labels (no red dots)
+        // Special handling for string_text - store points and render lazily for performance
         if (file.name === 'string_text') {
           const stringLayer = L.layerGroup();
+          stringTextLayerRef.current = stringLayer;
           
           (data.features || []).forEach(feature => {
             if (feature.geometry?.type === 'Point' && feature.properties?.text) {
@@ -646,18 +710,14 @@ function App() {
               collectedPoints.push({ id: stringId, lat, lng });
               stringTextMap[stringId] = { lat, lng, angle: feature.properties.angle || 0, text: feature.properties.text };
               
-              // Create ONLY text label (NO red dot)
-              textCount++;
-              const label = L.textLabel([lat, lng], {
+              // Store for lazy rendering
+              stringTextPointsRef.current.push({
+                lat,
+                lng,
+                stringId,
                 text: feature.properties.text,
-                renderer: canvasRenderer,
-                textBaseSize: 12,
-                refZoom: 20,
-                textStyle: '500',
-                textColor: '#222',
-                rotation: feature.properties.angle || 0
+                angle: feature.properties.angle || 0
               });
-              label.addTo(stringLayer);
               
               allBounds.extend([lat, lng]);
             }
@@ -675,10 +735,10 @@ function App() {
             interactive: true,
             
             style: (feature) => ({
-              color: '#2563eb',
-              weight: 2,
-              fillColor: '#3b82f6',
-              fillOpacity: 0.4,
+              color: 'rgba(255,255,255,0.35)',
+              weight: 1.05,
+              fill: false,
+              fillOpacity: 0,
             }),
             
             onEachFeature: (feature, featureLayer) => {
@@ -781,12 +841,23 @@ function App() {
           renderer: canvasRenderer,
           interactive: false,
           
-          style: (feature) => ({
-            color: file.color,
-            weight: file.weight || 1,
-            fillColor: file.fillColor,
-            fillOpacity: file.fillOpacity || 0.4,
-          }),
+          style: (feature) => {
+            // Restore the "dim white" look for all layers, with a stronger LV box outline.
+            if (file.name === 'lv_box') {
+              return {
+                color: 'rgba(255,255,255,0.95)',
+                weight: 3.2,
+                fill: false,
+                fillOpacity: 0
+              };
+            }
+            return {
+              color: 'rgba(255,255,255,0.26)',
+              weight: 0.78,
+              fill: false,
+              fillOpacity: 0
+            };
+          },
           
           pointToLayer: (feature, latlng) => {
             if (feature.properties?.text) {
@@ -796,14 +867,18 @@ function App() {
                 renderer: canvasRenderer,
                 textBaseSize: 12,
                 refZoom: 20,
-                textStyle: '500',
-                textColor: '#222',
+                textStyle: '400',
+                textColor: 'rgba(255,255,255,0.85)',
                 rotation: feature.properties.angle || 0
               });
             }
-            return L.circleMarker(latlng, { 
-              renderer: canvasRenderer, 
-              radius: 2 
+            return L.circleMarker(latlng, {
+              renderer: canvasRenderer,
+              radius: 2,
+              color: 'rgba(255,255,255,0.26)',
+              weight: 1,
+              fillColor: 'rgba(255,255,255,0.26)',
+              fillOpacity: 0.65
             });
           },
           
@@ -830,7 +905,7 @@ function App() {
                   textBaseSize: 20,
                   refZoom: 22,
                   textStyle: '300',
-                  textColor: '#333',
+                  textColor: 'rgba(255,255,255,0.9)',
                   rotation: rotation
                 });
                 textMarker.addTo(mapRef.current);
@@ -854,6 +929,62 @@ function App() {
     if (allBounds.isValid()) {
       mapRef.current.fitBounds(allBounds, { padding: [20, 20] });
     }
+
+    // Initial label draw + update on view changes (lazy string_text rendering)
+    scheduleStringTextLabelUpdate();
+    mapRef.current.off('zoomend moveend', scheduleStringTextLabelUpdate);
+    mapRef.current.on('zoomend moveend', scheduleStringTextLabelUpdate);
+
+    // Build a tiny spatial grid for string_text points to speed up polygon matching.
+    // This avoids O(polygons * allStringPoints) scans.
+    const GRID_CELL_DEG = 0.001; // ~111m latitude; good balance between speed and accuracy
+    const stringGrid = (() => {
+      const grid = new Map(); // key -> [{stringId, latLng}]
+      const seen = new Set();
+      for (const p of stringTextPointsRef.current) {
+        if (!p?.stringId || seen.has(p.stringId)) continue;
+        seen.add(p.stringId);
+        const iLat = Math.floor(p.lat / GRID_CELL_DEG);
+        const iLng = Math.floor(p.lng / GRID_CELL_DEG);
+        const key = `${iLat}:${iLng}`;
+        if (!grid.has(key)) grid.set(key, []);
+        grid.get(key).push({ stringId: p.stringId, latLng: L.latLng(p.lat, p.lng) });
+      }
+      return grid;
+    })();
+
+    const queryStringCandidates = (bounds, center, includeLooseMargin) => {
+      let queryBounds = bounds;
+      if (includeLooseMargin) {
+        const latRad = (center.lat * Math.PI) / 180;
+        const cos = Math.max(0.2, Math.cos(latRad));
+        const latDeg = LOOSE_DISTANCE_METERS / 111320;
+        const lngDeg = latDeg / cos;
+        const sw = bounds.getSouthWest();
+        const ne = bounds.getNorthEast();
+        queryBounds = L.latLngBounds(
+          [sw.lat - latDeg, sw.lng - lngDeg],
+          [ne.lat + latDeg, ne.lng + lngDeg]
+        );
+      }
+
+      const sw = queryBounds.getSouthWest();
+      const ne = queryBounds.getNorthEast();
+      const minLat = Math.floor(sw.lat / GRID_CELL_DEG);
+      const maxLat = Math.floor(ne.lat / GRID_CELL_DEG);
+      const minLng = Math.floor(sw.lng / GRID_CELL_DEG);
+      const maxLng = Math.floor(ne.lng / GRID_CELL_DEG);
+
+      const out = [];
+      for (let a = minLat; a <= maxLat; a++) {
+        for (let b = minLng; b <= maxLng; b++) {
+          const key = `${a}:${b}`;
+          const arr = stringGrid.get(key);
+          if (arr && arr.length) out.push(...arr);
+        }
+      }
+      return out;
+    };
 
     // Match string text locations with full.geojson polygons (chunked to avoid long blocking)
     setTimeout(() => {
@@ -900,27 +1031,17 @@ function App() {
           const matchesInside = [];
           const matchesNearby = [];
 
-          Object.keys(stringTextMap).forEach(stringId => {
-            if (!isSmallTable && assignedToLargeTable.has(stringId)) {
-              return;
-            }
-            
-            const pt = stringTextMap[stringId];
-            const ptLatLng = L.latLng(pt.lat, pt.lng);
-            const distToCenter = center.distanceTo(ptLatLng);
-            
-            // Fast check: bounds is enough for label matching; skip heavy geometry calc
-            const insideBounds = bounds.contains(ptLatLng);
-
+          const candidates = queryStringCandidates(bounds, center, isSmallTable);
+          for (const c of candidates) {
+            if (!isSmallTable && assignedToLargeTable.has(c.stringId)) continue;
+            const distToCenter = center.distanceTo(c.latLng);
+            const insideBounds = bounds.contains(c.latLng);
             if (insideBounds) {
-              matchesInside.push({ stringId, dist: distToCenter });
-              return;
+              matchesInside.push({ stringId: c.stringId, dist: distToCenter });
+            } else if (isSmallTable && distToCenter < NEAR_DISTANCE_METERS) {
+              matchesNearby.push({ stringId: c.stringId, dist: distToCenter });
             }
-            
-            if (isSmallTable && distToCenter < NEAR_DISTANCE_METERS) {
-              matchesNearby.push({ stringId, dist: distToCenter });
-            }
-          });
+          }
           
           let finalId = null;
           if (matchesInside.length === 1) {
@@ -933,16 +1054,14 @@ function App() {
             finalId = matchesNearby[0].stringId;
           } else if (isSmallTable) {
             let bestLoose = null;
-            Object.keys(stringTextMap).forEach(stringId => {
-              const pt = stringTextMap[stringId];
-              const ptLatLng = L.latLng(pt.lat, pt.lng);
-              const distToCenter = center.distanceTo(ptLatLng);
+            for (const c of candidates) {
+              const distToCenter = center.distanceTo(c.latLng);
               if (distToCenter < LOOSE_DISTANCE_METERS) {
                 if (!bestLoose || distToCenter < bestLoose.dist) {
-                  bestLoose = { stringId, dist: distToCenter };
+                  bestLoose = { stringId: c.stringId, dist: distToCenter };
                 }
               }
-            });
+            }
             if (bestLoose) {
               finalId = bestLoose.stringId;
             }
@@ -987,8 +1106,6 @@ function App() {
     const isNoteMarkerDomTarget = (evt) => {
       const t = evt?.target;
       if (!t) return false;
-      // Leaflet marker icon element will include our divIcon className `custom-note-pin`
-      // Inner elements include `.note-dot-hit` / `.note-dot-core`
       return Boolean(
         t.closest?.('.custom-note-pin') ||
           t.closest?.('.note-dot-hit') ||
@@ -1005,9 +1122,8 @@ function App() {
     const onMouseDown = (e) => {
       if (e.button !== 0 && e.button !== 2) return; // Left or right click
 
-      // If user is interacting with a note marker, don't start map selection / note-create flow.
-      // This prevents "click note marker => create new note" bug.
-      if (isNoteMarkerDomTarget(e)) {
+      // Prevent "clicking a note marker creates a new note" bug
+      if (noteMode && isNoteMarkerDomTarget(e)) {
         return;
       }
       
@@ -1152,23 +1268,35 @@ function App() {
     mapRef.current = L.map('map', {
       zoomControl: true,
       preferCanvas: true,
-      zoomAnimation: true,
-      markerZoomAnimation: true,
+      // Animations can feel laggy with lots of canvas layers
+      zoomAnimation: false,
+      markerZoomAnimation: false,
       fadeAnimation: false,
     });
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 23,
-      maxNativeZoom: 19,
-      attribution: '&copy; OpenStreetMap'
-    }).addTo(mapRef.current);
+    // Hide raster tiles for best performance + clean dark background
+    // (Re-enable if you want map imagery)
+    // L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    //   maxZoom: 23,
+    //   maxNativeZoom: 19,
+    //   attribution: '&copy; OpenStreetMap',
+    //   updateWhenIdle: true,
+    //   updateWhenZooming: false,
+    //   keepBuffer: 1
+    // }).addTo(mapRef.current);
 
     fetchAllGeoJson();
 
-    return () => mapRef.current?.remove();
+    return () => {
+      try {
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        mapRef.current?.off('zoomend moveend', scheduleStringTextLabelUpdate);
+      } catch (e) {}
+      mapRef.current?.remove();
+    };
   }, []);
 
-  // (Selection clear) - intentionally left empty
+  // Seçimi temizle
 
 
   return (
@@ -1222,9 +1350,7 @@ function App() {
           <button
             onClick={() => {
               setNoteMode(!noteMode);
-              if (noteMode) {
-                setSelectedNotes(new Set());
-              }
+              if (noteMode) setSelectedNotes(new Set());
             }}
             className={`btn-icon ${noteMode ? 'btn-icon-active' : ''}`}
             title={noteMode ? 'Exit Notes' : 'Notes'}
@@ -1293,8 +1419,8 @@ function App() {
           
           <button
             onClick={() => setHistoryOpen(true)}
-            disabled={dailyLog.length === 0}
-            className={`btn-icon ${dailyLog.length === 0 ? 'disabled' : ''}`}
+            disabled={dailyLog.length === 0 && notes.length === 0}
+            className={`btn-icon ${(dailyLog.length === 0 && notes.length === 0) ? 'disabled' : ''}`}
             title="History"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1324,6 +1450,7 @@ function App() {
             </button>
           )}
         </div>
+        
       </div>
 
       <div className="map-wrapper">
@@ -1430,7 +1557,6 @@ function App() {
                 <img src={notePhotoDataUrl} alt={notePhotoName || 'Note attachment'} />
               </div>
             )}
-
             <textarea
               className="note-textarea"
               value={noteText}
@@ -1558,21 +1684,12 @@ function App() {
 
                 dates.sort((a, b) => mult * (dateMetric(a) - dateMetric(b)));
 
-                const sortRecordsInDate = (recs) => {
-                  const recMult = historySortOrder === 'desc' ? -1 : 1;
-                  return [...recs].sort((a, b) => {
-                    if (historySortBy === 'workers') return recMult * ((a.workers || 0) - (b.workers || 0));
-                    if (historySortBy === 'cable') return recMult * ((a.total_cable || 0) - (b.total_cable || 0));
-                    return recMult * (new Date(a.date) - new Date(b.date));
-                  });
-                };
-
                 if (dates.length === 0) {
                   return <div className="history-empty">No work records or notes yet</div>;
                 }
 
                 return dates.map((d) => {
-                  const recs = sortRecordsInDate(recordsByDate[d] || []);
+                  const recs = [...(recordsByDate[d] || [])];
                   const dayNotes = [...(notesByDate[d] || [])].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
                   const dateLabel = new Date(d).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
 
