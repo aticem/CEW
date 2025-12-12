@@ -7,7 +7,7 @@ import useDailyLog from './hooks/useDailyLog';
 import { useChartExport } from './hooks/useChartExport';
 
 // ═══════════════════════════════════════════════════════════════
-// ÖZEL CANVAS TEXT LABEL SINIFI
+// CUSTOM CANVAS TEXT LABEL CLASS
 // ═══════════════════════════════════════════════════════════════
 L.TextLabel = L.CircleMarker.extend({
   options: {
@@ -67,7 +67,7 @@ L.textLabel = function (latlng, options) {
 const canvasRenderer = L.canvas({ padding: 0.5 });
 
 // ═══════════════════════════════════════════════════════════════
-// GEOJSON DOSYALARI KONFİGÜRASYONU
+// GEOJSON FILE CONFIG
 // ═══════════════════════════════════════════════════════════════
 const GEOJSON_FILES = [
   { 
@@ -99,7 +99,7 @@ const GEOJSON_FILES = [
 ];
 
 // ═══════════════════════════════════════════════════════════════
-// YARDIMCI FONKSİYONLAR
+// HELPERS
 // ═══════════════════════════════════════════════════════════════
 function calculateLineAngle(coords) {
   if (!coords || coords.length < 2) return 0;
@@ -125,7 +125,7 @@ function calculateLineAngle(coords) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ID NORMALİZASYONU
+// ID NORMALIZATION
 // ═══════════════════════════════════════════════════════════════
 const normalizeId = (id) => (id ? id.toString().replace(/\s+/g, '').toLowerCase().trim() : '');
 
@@ -199,15 +199,65 @@ function App() {
   
   // Note Mode state
   const [noteMode, setNoteMode] = useState(false);
-  const [notes, setNotes] = useState(() => {
+  const initialNotes = (() => {
     const saved = localStorage.getItem('cew_notes');
     return saved ? JSON.parse(saved) : [];
-  });
+  })();
+  const [notesState, setNotesState] = useState(() => ({
+    past: [],
+    present: initialNotes,
+    future: []
+  }));
+  const notes = notesState.present;
+  const canUndoNotes = notesState.past.length > 0;
+  const canRedoNotes = notesState.future.length > 0;
+  const NOTES_HISTORY_LIMIT = 50;
+
+  const setNotes = (updater) => {
+    setNotesState((s) => {
+      const next = typeof updater === 'function' ? updater(s.present) : updater;
+      if (next === s.present) return s;
+      const past = [...s.past, s.present].slice(-NOTES_HISTORY_LIMIT);
+      return { past, present: next, future: [] };
+    });
+  };
+
+  const undoNotes = () => {
+    setNotesState((s) => {
+      if (s.past.length === 0) return s;
+      const previous = s.past[s.past.length - 1];
+      return {
+        past: s.past.slice(0, -1),
+        present: previous,
+        future: [s.present, ...s.future]
+      };
+    });
+  };
+
+  const redoNotes = () => {
+    setNotesState((s) => {
+      if (s.future.length === 0) return s;
+      const next = s.future[0];
+      return {
+        past: [...s.past, s.present].slice(-NOTES_HISTORY_LIMIT),
+        present: next,
+        future: s.future.slice(1)
+      };
+    });
+  };
+
   const [selectedNotes, setSelectedNotes] = useState(new Set());
   const [editingNote, setEditingNote] = useState(null); // { id, lat, lng, text }
   const [noteText, setNoteText] = useState('');
+  const [noteDate, setNoteDate] = useState(''); // YYYY-MM-DD
+  const [notePhotoDataUrl, setNotePhotoDataUrl] = useState(null); // string | null
+  const [notePhotoName, setNotePhotoName] = useState(''); // original filename (optional)
+  const notePhotoInputRef = useRef(null);
   const noteMarkersRef = useRef({}); // id -> marker
   const markerClickedRef = useRef(false); // Track if a marker was just clicked
+
+  const getTodayYmd = () => new Date().toISOString().split('T')[0];
+  const getNoteYmd = (note) => note?.noteDate || (note?.createdAt ? new Date(note.createdAt).toISOString().split('T')[0] : getTodayYmd());
   
   // Hooks for daily log and export
   const { dailyLog, addRecord, resetLog } = useDailyLog();
@@ -217,10 +267,32 @@ function App() {
   useEffect(() => {
     localStorage.setItem('cew_notes', JSON.stringify(notes));
   }, [notes]);
+
+  // Keep selection/editing consistent when notes change (undo/redo or deletions)
+  useEffect(() => {
+    const ids = new Set(notes.map((n) => n.id));
+    setSelectedNotes((prev) => new Set([...prev].filter((id) => ids.has(id))));
+
+    if (editingNote && !ids.has(editingNote.id)) {
+      setEditingNote(null);
+      setNoteText('');
+      setNoteDate('');
+      setNotePhotoDataUrl(null);
+      setNotePhotoName('');
+    }
+  }, [notes, editingNote]);
   
   // Render note markers on map
   useEffect(() => {
     if (!mapRef.current) return;
+
+    const escapeHtml = (s) =>
+      String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
     
     // Clear existing markers
     Object.values(noteMarkersRef.current).forEach(marker => marker.remove());
@@ -247,15 +319,38 @@ function App() {
         interactive: true,
         riseOnHover: true
       });
+
+      // Tooltip: show instantly on hover if note has content (text and/or photo)
+      const rawText = (note.text || '').trim();
+      const hasPhoto = Boolean(note.photoDataUrl);
+      if (rawText || hasPhoto) {
+        const compact = rawText.replace(/\s+/g, ' ');
+        const snippet = compact.length > 80 ? `${compact.slice(0, 80)}…` : compact;
+        const tooltipText = snippet || (hasPhoto ? 'Photo attached' : '');
+        marker.bindTooltip(escapeHtml(tooltipText), {
+          direction: 'top',
+          opacity: 0.98,
+          className: 'note-tooltip',
+          offset: [0, -12],
+          sticky: false
+        });
+
+        marker.on('mouseover', () => marker.openTooltip());
+        marker.on('mouseout', () => marker.closeTooltip());
+      }
       
       marker.on('click', (e) => {
         e.originalEvent?.stopPropagation();
         L.DomEvent.stopPropagation(e);
         markerClickedRef.current = true;
         
-        // Open popup immediately when marker is clicked
+        // Open note popup directly on marker click
         setEditingNote(note);
         setNoteText(note.text || '');
+        setNoteDate(getNoteYmd(note));
+        setNotePhotoDataUrl(note.photoDataUrl || null);
+        setNotePhotoName(note.photoName || '');
+        marker.closeTooltip?.();
         
         // Reset flag after event propagation
         setTimeout(() => {
@@ -273,9 +368,41 @@ function App() {
     });
   }, [notes, selectedNotes, noteMode]);
   
-  // Handle Delete key for selected notes
+  // Handle Delete key for selected notes, Escape to close popup, and Ctrl+Z / Ctrl+Y for undo/redo (notes)
   useEffect(() => {
     const handleKeyDown = (e) => {
+      const active = document.activeElement;
+      const isTyping =
+        active &&
+        (active.tagName === 'INPUT' ||
+          active.tagName === 'TEXTAREA' ||
+          active.isContentEditable);
+
+      // Undo/Redo (only when not typing in an input/textarea)
+      if (!isTyping && (e.ctrlKey || e.metaKey)) {
+        const key = (e.key || '').toLowerCase();
+        const isUndo = key === 'z' && !e.shiftKey;
+        const isRedo = key === 'y' || (key === 'z' && e.shiftKey);
+
+        if (isUndo) {
+          e.preventDefault();
+          undoNotes();
+          return;
+        }
+        if (isRedo) {
+          e.preventDefault();
+          redoNotes();
+          return;
+        }
+      }
+
+      if (e.key === 'Escape') {
+        setEditingNote(null);
+        setNoteText('');
+        setNoteDate('');
+        setNotePhotoDataUrl(null);
+        setNotePhotoName('');
+      }
       if (e.key === 'Delete' && noteMode && selectedNotes.size > 0) {
         const toDelete = new Set(selectedNotes);
         setNotes(prev => prev.filter(n => !toDelete.has(n.id)));
@@ -294,20 +421,51 @@ function App() {
       lat: latlng.lat,
       lng: latlng.lng,
       text: '',
+      noteDate: getTodayYmd(),
+      photoDataUrl: null,
+      photoName: '',
       createdAt: new Date().toISOString()
     };
     setNotes(prev => [...prev, newNote]);
     // Don't open popup on create - user clicks the marker to edit
   };
   
+  const handleNotePhotoSelected = (file) => {
+    if (!file) return;
+    if (!file.type?.startsWith('image/')) {
+      alert('Please select an image file.');
+      return;
+    }
+    // Keep localStorage safe-ish: reject very large images (Data URL can explode in size)
+    const maxBytes = 1.5 * 1024 * 1024; // 1.5MB
+    if (file.size > maxBytes) {
+      alert('Image is too large. Please select an image under 1.5MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : null;
+      if (!dataUrl) return;
+      setNotePhotoDataUrl(dataUrl);
+      setNotePhotoName(file.name || '');
+    };
+    reader.readAsDataURL(file);
+  };
+
   // Save note text
   const saveNote = () => {
     if (!editingNote) return;
     setNotes(prev => prev.map(n => 
-      n.id === editingNote.id ? { ...n, text: noteText } : n
+      n.id === editingNote.id
+        ? { ...n, text: noteText, noteDate: noteDate || getNoteYmd(n), photoDataUrl: notePhotoDataUrl, photoName: notePhotoName }
+        : n
     ));
     setEditingNote(null);
     setNoteText('');
+    setNoteDate('');
+    setNotePhotoDataUrl(null);
+    setNotePhotoName('');
   };
   
   // Delete single note
@@ -319,6 +477,10 @@ function App() {
       return next;
     });
     setEditingNote(null);
+    setNoteText('');
+    setNoteDate('');
+    setNotePhotoDataUrl(null);
+    setNotePhotoName('');
   };
   
   // Delete all selected notes
@@ -329,13 +491,13 @@ function App() {
     setSelectedNotes(new Set());
   };
 
-  // CSV yükle
+  // Load CSV
   useEffect(() => {
     fetch('/DC_CABLE_PULLING _PROGRESS_TRACKING/dc_strings.csv')
       .then(res => res.text())
       .then(text => {
         const rows = text.split(/\r?\n/).slice(1);
-        const dict = {}; // Her ID için {plus: [], minus: []} array'leri tutacak
+        const dict = {}; // For each ID: { plus: number[], minus: number[] }
         rows.forEach(r => {
           const parts = r.split(',');
           if (parts.length >= 2) {
@@ -370,7 +532,7 @@ function App() {
         
         console.log('CSV loaded:', Object.keys(dict).length, 'entries');
       })
-      .catch(err => console.error('CSV yüklenemedi:', err));
+      .catch(err => console.error('CSV failed to load:', err));
   }, []);
 
   // Calculate counters when selection changes
@@ -457,7 +619,7 @@ function App() {
     let textCount = 0;
     const collectedPoints = [];
     
-    // String text'leri topla (text konumları için)
+    // Collect string text points (used as label positions)
     const stringTextMap = {}; // stringId -> {lat, lng, angle, text}
 
     for (const file of GEOJSON_FILES) {
@@ -821,6 +983,18 @@ function App() {
     
     const map = mapRef.current;
     const container = map.getContainer();
+
+    const isNoteMarkerDomTarget = (evt) => {
+      const t = evt?.target;
+      if (!t) return false;
+      // Leaflet marker icon element will include our divIcon className `custom-note-pin`
+      // Inner elements include `.note-dot-hit` / `.note-dot-core`
+      return Boolean(
+        t.closest?.('.custom-note-pin') ||
+          t.closest?.('.note-dot-hit') ||
+          t.closest?.('.note-dot-core')
+      );
+    };
     
     // Prevent default context menu only on map container
     const preventContextMenu = (e) => {
@@ -830,6 +1004,12 @@ function App() {
     
     const onMouseDown = (e) => {
       if (e.button !== 0 && e.button !== 2) return; // Left or right click
+
+      // If user is interacting with a note marker, don't start map selection / note-create flow.
+      // This prevents "click note marker => create new note" bug.
+      if (isNoteMarkerDomTarget(e)) {
+        return;
+      }
       
       // Reset marker click flag at start of new interaction
       markerClickedRef.current = false;
@@ -988,98 +1168,14 @@ function App() {
     return () => mapRef.current?.remove();
   }, []);
 
-  // Seçimi temizle
+  // (Selection clear) - intentionally left empty
 
 
   return (
     <div className="app">
       {/* Header with Buttons and Counters */}
       <div className="header">
-        {/* Action Buttons on the left */}
-        <div className="action-buttons">
-          <button
-            onClick={() => {
-              setNoteMode(!noteMode);
-              if (noteMode) setSelectedNotes(new Set());
-            }}
-            className={`btn-icon ${noteMode ? 'btn-icon-active' : ''}`}
-            title={noteMode ? 'Exit Notes' : 'Notes'}
-          >
-            <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <ellipse cx="16" cy="28" rx="4" ry="2" fill="rgba(0,0,0,0.2)"/>
-              <path d="M16 4C11.6 4 8 7.6 8 12c0 6 8 14 8 14s8-8 8-14c0-4.4-3.6-8-8-8z" fill="url(#pinGrad)" stroke="#b91c1c" strokeWidth="1"/>
-              <circle cx="16" cy="12" r="3" fill="white"/>
-              <defs>
-                <linearGradient id="pinGrad" x1="8" y1="4" x2="24" y2="26">
-                  <stop stopColor="#f87171"/>
-                  <stop offset="1" stopColor="#dc2626"/>
-                </linearGradient>
-              </defs>
-            </svg>
-            {noteMode && selectedNotes.size > 0 && <span className="badge">{selectedNotes.size}</span>}
-          </button>
-          
-          {noteMode && selectedNotes.size > 0 && (
-            <button onClick={deleteSelectedNotes} className="btn-icon" title="Delete Selected">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
-                <line x1="10" y1="11" x2="10" y2="17"/>
-                <line x1="14" y1="11" x2="14" y2="17"/>
-              </svg>
-            </button>
-          )}
-          
-          <div className="btn-divider"></div>
-          
-          <button
-            onClick={() => setModalOpen(true)}
-            disabled={selectedPolygons.size === 0 || noteMode}
-            className={`btn-icon ${(selectedPolygons.size === 0 || noteMode) ? 'disabled' : ''}`}
-            title="Submit Work"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M9 12l2 2 4-4"/>
-              <circle cx="12" cy="12" r="10"/>
-            </svg>
-            {selectedPolygons.size > 0 && <span className="badge">{selectedPolygons.size}</span>}
-          </button>
-          
-          <button
-            onClick={() => setHistoryOpen(true)}
-            disabled={dailyLog.length === 0}
-            className={`btn-icon ${dailyLog.length === 0 ? 'disabled' : ''}`}
-            title="History"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12 6 12 12 16 14"/>
-            </svg>
-            {dailyLog.length > 0 && <span className="badge">{dailyLog.length}</span>}
-          </button>
-          
-          <button
-            onClick={() => exportToExcel(dailyLog)}
-            disabled={dailyLog.length === 0}
-            className={`btn-icon ${dailyLog.length === 0 ? 'disabled' : ''}`}
-            title="Export Excel"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-              <polyline points="7 10 12 15 17 10"/>
-              <line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
-          </button>
-
-          {dailyLog.length > 0 && (
-            <button onClick={resetLog} className="btn-icon" title="Reset All">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
-              </svg>
-            </button>
-          )}
-        </div>
-        
-        {/* Counters on the right */}
+        {/* Counters on the left */}
         <div className="counters">
         <div className="counter-group">
           <div className="group-title">Total</div>
@@ -1120,6 +1216,114 @@ function App() {
           </div>
         </div>
         </div>
+
+        {/* Action Buttons on the right */}
+        <div className="action-buttons">
+          <button
+            onClick={() => {
+              setNoteMode(!noteMode);
+              if (noteMode) {
+                setSelectedNotes(new Set());
+              }
+            }}
+            className={`btn-icon ${noteMode ? 'btn-icon-active' : ''}`}
+            title={noteMode ? 'Exit Notes' : 'Notes'}
+          >
+            <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <ellipse cx="16" cy="28" rx="4" ry="2" fill="rgba(0,0,0,0.2)"/>
+              <path d="M16 4C11.6 4 8 7.6 8 12c0 6 8 14 8 14s8-8 8-14c0-4.4-3.6-8-8-8z" fill="url(#pinGrad)" stroke="#b91c1c" strokeWidth="1"/>
+              <circle cx="16" cy="12" r="3" fill="white"/>
+              <defs>
+                <linearGradient id="pinGrad" x1="8" y1="4" x2="24" y2="26">
+                  <stop stopColor="#f87171"/>
+                  <stop offset="1" stopColor="#dc2626"/>
+                </linearGradient>
+              </defs>
+            </svg>
+            {noteMode && selectedNotes.size > 0 && <span className="badge">{selectedNotes.size}</span>}
+          </button>
+          
+          {noteMode && selectedNotes.size > 0 && (
+            <button onClick={deleteSelectedNotes} className="btn-icon" title="Delete Selected">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                <line x1="10" y1="11" x2="10" y2="17"/>
+                <line x1="14" y1="11" x2="14" y2="17"/>
+              </svg>
+            </button>
+          )}
+          
+          <div className="btn-divider"></div>
+
+          <button
+            onClick={undoNotes}
+            disabled={!canUndoNotes}
+            className={`btn-icon ${!canUndoNotes ? 'disabled' : ''}`}
+            title="Undo (Ctrl+Z)"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M9 14l-4-4 4-4" />
+              <path d="M5 10h9a6 6 0 010 12h-1" />
+            </svg>
+          </button>
+
+          <button
+            onClick={redoNotes}
+            disabled={!canRedoNotes}
+            className={`btn-icon ${!canRedoNotes ? 'disabled' : ''}`}
+            title="Redo (Ctrl+Y / Ctrl+Shift+Z)"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M15 14l4-4-4-4" />
+              <path d="M19 10H10a6 6 0 000 12h1" />
+            </svg>
+          </button>
+          
+          <button
+            onClick={() => setModalOpen(true)}
+            disabled={selectedPolygons.size === 0 || noteMode}
+            className={`btn-icon ${(selectedPolygons.size === 0 || noteMode) ? 'disabled' : ''}`}
+            title="Submit Work"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M9 12l2 2 4-4"/>
+              <circle cx="12" cy="12" r="10"/>
+            </svg>
+          </button>
+          
+          <button
+            onClick={() => setHistoryOpen(true)}
+            disabled={dailyLog.length === 0}
+            className={`btn-icon ${dailyLog.length === 0 ? 'disabled' : ''}`}
+            title="History"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+          </button>
+          
+          <button
+            onClick={() => exportToExcel(dailyLog)}
+            disabled={dailyLog.length === 0}
+            className={`btn-icon ${dailyLog.length === 0 ? 'disabled' : ''}`}
+            title="Export Excel"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </button>
+
+          {dailyLog.length > 0 && (
+            <button onClick={resetLog} className="btn-icon" title="Reset All">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="map-wrapper">
@@ -1137,7 +1341,16 @@ function App() {
       
       {/* Note Edit Popup */}
       {editingNote && (
-        <div className="note-popup-overlay" onClick={() => setEditingNote(null)}>
+        <div
+          className="note-popup-overlay"
+          onClick={() => {
+            setEditingNote(null);
+            setNoteText('');
+            setNoteDate('');
+            setNotePhotoDataUrl(null);
+            setNotePhotoName('');
+          }}
+        >
           <div className="note-popup" onClick={(e) => e.stopPropagation()}>
             <div className="note-popup-header">
               <h3>
@@ -1154,13 +1367,75 @@ function App() {
                 </svg>
                 Note
               </h3>
-              <button className="note-close-btn" onClick={() => setEditingNote(null)}>×</button>
+              <button
+                className="note-close-btn"
+                onClick={() => {
+                  setEditingNote(null);
+                  setNoteText('');
+                  setNoteDate('');
+                  setNotePhotoDataUrl(null);
+                  setNotePhotoName('');
+                }}
+              >
+                ×
+              </button>
             </div>
+
+            <div className="note-date-row">
+              <label className="note-date-label">Date</label>
+              <input
+                className="note-date-input"
+                type="date"
+                value={noteDate}
+                onChange={(e) => setNoteDate(e.target.value)}
+              />
+            </div>
+
+            <div className="note-attachments">
+              <input
+                ref={notePhotoInputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  handleNotePhotoSelected(file);
+                  // allow selecting the same file again
+                  e.target.value = '';
+                }}
+              />
+              <button
+                className="btn btn-photo-note"
+                onClick={() => notePhotoInputRef.current?.click()}
+                type="button"
+              >
+                📷 Add Photo
+              </button>
+              {notePhotoDataUrl && (
+                <button
+                  className="btn btn-remove-photo"
+                  onClick={() => {
+                    setNotePhotoDataUrl(null);
+                    setNotePhotoName('');
+                  }}
+                  type="button"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+
+            {notePhotoDataUrl && (
+              <div className="note-photo-preview">
+                <img src={notePhotoDataUrl} alt={notePhotoName || 'Note attachment'} />
+              </div>
+            )}
+
             <textarea
               className="note-textarea"
               value={noteText}
               onChange={(e) => setNoteText(e.target.value)}
-              placeholder="Enter your note here..."
+              placeholder="Write your note here..."
               autoFocus
             />
             <div className="note-popup-actions">
@@ -1186,8 +1461,8 @@ function App() {
           // Add notes from the same date to the record
           const recordDate = record.date;
           const notesOnDate = notes.filter(n => {
-            const noteDate = new Date(n.createdAt).toISOString().split('T')[0];
-            return noteDate === recordDate;
+            const ymd = n.noteDate || (n.createdAt ? new Date(n.createdAt).toISOString().split('T')[0] : null);
+            return ymd === recordDate;
           });
           addRecord({ ...record, notes: notesOnDate });
           alert('Work submitted successfully!');
@@ -1252,52 +1527,121 @@ function App() {
             </div>
             
             <div className="history-list">
-              {[...dailyLog].sort((a, b) => {
+              {(() => {
+                const noteYmd = (n) => n.noteDate || (n.createdAt ? new Date(n.createdAt).toISOString().split('T')[0] : null);
+
+                const notesByDate = {};
+                notes.forEach(n => {
+                  const d = noteYmd(n);
+                  if (!d) return;
+                  if (!notesByDate[d]) notesByDate[d] = [];
+                  notesByDate[d].push(n);
+                });
+
+                const recordsByDate = {};
+                dailyLog.forEach(r => {
+                  const d = r.date;
+                  if (!d) return;
+                  if (!recordsByDate[d]) recordsByDate[d] = [];
+                  recordsByDate[d].push(r);
+                });
+
+                const dates = Array.from(new Set([...Object.keys(recordsByDate), ...Object.keys(notesByDate)]));
                 const mult = historySortOrder === 'desc' ? -1 : 1;
-                if (historySortBy === 'date') return mult * (new Date(a.date) - new Date(b.date));
-                if (historySortBy === 'workers') return mult * ((a.workers || 0) - (b.workers || 0));
-                if (historySortBy === 'cable') return mult * ((a.total_cable || 0) - (b.total_cable || 0));
-                return 0;
-              }).map((record, idx) => (
-                <div key={idx} className="history-item">
-                  <div className="history-item-header">
-                    <span className="history-date">{new Date(record.date).toLocaleDateString('tr-TR', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</span>
-                    <span className="history-subcontractor">{record.subcontractor}</span>
-                  </div>
-                  <div className="history-item-stats">
-                    <div className="stat">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="stat-icon">
-                        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
-                        <circle cx="9" cy="7" r="4"/>
-                        <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
-                      </svg>
-                      <span>{record.workers} workers</span>
-                    </div>
-                    <div className="stat stat-positive">
-                      <span>+DC: {(record.plus_dc || 0).toFixed(0)} m</span>
-                    </div>
-                    <div className="stat stat-negative">
-                      <span>-DC: {(record.minus_dc || 0).toFixed(0)} m</span>
-                    </div>
-                    <div className="stat stat-total">
-                      <span>Total: {(record.total_cable || 0).toFixed(0)} m</span>
-                    </div>
-                  </div>
-                  {record.notes && record.notes.length > 0 && (
-                    <div className="history-notes">
-                      <span className="notes-label">📌 Notes ({record.notes.length}):</span>
-                      {record.notes.map((note, nidx) => (
-                        <div key={nidx} className="history-note">
-                          {note.text || '(empty note)'}
+
+                const dateMetric = (d) => {
+                  const recs = recordsByDate[d] || [];
+                  if (historySortBy === 'workers') return recs.reduce((s, r) => s + (r.workers || 0), 0);
+                  if (historySortBy === 'cable') return recs.reduce((s, r) => s + (r.total_cable || 0), 0);
+                  return new Date(d).getTime();
+                };
+
+                dates.sort((a, b) => mult * (dateMetric(a) - dateMetric(b)));
+
+                const sortRecordsInDate = (recs) => {
+                  const recMult = historySortOrder === 'desc' ? -1 : 1;
+                  return [...recs].sort((a, b) => {
+                    if (historySortBy === 'workers') return recMult * ((a.workers || 0) - (b.workers || 0));
+                    if (historySortBy === 'cable') return recMult * ((a.total_cable || 0) - (b.total_cable || 0));
+                    return recMult * (new Date(a.date) - new Date(b.date));
+                  });
+                };
+
+                if (dates.length === 0) {
+                  return <div className="history-empty">No work records or notes yet</div>;
+                }
+
+                return dates.map((d) => {
+                  const recs = sortRecordsInDate(recordsByDate[d] || []);
+                  const dayNotes = [...(notesByDate[d] || [])].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+                  const dateLabel = new Date(d).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+
+                  return (
+                    <div key={d} className="history-day">
+                      <div className="history-day-header">
+                        <span className="history-day-date">{dateLabel}</span>
+                        <span className="history-day-badges">
+                          {recs.length > 0 && <span className="history-day-badge">Work: {recs.length}</span>}
+                          {dayNotes.length > 0 && <span className="history-day-badge notes">Notes: {dayNotes.length}</span>}
+                        </span>
+                      </div>
+
+                      {recs.length > 0 && (
+                        <div className="history-day-section">
+                          <div className="history-day-section-title">Work</div>
+                          {recs.map((record, idx) => (
+                            <div key={idx} className="history-item">
+                              <div className="history-item-header">
+                                <span className="history-subcontractor">{record.subcontractor}</span>
+                              </div>
+                              <div className="history-item-stats">
+                                <div className="stat">
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="stat-icon">
+                                    <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+                                    <circle cx="9" cy="7" r="4"/>
+                                    <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
+                                  </svg>
+                                  <span>{record.workers} workers</span>
+                                </div>
+                                <div className="stat stat-positive">
+                                  <span>+DC: {(record.plus_dc || 0).toFixed(0)} m</span>
+                                </div>
+                                <div className="stat stat-negative">
+                                  <span>-DC: {(record.minus_dc || 0).toFixed(0)} m</span>
+                                </div>
+                                <div className="stat stat-total">
+                                  <span>Total: {(record.total_cable || 0).toFixed(0)} m</span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
+                      )}
+
+                      {dayNotes.length > 0 && (
+                        <div className="history-day-section">
+                          <div className="history-day-section-title">Notes</div>
+                          <div className="history-notes">
+                            {dayNotes.map((n) => {
+                              const time = n.createdAt ? new Date(n.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
+                              const hasPhoto = Boolean(n.photoDataUrl);
+                              return (
+                                <div key={n.id} className="history-note">
+                                  <div className="history-note-top">
+                                    <span className="history-note-time">{time}</span>
+                                    {hasPhoto && <span className="history-note-photo">📷</span>}
+                                  </div>
+                                  <div className="history-note-text">{n.text || '(empty note)'}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              ))}
-              {dailyLog.length === 0 && (
-                <div className="history-empty">No work records yet</div>
-              )}
+                  );
+                });
+              })()}
             </div>
           </div>
         </div>

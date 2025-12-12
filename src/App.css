@@ -459,6 +459,24 @@ body {
   box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.35), 0 0 14px rgba(245, 158, 11, 0.6);
 }
 
+/* Note marker tooltip (Leaflet) */
+.leaflet-tooltip.note-tooltip {
+  background: rgba(15, 23, 42, 0.95);
+  color: #e2e8f0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  max-width: 280px;
+  white-space: normal;
+}
+
+.leaflet-tooltip.note-tooltip::before {
+  border-top-color: rgba(15, 23, 42, 0.95);
+}
+
 /* Note Popup */
 .note-popup-overlay {
   position: fixed;
@@ -508,6 +526,78 @@ body {
 .note-popup-header h3 svg {
   width: 22px;
   height: 28px;
+}
+
+.note-date-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.note-date-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.note-date-input {
+  height: 36px;
+  padding: 0 12px;
+  border: 2px solid #e5e7eb;
+  border-radius: 10px;
+  font-size: 13px;
+  font-family: inherit;
+  background: white;
+}
+
+.note-date-input:focus {
+  outline: none;
+  border-color: #f97316;
+}
+
+.note-attachments {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.btn-photo-note {
+  background: #0ea5e9;
+  color: white;
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.25);
+}
+
+.btn-photo-note:hover {
+  background: #0284c7;
+}
+
+.btn-remove-photo {
+  background: #111827;
+  color: #e5e7eb;
+  border: 2px solid rgba(17, 24, 39, 0.15);
+}
+
+.btn-remove-photo:hover {
+  background: #0b1220;
+}
+
+.note-photo-preview {
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: #f8fafc;
+  margin-bottom: 12px;
+}
+
+.note-photo-preview img {
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  display: block;
 }
 
 .note-close-btn {
@@ -824,4 +914,82 @@ body {
   padding: 40px 20px;
   color: #64748b;
   font-size: 14px;
+}
+
+/* History grouping by date */
+.history-day {
+  margin-bottom: 14px;
+}
+
+.history-day-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+}
+
+.history-day-date {
+  font-weight: 800;
+  color: white;
+  font-size: 14px;
+}
+
+.history-day-badges {
+  display: flex;
+  gap: 8px;
+}
+
+.history-day-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #e2e8f0;
+  background: rgba(59, 130, 246, 0.25);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.history-day-badge.notes {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.28);
+  color: #fde68a;
+}
+
+.history-day-section {
+  margin-top: 10px;
+}
+
+.history-day-section-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.75);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin: 8px 2px;
+}
+
+.history-note-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.history-note-time {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(148, 163, 184, 0.9);
+}
+
+.history-note-photo {
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.history-note-text {
+  font-size: 12px;
+  color: #94a3b8;
 }
