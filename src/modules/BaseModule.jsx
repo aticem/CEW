@@ -170,6 +170,24 @@ export default function BaseModule({
   const activeMode = customBoundaryLogic ? customBoundaryLogic(moduleConfig) : moduleConfig;
   const moduleName = name || activeMode?.label || 'MODULE';
   const showCounters = Boolean(counters);
+  const stringTextToggleEnabled = Boolean(activeMode?.stringTextToggle);
+  const [stringTextUserOn, setStringTextUserOn] = useState(Boolean(activeMode?.stringTextDefaultOn));
+  const effectiveStringTextVisibility = stringTextToggleEnabled
+    ? (stringTextUserOn ? 'always' : 'none')
+    : (activeMode?.stringTextVisibility || 'always'); // 'always' | 'hover' | 'cursor' | 'none'
+
+  // Keep current visibility in refs so Leaflet event handlers never call stale closures.
+  const effectiveStringTextVisibilityRef = useRef(effectiveStringTextVisibility);
+  const stringTextToggleEnabledRef = useRef(stringTextToggleEnabled);
+  useEffect(() => {
+    effectiveStringTextVisibilityRef.current = effectiveStringTextVisibility;
+    stringTextToggleEnabledRef.current = stringTextToggleEnabled;
+  }, [effectiveStringTextVisibility, stringTextToggleEnabled]);
+
+  // Reset per-module toggle when switching modules
+  useEffect(() => {
+    setStringTextUserOn(Boolean(activeMode?.stringTextDefaultOn));
+  }, [activeMode]);
 
   // Optional hooks for module-specific behavior (kept isolated)
   useEffect(() => {
@@ -193,10 +211,11 @@ export default function BaseModule({
   }, [_customPanelLogic, moduleName, activeMode]);
 
   const mapRef = useRef(null);
+  const stringTextRendererRef = useRef(null); // dedicated canvas renderer for string_text to avoid ghosting
   const layersRef = useRef([]);
   const polygonIdCounter = useRef(0); // Counter for unique polygon IDs
   const polygonById = useRef({}); // uniqueId -> {layer, stringId}
-  const boxRectRef = useRef(null);
+                const boxRectRef = useRef(null);
   const draggingRef = useRef(null);
   const rafRef = useRef(null);
   const stringTextPointsRef = useRef([]); // [{lat,lng,text,angle,stringId}]
@@ -284,13 +303,21 @@ export default function BaseModule({
   const STRING_LABEL_MAX = 2500; // hard cap to avoid blowing up canvas on huge datasets
   const STRING_LABEL_PAD = 0.12; // smaller pad = fewer offscreen labels to build
   const STRING_LABEL_GRID_CELL_DEG = 0.001; // ~111m latitude; good speed/accuracy tradeoff
+  const STRING_LABEL_CURSOR_PX = 28; // LV cursor-mode radius (px)
+  const STRING_LABEL_CURSOR_MAX = 24; // LV cursor-mode max labels near cursor
 
   // string_text visibility can be controlled per module (default: always)
   const stringLabelsEnabledRef = useRef(true);
+  const cursorLabelBoundsRef = useRef(null); // L.LatLngBounds | null
+  const cursorPointRef = useRef(null); // L.Point | null (container point)
+  const cursorMoveRafRef = useRef(null);
   useEffect(() => {
-    const visibility = activeMode?.stringTextVisibility || 'always'; // 'always' | 'hover' | 'none'
+    const visibility = effectiveStringTextVisibility;
+    // cursor mode starts fully hidden until we have an actual cursor position
     stringLabelsEnabledRef.current = visibility === 'always';
-  }, [activeMode]);
+    cursorLabelBoundsRef.current = null;
+    cursorPointRef.current = null;
+  }, [effectiveStringTextVisibility, stringTextToggleEnabled]);
 
   // Reuse label instances to avoid GC churn on pan/zoom
   const stringTextLabelPoolRef = useRef([]); // L.TextLabel[]
@@ -305,10 +332,61 @@ export default function BaseModule({
       const map = mapRef.current;
       const layer = stringTextLayerRef.current;
       const zoom = map.getZoom();
+      const effVis = effectiveStringTextVisibilityRef.current;
+      const toggleEnabled = stringTextToggleEnabledRef.current;
 
-      // LV mode: string_text labels are hidden unless explicitly enabled (hover over map)
+      // Hard kill when effective visibility is OFF
+      if (effVis === 'none') {
+        const pool = stringTextLabelPoolRef.current;
+        const prevActive = stringTextLabelActiveCountRef.current;
+        for (let i = 0; i < prevActive; i++) {
+          const lbl = pool[i];
+          if (lbl && layer.hasLayer(lbl)) layer.removeLayer(lbl);
+        }
+        try {
+          stringTextRendererRef.current?._clear?.();
+        } catch (_e) {
+          void _e;
+        }
+        stringTextLabelActiveCountRef.current = 0;
+        lastStringLabelKeyRef.current = '';
+        return;
+      }
+
+      // If we're in ALWAYS mode, keep labels enabled regardless of any transient pointer-state flags.
+      if (effVis === 'always') {
+        stringLabelsEnabledRef.current = true;
+      }
+
+      // string_text labels are hidden unless explicitly enabled (hover/cursor modes)
       if (!stringLabelsEnabledRef.current) {
         // remove any active pooled labels from the layer
+        const pool = stringTextLabelPoolRef.current;
+        const prevActive = stringTextLabelActiveCountRef.current;
+        for (let i = 0; i < prevActive; i++) {
+          const lbl = pool[i];
+          if (lbl && layer.hasLayer(lbl)) layer.removeLayer(lbl);
+        }
+        // Clear only the label canvas (prevents "ghost" text remnants)
+        try {
+          stringTextRendererRef.current?._clear?.();
+        } catch (_e) {
+          void _e;
+        }
+        stringTextLabelActiveCountRef.current = 0;
+        lastStringLabelKeyRef.current = '';
+        return;
+      }
+
+      // TEXT ON (always) should stay visible even when zooming out in LV.
+      const minZoom = effVis === 'always' && toggleEnabled ? 0 : STRING_LABEL_MIN_ZOOM;
+      if (zoom < minZoom) return;
+
+      const visibility = effVis;
+      const cursorBounds = visibility === 'cursor' ? cursorLabelBoundsRef.current : null;
+      const cursorPoint = visibility === 'cursor' ? cursorPointRef.current : null;
+      // In cursor mode, NEVER fall back to full-map bounds (that's what causes lag).
+      if (visibility === 'cursor' && (!cursorBounds || !cursorPoint)) {
         const pool = stringTextLabelPoolRef.current;
         const prevActive = stringTextLabelActiveCountRef.current;
         for (let i = 0; i < prevActive; i++) {
@@ -320,10 +398,14 @@ export default function BaseModule({
         return;
       }
 
-      if (zoom < STRING_LABEL_MIN_ZOOM) return;
-
-      const bounds = map.getBounds().pad(STRING_LABEL_PAD);
-      const key = `${zoom}|${bounds.getSouth().toFixed(5)},${bounds.getWest().toFixed(5)},${bounds.getNorth().toFixed(5)},${bounds.getEast().toFixed(5)}`;
+      const bounds = cursorBounds || map.getBounds().pad(STRING_LABEL_PAD);
+      // IMPORTANT: in cursor mode, include cursor pixel coords in key so tiny moves still trigger updates
+      // (otherwise rounding can make different cursor positions look identical and leave stale labels on screen)
+      const key = cursorBounds
+        ? `${zoom}|cursor|${Math.round(cursorPoint.x)},${Math.round(cursorPoint.y)}|${bounds
+            .getSouth()
+            .toFixed(6)},${bounds.getWest().toFixed(6)},${bounds.getNorth().toFixed(6)},${bounds.getEast().toFixed(6)}`
+        : `${zoom}|${bounds.getSouth().toFixed(5)},${bounds.getWest().toFixed(5)},${bounds.getNorth().toFixed(5)},${bounds.getEast().toFixed(5)}`;
       if (key === lastStringLabelKeyRef.current) return;
       lastStringLabelKeyRef.current = key;
 
@@ -352,12 +434,38 @@ export default function BaseModule({
       const points = stringTextPointsRef.current;
       const pool = stringTextLabelPoolRef.current;
       let count = 0;
+      const maxCount = cursorBounds ? STRING_LABEL_CURSOR_MAX : STRING_LABEL_MAX;
 
       const iterateIndices = candidates.length ? candidates : null;
       const total = iterateIndices ? iterateIndices.length : points.length;
-      for (let k = 0; k < total; k++) {
-        if (count >= STRING_LABEL_MAX) break;
-        const idx = iterateIndices ? iterateIndices[k] : k;
+
+      // Cursor mode: prioritize closest labels to cursor to keep it ultra-light.
+      let cursorCandidates = null;
+      if (cursorBounds) {
+        const cp = cursorPointRef.current;
+        if (cp) {
+          const tmp = [];
+          const r2 = STRING_LABEL_CURSOR_PX * STRING_LABEL_CURSOR_PX;
+          for (let k = 0; k < total; k++) {
+            const idx = iterateIndices ? iterateIndices[k] : k;
+            const pt = points[idx];
+            if (!pt) continue;
+            if (!bounds.contains([pt.lat, pt.lng])) continue;
+            const pxy = map.latLngToContainerPoint([pt.lat, pt.lng]);
+            const dx = pxy.x - cp.x;
+            const dy = pxy.y - cp.y;
+            const d2 = dx * dx + dy * dy;
+            if (d2 <= r2) tmp.push({ idx, d2 });
+          }
+          tmp.sort((a, b) => a.d2 - b.d2);
+          cursorCandidates = tmp.slice(0, maxCount).map((t) => t.idx);
+        }
+      }
+
+      const runTotal = cursorCandidates ? cursorCandidates.length : total;
+      for (let k = 0; k < runTotal; k++) {
+        if (count >= maxCount) break;
+        const idx = cursorCandidates ? cursorCandidates[k] : (iterateIndices ? iterateIndices[k] : k);
         const pt = points[idx];
         if (!pt) continue;
         if (!bounds.contains([pt.lat, pt.lng])) continue;
@@ -367,7 +475,7 @@ export default function BaseModule({
         if (!label) {
           label = L.textLabel([pt.lat, pt.lng], {
             text: pt.text,
-            renderer: canvasRenderer,
+            renderer: stringTextRendererRef.current || canvasRenderer,
             textBaseSize: 11,
             refZoom: 20,
             textStyle: '300',
@@ -378,9 +486,12 @@ export default function BaseModule({
         }
 
         // Update position + text/rotation then ensure it's on the layer
+        const prevLatLng = typeof label.getLatLng === 'function' ? label.getLatLng() : null;
         const nextLatLng = [pt.lat, pt.lng];
         label.setLatLng(nextLatLng);
-        let needsRedraw = false;
+        let needsRedraw =
+          !!cursorBounds ||
+          (prevLatLng && (prevLatLng.lat !== pt.lat || prevLatLng.lng !== pt.lng));
         if (label.options.text !== pt.text) {
           label.options.text = pt.text;
           needsRedraw = true;
@@ -391,6 +502,7 @@ export default function BaseModule({
           needsRedraw = true;
         }
         if (!layer.hasLayer(label)) layer.addLayer(label);
+        // In cursor mode, ALWAYS redraw after moving a label to prevent "ghost" canvas text.
         if (needsRedraw) label.redraw?.();
 
         count++;
@@ -405,6 +517,34 @@ export default function BaseModule({
       stringTextLabelActiveCountRef.current = count;
     });
   }, []);
+
+  // When the effective visibility changes (TEXT ON/OFF or module config), immediately refresh labels.
+  useEffect(() => {
+    // Keep the internal gate consistent for "always" mode.
+    stringLabelsEnabledRef.current = effectiveStringTextVisibility === 'always';
+    if (effectiveStringTextVisibility === 'none') {
+      cursorLabelBoundsRef.current = null;
+      cursorPointRef.current = null;
+    }
+    scheduleStringTextLabelUpdate();
+  }, [effectiveStringTextVisibility, scheduleStringTextLabelUpdate]);
+
+  // TEXT ON must stay visible even when clicking/selecting; force a refresh on any click within the map container.
+  useEffect(() => {
+    if (!mapRef.current) return;
+    if (effectiveStringTextVisibility !== 'always') return;
+    const el = mapRef.current.getContainer();
+    if (!el) return;
+
+    const onAnyClickCapture = () => {
+      // Bust key cache and redraw so canvas never "drops" labels after interactions.
+      lastStringLabelKeyRef.current = '';
+      scheduleStringTextLabelUpdate();
+    };
+
+    el.addEventListener('click', onAnyClickCapture, true);
+    return () => el.removeEventListener('click', onAnyClickCapture, true);
+  }, [effectiveStringTextVisibility, scheduleStringTextLabelUpdate]);
   
   // Hooks for daily log and export
   const { dailyLog, addRecord, resetLog } = useDailyLog();
@@ -1413,6 +1553,20 @@ export default function BaseModule({
       fadeAnimation: false,
     });
 
+    // Dedicated canvas renderer + pane for string_text labels (prevents ghosting when hiding/showing)
+    try {
+      const paneName = 'stringTextPane';
+      if (!mapRef.current.getPane(paneName)) {
+        const pane = mapRef.current.createPane(paneName);
+        pane.style.zIndex = '450'; // above polygons, below markers
+        pane.style.pointerEvents = 'none';
+      }
+      stringTextRendererRef.current = L.canvas({ padding: 0.1, pane: paneName });
+    } catch (_e) {
+      void _e;
+      stringTextRendererRef.current = null;
+    }
+
     // Hide raster tiles for best performance + clean dark background
     // (Re-enable if you want map imagery)
     // L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -1441,31 +1595,66 @@ export default function BaseModule({
     fetchAllGeoJson();
   }, [activeMode]);
 
-  // If a module wants string_text on hover, toggle the label visibility by map hover state.
+  // If a module wants string_text on hover/cursor, control label visibility by map pointer state.
   useEffect(() => {
     if (!mapRef.current) return;
-    const visibility = activeMode?.stringTextVisibility || 'always';
-    if (visibility !== 'hover') return;
+    const visibility = effectiveStringTextVisibility;
+    if (visibility !== 'hover' && visibility !== 'cursor') return;
 
     const el = mapRef.current.getContainer();
     if (!el) return;
 
     const onEnter = () => {
-      stringLabelsEnabledRef.current = true;
-      scheduleStringTextLabelUpdate();
+      // hover mode shows labels on enter; cursor mode waits for actual cursor position
+      if (visibility === 'hover') {
+        stringLabelsEnabledRef.current = true;
+        scheduleStringTextLabelUpdate();
+      } else {
+        stringLabelsEnabledRef.current = false;
+        cursorLabelBoundsRef.current = null;
+        cursorPointRef.current = null;
+        scheduleStringTextLabelUpdate(); // ensures nothing is rendered
+      }
     };
     const onLeave = () => {
       stringLabelsEnabledRef.current = false;
+      cursorLabelBoundsRef.current = null;
+      cursorPointRef.current = null;
       scheduleStringTextLabelUpdate(); // clears active labels
+    };
+
+    const onMove = (evt) => {
+      if (visibility !== 'cursor') return;
+      if (!mapRef.current) return;
+
+      if (cursorMoveRafRef.current) return;
+      cursorMoveRafRef.current = requestAnimationFrame(() => {
+        cursorMoveRafRef.current = null;
+        const map = mapRef.current;
+        if (!map) return;
+
+        const p = map.mouseEventToContainerPoint(evt);
+        cursorPointRef.current = p;
+        const r = STRING_LABEL_CURSOR_PX;
+        const sw = map.containerPointToLatLng([p.x - r, p.y + r]);
+        const ne = map.containerPointToLatLng([p.x + r, p.y - r]);
+        cursorLabelBoundsRef.current = L.latLngBounds(sw, ne);
+        stringLabelsEnabledRef.current = true;
+        scheduleStringTextLabelUpdate();
+      });
     };
 
     el.addEventListener('mouseenter', onEnter);
     el.addEventListener('mouseleave', onLeave);
+    el.addEventListener('mousemove', onMove);
     return () => {
       el.removeEventListener('mouseenter', onEnter);
       el.removeEventListener('mouseleave', onLeave);
+      el.removeEventListener('mousemove', onMove);
+      if (cursorMoveRafRef.current) cancelAnimationFrame(cursorMoveRafRef.current);
+      cursorMoveRafRef.current = null;
     };
-  }, [activeMode, scheduleStringTextLabelUpdate]);
+  }, [effectiveStringTextVisibility, scheduleStringTextLabelUpdate]);
 
   // Seçimi temizle
 
@@ -1650,6 +1839,17 @@ export default function BaseModule({
           >
             Original DWG
           </a>
+
+          {stringTextToggleEnabled && (
+            <button
+              type="button"
+              onClick={() => setStringTextUserOn((v) => !v)}
+              className="inline-flex h-6 items-center justify-center border-2 border-slate-700 bg-slate-900 px-2 text-[10px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
+              title="Toggle string text"
+            >
+              TEXT {stringTextUserOn ? 'ON' : 'OFF'}
+            </button>
+          )}
         </div>
 
         {/* NOTE (between header and legend, right-aligned with legend/DWG) */}

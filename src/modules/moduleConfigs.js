@@ -5,6 +5,8 @@ export const DC_MODULE_CONFIG = {
   csvPath: '/dc-cable-pulling-progress/dc_strings.csv',
   linkPath: '/dc-cable-pulling-progress/link',
   stringTextVisibility: 'always', // 'always' | 'hover' | 'none'
+  stringTextToggle: false,
+  stringTextDefaultOn: true,
   geojsonFiles: [
     { url: '/dc-cable-pulling-progress/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
     { url: '/dc-cable-pulling-progress/string_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
@@ -26,7 +28,9 @@ export const LV_MODULE_CONFIG = {
   csvFormat: 'lv',
   csvPath: '/LV_CABLE_PULLING _PROGRESS_TRACKING/lv_pulling.csv',
   linkPath: '/LV_CABLE_PULLING _PROGRESS_TRACKING/link',
-  stringTextVisibility: 'hover',
+  stringTextVisibility: 'cursor', // show only near cursor position
+  stringTextToggle: true,
+  stringTextDefaultOn: false,
   geojsonFiles: [
     { url: '/LV_CABLE_PULLING _PROGRESS_TRACKING/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
     { url: '/LV_CABLE_PULLING _PROGRESS_TRACKING/string_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
