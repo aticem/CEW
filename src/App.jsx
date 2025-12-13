@@ -73,36 +73,50 @@ L.textLabel = function (latlng, options) {
 const canvasRenderer = L.canvas({ padding: 0.1 });
 
 // ═══════════════════════════════════════════════════════════════
-// GEOJSON DOSYALARI KONFİGÜRASYONU
+// MODES + DATA CONFIG
 // ═══════════════════════════════════════════════════════════════
-const GEOJSON_FILES = [
-  { 
-    url: '/DC_CABLE_PULLING _PROGRESS_TRACKING/full.geojson',
-    name: 'full',
-    color: '#2563eb',
-    fillColor: '#3b82f6'
+const MODES = {
+  DC: {
+    key: 'DC',
+    label: 'DC CABLE PULLING PROGRESS',
+    basePath: '/dc-cable-pulling-progress',
+    csvPath: '/dc-cable-pulling-progress/dc_strings.csv',
+    linkPath: '/dc-cable-pulling-progress/link',
+    geojsonFiles: [
+      { url: '/dc-cable-pulling-progress/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
+      { url: '/dc-cable-pulling-progress/string_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
+      { url: '/dc-cable-pulling-progress/inv_id.geojson', name: 'inv_id', color: '#16a34a', fillColor: '#22c55e' },
+      {
+        url: '/dc-cable-pulling-progress/lv_box.geojson',
+        name: 'lv_box',
+        color: '#eab308',
+        fillColor: '#facc15',
+        weight: 3,
+        fillOpacity: 0.6
+      }
+    ]
   },
-  { 
-    url: '/DC_CABLE_PULLING _PROGRESS_TRACKING/string_text.geojson', 
-    name: 'string_text', 
-    color: '#dc2626', 
-    fillColor: '#ef4444' 
-  },
-  { 
-    url: '/DC_CABLE_PULLING _PROGRESS_TRACKING/inv_id.geojson', 
-    name: 'inv_id', 
-    color: '#16a34a', 
-    fillColor: '#22c55e' 
-  },
-  { 
-    url: '/DC_CABLE_PULLING _PROGRESS_TRACKING/lv_box.geojson', 
-    name: 'lv_box', 
-    color: '#eab308', 
-    fillColor: '#facc15',
-    weight: 3,
-    fillOpacity: 0.6
-  },
-];
+  LV: {
+    key: 'LV',
+    label: 'LV CABLE PULLING PROGRESS',
+    basePath: '/LV_CABLE_PULLING _PROGRESS_TRACKING',
+    csvPath: '/LV_CABLE_PULLING _PROGRESS_TRACKING/lv_pulling.csv',
+    linkPath: '/LV_CABLE_PULLING _PROGRESS_TRACKING/link',
+    geojsonFiles: [
+      { url: '/LV_CABLE_PULLING _PROGRESS_TRACKING/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
+      { url: '/LV_CABLE_PULLING _PROGRESS_TRACKING/string_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
+      { url: '/LV_CABLE_PULLING _PROGRESS_TRACKING/inv_id.geojson', name: 'inv_id', color: '#16a34a', fillColor: '#22c55e' },
+      {
+        url: '/LV_CABLE_PULLING _PROGRESS_TRACKING/lv_box.geojson',
+        name: 'lv_box',
+        color: '#eab308',
+        fillColor: '#facc15',
+        weight: 3,
+        fillOpacity: 0.6
+      }
+    ]
+  }
+};
 
 // ═══════════════════════════════════════════════════════════════
 // YARDIMCI FONKSİYONLAR
@@ -183,6 +197,10 @@ const isPointInsideFeature = (lat, lng, geometry) => {
 // ANA UYGULAMA
 // ═══════════════════════════════════════════════════════════════
 function App() {
+  const [mode, setMode] = useState('DC'); // 'DC' | 'LV'
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  const activeMode = MODES[mode] || MODES.DC;
+
   const mapRef = useRef(null);
   const layersRef = useRef([]);
   const polygonIdCounter = useRef(0); // Counter for unique polygon IDs
@@ -276,6 +294,12 @@ function App() {
   const STRING_LABEL_PAD = 0.12; // smaller pad = fewer offscreen labels to build
   const STRING_LABEL_GRID_CELL_DEG = 0.001; // ~111m latitude; good speed/accuracy tradeoff
 
+  // LV mode: keep string_text hidden until the mouse is over the map
+  const stringLabelsEnabledRef = useRef(true);
+  useEffect(() => {
+    stringLabelsEnabledRef.current = mode === 'DC';
+  }, [mode]);
+
   // Reuse label instances to avoid GC churn on pan/zoom
   const stringTextLabelPoolRef = useRef([]); // L.TextLabel[]
   const stringTextLabelActiveCountRef = useRef(0);
@@ -289,6 +313,20 @@ function App() {
       const map = mapRef.current;
       const layer = stringTextLayerRef.current;
       const zoom = map.getZoom();
+
+      // LV mode: string_text labels are hidden unless explicitly enabled (hover over map)
+      if (!stringLabelsEnabledRef.current) {
+        // remove any active pooled labels from the layer
+        const pool = stringTextLabelPoolRef.current;
+        const prevActive = stringTextLabelActiveCountRef.current;
+        for (let i = 0; i < prevActive; i++) {
+          const lbl = pool[i];
+          if (lbl && layer.hasLayer(lbl)) layer.removeLayer(lbl);
+        }
+        stringTextLabelActiveCountRef.current = 0;
+        lastStringLabelKeyRef.current = '';
+        return;
+      }
 
       if (zoom < STRING_LABEL_MIN_ZOOM) return;
 
@@ -608,49 +646,67 @@ function App() {
     setSelectedNotes(new Set());
   };
 
-  // CSV yükle
+  // CSV load (mode-aware)
   useEffect(() => {
-    fetch('/DC_CABLE_PULLING _PROGRESS_TRACKING/dc_strings.csv')
-      .then(res => res.text())
-      .then(text => {
-        const rows = text.split(/\r?\n/).slice(1);
-        const dict = {}; // Her ID için {plus: [], minus: []} array'leri tutacak
-        rows.forEach(r => {
-          const parts = r.split(',');
-          if (parts.length >= 2) {
-            const id = normalizeId(parts[0]);
-            const valStr = parts[1].trim();
-            const length = parseFloat(valStr);
-            
-            if (id && !isNaN(length)) {
-              if (!dict[id]) {
-                dict[id] = { plus: [], minus: [] };
-              }
-              
-              // Stricter check: if string starts with '-' or value is negative
-              if (valStr.startsWith('-') || length < 0) {
-                dict[id].minus.push(Math.abs(length));
-              } else {
-                dict[id].plus.push(length);
+    const csvPath = activeMode.csvPath;
+    if (!csvPath) return;
+
+    fetch(csvPath)
+      .then((res) => res.text())
+      .then((text) => {
+        const dict = {}; // id -> {plus: number[], minus: number[]}
+
+        if (mode === 'DC') {
+          const rows = text.split(/\r?\n/).slice(1);
+          rows.forEach((r) => {
+            const parts = r.split(',');
+            if (parts.length >= 2) {
+              const id = normalizeId(parts[0]);
+              const valStr = parts[1].trim();
+              const length = parseFloat(valStr);
+
+              if (id && !isNaN(length)) {
+                if (!dict[id]) dict[id] = { plus: [], minus: [] };
+                if (valStr.startsWith('-') || length < 0) dict[id].minus.push(Math.abs(length));
+                else dict[id].plus.push(length);
               }
             }
-          }
-        });
+          });
+        } else {
+          // LV CSV: tab-separated with columns: DI, *1, Length (Length is 3rd col)
+          const lines = text.split(/\r?\n/).slice(1);
+          lines.forEach((line) => {
+            if (!line.trim()) return;
+            const parts = line.split(/\t|,/);
+            if (parts.length < 3) return;
+            const id = normalizeId(parts[0]);
+            const len = parseFloat(String(parts[2]).trim());
+            if (!id || isNaN(len)) return;
+            if (!dict[id]) dict[id] = { plus: [], minus: [] };
+            // LV has no +/- separation; treat as "+" to keep UI identical
+            dict[id].plus.push(len);
+          });
+        }
+
         setLengthData(dict);
-        
-        // Calculate total +/- DC Cable from all CSV data
-        let allPlus = 0, allMinus = 0;
-        Object.values(dict).forEach(data => {
+
+        // Calculate total +/- from all CSV data
+        let allPlus = 0,
+          allMinus = 0;
+        Object.values(dict).forEach((data) => {
           if (data.plus) allPlus += data.plus.reduce((a, b) => a + b, 0);
           if (data.minus) allMinus += data.minus.reduce((a, b) => a + b, 0);
         });
         setTotalPlus(allPlus);
         setTotalMinus(allMinus);
-        
-        console.log('CSV loaded:', Object.keys(dict).length, 'entries');
+
+        // Reset selection when switching modes (avoids mismatched IDs)
+        setSelectedPolygons(new Set());
+        setCompletedPlus(0);
+        setCompletedMinus(0);
       })
-      .catch(err => console.error('CSV yüklenemedi:', err));
-  }, []);
+      .catch((err) => console.error('CSV yüklenemedi:', err));
+  }, [mode, activeMode.csvPath]);
 
   // Calculate counters when selection changes
   useEffect(() => {
@@ -742,6 +798,10 @@ function App() {
     polygonById.current = {};
     polygonIdCounter.current = 0;
     stringTextPointsRef.current = [];
+    stringTextGridRef.current = null;
+    stringTextLabelPoolRef.current = [];
+    stringTextLabelActiveCountRef.current = 0;
+    lastStringLabelKeyRef.current = '';
     if (stringTextLayerRef.current) {
       try { stringTextLayerRef.current.remove(); } catch (e) {}
       stringTextLayerRef.current = null;
@@ -755,7 +815,7 @@ function App() {
     // String text'leri topla (text konumları için)
     const stringTextMap = {}; // stringId -> {lat, lng, angle, text}
 
-    for (const file of GEOJSON_FILES) {
+    for (const file of activeMode.geojsonFiles) {
       try {
         const response = await fetch(file.url);
         if (!response.ok) continue;
@@ -1382,6 +1442,38 @@ function App() {
     };
   }, []);
 
+  // Reload GeoJSON layers when mode changes (same UI, different dataset)
+  useEffect(() => {
+    if (!mapRef.current) return;
+    fetchAllGeoJson();
+    setModeMenuOpen(false);
+  }, [mode]);
+
+  // LV mode: show string_text labels only while mouse is over the map
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const el = mapRef.current.getContainer();
+    if (!el) return;
+
+    const onEnter = () => {
+      if (mode !== 'LV') return;
+      stringLabelsEnabledRef.current = true;
+      scheduleStringTextLabelUpdate();
+    };
+    const onLeave = () => {
+      if (mode !== 'LV') return;
+      stringLabelsEnabledRef.current = false;
+      scheduleStringTextLabelUpdate(); // clears active labels
+    };
+
+    el.addEventListener('mouseenter', onEnter);
+    el.addEventListener('mouseleave', onLeave);
+    return () => {
+      el.removeEventListener('mouseenter', onEnter);
+      el.removeEventListener('mouseleave', onLeave);
+    };
+  }, [mode, scheduleStringTextLabelUpdate]);
+
   // Seçimi temizle
 
 
@@ -1407,11 +1499,13 @@ function App() {
 
   const [dwgUrl, setDwgUrl] = useState('');
   useEffect(() => {
-    fetch('/DC_CABLE_PULLING _PROGRESS_TRACKING/link')
+    const linkPath = activeMode.linkPath;
+    if (!linkPath) return;
+    fetch(linkPath)
       .then((r) => r.text())
       .then((t) => setDwgUrl((t || '').trim()))
-      .catch(() => setDwgUrl('/DC_CABLE_PULLING _PROGRESS_TRACKING/link'));
-  }, []);
+      .catch(() => setDwgUrl(linkPath));
+  }, [activeMode.linkPath]);
 
   return (
     <div className="app">
@@ -1422,7 +1516,7 @@ function App() {
           {/* Counters (left) */}
           <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start">
             <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-              <div className="grid w-full grid-cols-[max-content_max-content] items-center gap-x-4 gap-y-2">
+              <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
                 <span className="text-xs font-bold text-slate-200">+DC Cable</span>
                 <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{totalPlus.toFixed(0)} m</span>
 
@@ -1435,7 +1529,7 @@ function App() {
             </div>
 
             <div className="min-w-[260px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-              <div className="grid w-full grid-cols-[max-content_max-content] items-center gap-x-4 gap-y-2">
+              <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
                 <span className="text-xs font-bold text-slate-200">+DC Cable</span>
                 <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{completedPlus.toFixed(0)} m</span>
 
@@ -1448,7 +1542,7 @@ function App() {
             </div>
 
             <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-              <div className="grid w-full grid-cols-[max-content_max-content] items-center gap-x-4 gap-y-2">
+              <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
                 <span className="text-xs font-bold text-slate-200">+DC Cable</span>
                 <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingPlus.toFixed(0)} m</span>
 
@@ -1546,7 +1640,7 @@ function App() {
           </div>
 
           <a
-            href={dwgUrl || '/DC_CABLE_PULLING _PROGRESS_TRACKING/link'}
+             href={dwgUrl || activeMode.linkPath}
             target="_blank"
             rel="noreferrer"
             className="inline-flex h-6 items-center justify-center border-2 border-slate-700 bg-slate-900 px-2 text-[10px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
@@ -1593,6 +1687,48 @@ function App() {
 
       <div className="map-wrapper">
         <div id="map" />
+      </div>
+
+      {/* Mode button (left), aligned with Legend (right) */}
+      <div className="fixed left-3 sm:left-5 top-[40%] -translate-y-1/2 z-[1091]">
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setModeMenuOpen((v) => !v)}
+            aria-expanded={modeMenuOpen}
+            aria-label="Mode"
+            className="inline-flex h-10 w-10 items-center justify-center border-2 border-slate-700 bg-slate-900 text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
+          >
+            <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <line x1="4" y1="6" x2="20" y2="6" />
+              <line x1="4" y1="12" x2="20" y2="12" />
+              <line x1="4" y1="18" x2="20" y2="18" />
+            </svg>
+          </button>
+
+          {modeMenuOpen && (
+            <div className="absolute left-0 mt-2 w-72 border-2 border-slate-700 bg-slate-900 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
+              <button
+                type="button"
+                onClick={() => setMode('DC')}
+                className={`w-full border-b-2 border-slate-700 px-3 py-3 text-left text-xs font-extrabold uppercase tracking-wide ${
+                  mode === 'DC' ? 'bg-amber-500 text-black' : 'bg-slate-900 text-slate-200 hover:bg-slate-800'
+                }`}
+              >
+                DC CABLE PULLING PROGRESS
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('LV')}
+                className={`w-full px-3 py-3 text-left text-xs font-extrabold uppercase tracking-wide ${
+                  mode === 'LV' ? 'bg-amber-500 text-black' : 'bg-slate-900 text-slate-200 hover:bg-slate-800'
+                }`}
+              >
+                LV CABLE PULLING PROGRESS
+              </button>
+            </div>
+          )}
+        </div>
       </div>
       
       {/* Note Edit Popup */}
