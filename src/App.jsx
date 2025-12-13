@@ -1422,41 +1422,41 @@ function App() {
           {/* Counters (left) */}
           <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start">
             <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-              <div className="grid w-full grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2">
+              <div className="grid w-full grid-cols-[max-content_max-content] items-center gap-x-4 gap-y-2">
                 <span className="text-xs font-bold text-slate-200">+DC Cable</span>
-                <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{totalPlus.toFixed(0)} m</span>
+                <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{totalPlus.toFixed(0)} m</span>
 
                 <span className="text-xs font-bold text-slate-200">-DC Cable</span>
-                <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{totalMinus.toFixed(0)} m</span>
+                <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{totalMinus.toFixed(0)} m</span>
 
                 <span className="text-xs font-bold text-slate-200">Total</span>
-                <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{(totalPlus + totalMinus).toFixed(0)} m</span>
+                <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{(totalPlus + totalMinus).toFixed(0)} m</span>
               </div>
             </div>
 
             <div className="min-w-[260px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-              <div className="grid w-full grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2">
+              <div className="grid w-full grid-cols-[max-content_max-content] items-center gap-x-4 gap-y-2">
                 <span className="text-xs font-bold text-slate-200">+DC Cable</span>
-                <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{completedPlus.toFixed(0)} m</span>
+                <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{completedPlus.toFixed(0)} m</span>
 
                 <span className="text-xs font-bold text-slate-200">-DC Cable</span>
-                <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{completedMinus.toFixed(0)} m</span>
+                <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{completedMinus.toFixed(0)} m</span>
 
                 <span className="text-xs font-black text-emerald-400">Completed ({completedPct.toFixed(2)}%)</span>
-                <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{completedTotal.toFixed(0)} m</span>
+                <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{completedTotal.toFixed(0)} m</span>
               </div>
             </div>
 
             <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-              <div className="grid w-full grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2">
+              <div className="grid w-full grid-cols-[max-content_max-content] items-center gap-x-4 gap-y-2">
                 <span className="text-xs font-bold text-slate-200">+DC Cable</span>
-                <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{remainingPlus.toFixed(0)} m</span>
+                <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingPlus.toFixed(0)} m</span>
 
                 <span className="text-xs font-bold text-slate-200">-DC Cable</span>
-                <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{remainingMinus.toFixed(0)} m</span>
+                <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingMinus.toFixed(0)} m</span>
 
                 <span className="text-xs font-bold text-slate-200">Remaining</span>
-                <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{remainingTotal.toFixed(0)} m</span>
+                <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingTotal.toFixed(0)} m</span>
               </div>
             </div>
           </div>
@@ -1575,7 +1575,7 @@ function App() {
             Note
             {/* Red corner indicator (always visible; pulses only when note mode is active AND hovered) */}
             <svg
-              className={`note-dot absolute -right-1 -top-1 h-2 w-2 ${noteMode ? 'note-dot--active' : ''}`}
+              className={`note-dot absolute -right-1 -top-1 ${noteMode ? 'h-3 w-3 note-dot--active' : 'h-2 w-2'}`}
               viewBox="0 0 12 12"
               aria-hidden="true"
             >
