@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 
-export default function useDailyLog() {
+export default function useDailyLog(moduleKey = "DC") {
+  const storageKey = `cew:dailyLog:${String(moduleKey || "DC").toUpperCase()}`;
   const [dailyLog, setDailyLog] = useState([]);
 
   useEffect(() => {
-    const stored = localStorage.getItem("dcCableDailyLog");
+    const stored = localStorage.getItem(storageKey);
     if (stored) {
       try {
         setDailyLog(JSON.parse(stored));
@@ -13,17 +14,17 @@ export default function useDailyLog() {
         setDailyLog([]);
       }
     }
-  }, []);
+  }, [storageKey]);
 
   const addRecord = (record) => {
     const updated = [...dailyLog, record];
     setDailyLog(updated);
-    localStorage.setItem("dcCableDailyLog", JSON.stringify(updated));
+    localStorage.setItem(storageKey, JSON.stringify(updated));
   };
 
   const resetLog = () => {
     if (window.confirm("Are you sure you want to clear all daily logs?")) {
-      localStorage.removeItem("dcCableDailyLog");
+      localStorage.removeItem(storageKey);
       setDailyLog([]);
     }
   };

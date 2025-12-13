@@ -14,6 +14,19 @@ L.TextLabel = L.CircleMarker.extend({
     text: '',
     textStyle: '300',
     textColor: 'rgba(255,255,255,0.65)',
+    textStrokeColor: 'rgba(0,0,0,0.6)',
+    textStrokeWidthFactor: 1,
+    minFontSize: null,
+    maxFontSize: null,
+    bgColor: null, // e.g. 'rgba(11,18,32,0.85)'
+    bgPaddingX: 0,
+    bgPaddingY: 0,
+    bgStrokeColor: null,
+    bgStrokeWidth: 0,
+    bgCornerRadius: 0, // 0 = square corners
+    minTextZoom: null, // if set, hide text/bg below this zoom (prevents "soup" when zoomed out)
+    minBgZoom: null, // if set, hide background box below this zoom (text can still render)
+    textColorNoBg: null, // optional alternate text color when bg is hidden (e.g., completed green at zoomed-out)
     textBaseSize: 10,
     refZoom: 20,
     rotation: 0,
@@ -31,8 +44,17 @@ L.TextLabel = L.CircleMarker.extend({
     if (!map || !p) return;
 
     const zoom = map.getZoom();
+    const minTextZoom = typeof this.options.minTextZoom === 'number' ? this.options.minTextZoom : null;
+    if (minTextZoom != null && zoom < minTextZoom) return;
     const scale = Math.pow(2, zoom - this.options.refZoom);
-    const fontSize = this.options.textBaseSize * scale;
+    let fontSize = this.options.textBaseSize * scale;
+
+    // Optional clamping (module-configurable) so some labels remain readable when zoomed out
+    // without making them heavier/bolder.
+    const minFs = typeof this.options.minFontSize === 'number' ? this.options.minFontSize : null;
+    const maxFs = typeof this.options.maxFontSize === 'number' ? this.options.maxFontSize : null;
+    if (minFs != null) fontSize = Math.max(minFs, fontSize);
+    if (maxFs != null) fontSize = Math.min(maxFs, fontSize);
 
     if (fontSize < 1) return;
 
@@ -43,16 +65,68 @@ L.TextLabel = L.CircleMarker.extend({
     ctx.rotate(rotationRad);
 
     ctx.font = this.options.textStyle + ' ' + fontSize + 'px sans-serif';
-    ctx.fillStyle = this.options.textColor;
+    // If background is configured but hidden at this zoom, allow an alternate text color
+    // so completed markers remain visually distinct even when zoomed out.
+    const minBgZoom = typeof this.options.minBgZoom === 'number' ? this.options.minBgZoom : null;
+    const bgVisible = Boolean(this.options.bgColor) && (minBgZoom == null || zoom >= minBgZoom);
+    const altNoBg = this.options.textColorNoBg;
+    ctx.fillStyle = !bgVisible && altNoBg ? altNoBg : this.options.textColor;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+
+    // Optional background box behind text (square by default)
+    if (bgVisible) {
+      const metrics = ctx.measureText(this.options.text || '');
+      const ascent =
+        typeof metrics.actualBoundingBoxAscent === 'number' ? metrics.actualBoundingBoxAscent : fontSize * 0.8;
+      const descent =
+        typeof metrics.actualBoundingBoxDescent === 'number' ? metrics.actualBoundingBoxDescent : fontSize * 0.25;
+      const textW = metrics.width || 0;
+      const textH = ascent + descent;
+      const padX = Number(this.options.bgPaddingX) || 0;
+      const padY = Number(this.options.bgPaddingY) || 0;
+      const w = textW + padX * 2;
+      const h = textH + padY * 2;
+      const x = -w / 2;
+      const y = -h / 2;
+
+      ctx.save();
+      ctx.fillStyle = this.options.bgColor;
+      const r = Math.max(0, Number(this.options.bgCornerRadius) || 0);
+      ctx.beginPath();
+      if (r > 0) {
+        const rr = Math.min(r, w / 2, h / 2);
+        ctx.moveTo(x + rr, y);
+        ctx.lineTo(x + w - rr, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
+        ctx.lineTo(x + w, y + h - rr);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+        ctx.lineTo(x + rr, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
+        ctx.lineTo(x, y + rr);
+        ctx.quadraticCurveTo(x, y, x + rr, y);
+      } else {
+        ctx.rect(x, y, w, h);
+      }
+      ctx.closePath();
+      ctx.fill();
+
+      const sw = Number(this.options.bgStrokeWidth) || 0;
+      if (sw > 0 && this.options.bgStrokeColor) {
+        ctx.lineWidth = sw;
+        ctx.strokeStyle = this.options.bgStrokeColor;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
 
     // Make text look less "bold/fill-heavy":
     // - A bright stroke thickens glyphs; use a thin dark stroke instead.
     // - Skip stroke at small sizes (expensive + visually noisy).
     if (fontSize >= 10) {
-      ctx.lineWidth = Math.max(0.55, fontSize / 18);
-      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      const factor = typeof this.options.textStrokeWidthFactor === 'number' ? this.options.textStrokeWidthFactor : 1;
+      ctx.lineWidth = Math.max(0.55, fontSize / 18) * Math.max(0.5, factor);
+      ctx.strokeStyle = this.options.textStrokeColor || 'rgba(0,0,0,0.6)';
       ctx.strokeText(this.options.text, 0, 0);
     }
     
@@ -170,11 +244,34 @@ export default function BaseModule({
   const activeMode = customBoundaryLogic ? customBoundaryLogic(moduleConfig) : moduleConfig;
   const moduleName = name || activeMode?.label || 'MODULE';
   const showCounters = Boolean(counters);
+  const isLV = String(activeMode?.key || '').toUpperCase() === 'LV';
+  const isMVF = String(activeMode?.key || '').toUpperCase() === 'MVF';
+  const useSimpleCounters = Boolean(activeMode?.simpleCounters) || isLV;
   const stringTextToggleEnabled = Boolean(activeMode?.stringTextToggle);
   const [stringTextUserOn, setStringTextUserOn] = useState(Boolean(activeMode?.stringTextDefaultOn));
   const effectiveStringTextVisibility = stringTextToggleEnabled
     ? (stringTextUserOn ? 'always' : 'none')
     : (activeMode?.stringTextVisibility || 'always'); // 'always' | 'hover' | 'cursor' | 'none'
+
+  // Module-configurable string_text label styling (used by MVF subs_text and others)
+  const stringTextBaseSizeCfg =
+    typeof activeMode?.stringTextBaseSize === 'number' ? activeMode.stringTextBaseSize : 11;
+  const stringTextColorCfg = activeMode?.stringTextColor || 'rgba(255,255,255,0.92)';
+  const stringTextStyleCfg = activeMode?.stringTextStyle || '300';
+  const stringTextStrokeColorCfg = activeMode?.stringTextStrokeColor || 'rgba(0,0,0,0.6)';
+  const stringTextStrokeWidthFactorCfg =
+    typeof activeMode?.stringTextStrokeWidthFactor === 'number'
+      ? activeMode.stringTextStrokeWidthFactor
+      : 1;
+  const stringTextMinZoomCfg =
+    // NOTE: keep this default as a literal because STRING_LABEL_MIN_ZOOM is declared later in this component.
+    typeof activeMode?.stringTextMinZoom === 'number' ? activeMode.stringTextMinZoom : 18;
+  const stringTextMinFontSizeCfg =
+    typeof activeMode?.stringTextMinFontSize === 'number' ? activeMode.stringTextMinFontSize : null;
+  const stringTextMaxFontSizeCfg =
+    typeof activeMode?.stringTextMaxFontSize === 'number' ? activeMode.stringTextMaxFontSize : null;
+  const stringTextRefZoomCfg =
+    typeof activeMode?.stringTextRefZoom === 'number' ? activeMode.stringTextRefZoom : 20;
 
   // Keep current visibility in refs so Leaflet event handlers never call stale closures.
   const effectiveStringTextVisibilityRef = useRef(effectiveStringTextVisibility);
@@ -225,6 +322,8 @@ export default function BaseModule({
   const [lengthData, setLengthData] = useState({}); // Length data from CSV
   const [stringPoints, setStringPoints] = useState([]); // String points (id, lat, lng)
   const [selectedPolygons, setSelectedPolygons] = useState(new Set()); // Selected polygon unique IDs
+  // When string_id ↔ polygon matching completes, bump this to recompute counters immediately (no extra click needed).
+  const [stringMatchVersion, setStringMatchVersion] = useState(0);
   const [totalPlus, setTotalPlus] = useState(0); // Total +DC Cable from CSV
   const [totalMinus, setTotalMinus] = useState(0); // Total -DC Cable from CSV
   const [completedPlus, setCompletedPlus] = useState(0); // Selected +DC Cable
@@ -293,7 +392,94 @@ export default function BaseModule({
   const noteMarkersRef = useRef({}); // id -> marker
   const markerClickedRef = useRef(false); // Track if a marker was just clicked
 
+  // LV: inv_id daily completion tracking (click inv_id labels to mark completed for today)
   const getTodayYmd = () => new Date().toISOString().split('T')[0];
+  const lvTodayYmd = getTodayYmd();
+  const lvStorageKey = `cew:lv:inv_completed:${lvTodayYmd}`;
+  const [lvCompletedInvIds, setLvCompletedInvIds] = useState(() => new Set());
+  const lvCompletedInvIdsRef = useRef(lvCompletedInvIds);
+  const lvInvLabelByIdRef = useRef({}); // invIdNorm -> L.TextLabel
+
+  useEffect(() => {
+    lvCompletedInvIdsRef.current = lvCompletedInvIds;
+  }, [lvCompletedInvIds]);
+
+  useEffect(() => {
+    if (!isLV) return;
+    try {
+      const raw = localStorage.getItem(lvStorageKey);
+      const arr = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(arr)) setLvCompletedInvIds(new Set(arr.map(normalizeId)));
+      else setLvCompletedInvIds(new Set());
+    } catch (_e) {
+      void _e;
+      setLvCompletedInvIds(new Set());
+    }
+    // Reset polygon selection in LV (we count via inv_id clicks)
+    setSelectedPolygons(new Set());
+  }, [isLV, lvStorageKey]);
+
+  useEffect(() => {
+    if (!isLV) return;
+    try {
+      localStorage.setItem(lvStorageKey, JSON.stringify(Array.from(lvCompletedInvIds)));
+    } catch (_e) {
+      void _e;
+    }
+  }, [isLV, lvStorageKey, lvCompletedInvIds]);
+
+  // LV: keep inv_id label colors in sync with completion state without reloading GeoJSON.
+  useEffect(() => {
+    if (!isLV) return;
+    const labels = lvInvLabelByIdRef.current || {};
+    const invStrokeColor = activeMode?.invIdTextStrokeColor || 'rgba(0,0,0,0.88)';
+    const invStrokeWidthFactor =
+      typeof activeMode?.invIdTextStrokeWidthFactor === 'number' ? activeMode.invIdTextStrokeWidthFactor : 1.45;
+    const invBgColor = activeMode?.invIdTextBgColor || null;
+    const invBgStrokeColor = activeMode?.invIdTextBgStrokeColor || null;
+    const invBgStrokeWidth = typeof activeMode?.invIdTextBgStrokeWidth === 'number' ? activeMode.invIdTextBgStrokeWidth : 0;
+    const invDoneTextColor = activeMode?.invIdDoneTextColor || 'rgba(11,18,32,0.98)';
+    const invDoneTextColorNoBg = activeMode?.invIdDoneTextColorNoBg || 'rgba(34,197,94,0.98)';
+    const invDoneBgColor = activeMode?.invIdDoneBgColor || 'rgba(34,197,94,0.92)';
+    const invDoneBgStrokeColor = activeMode?.invIdDoneBgStrokeColor || 'rgba(255,255,255,0.70)';
+    const invDoneBgStrokeWidth =
+      typeof activeMode?.invIdDoneBgStrokeWidth === 'number' ? activeMode.invIdDoneBgStrokeWidth : 2;
+    Object.keys(labels).forEach((invIdNorm) => {
+      const lbl = labels[invIdNorm];
+      if (!lbl) return;
+      const done = lvCompletedInvIds.has(invIdNorm);
+      const nextTextColor = done ? invDoneTextColor : 'rgba(255,255,255,0.98)';
+      const nextTextColorNoBg = done ? invDoneTextColorNoBg : null;
+      const nextBgColor = done ? invDoneBgColor : invBgColor;
+      const nextBgStrokeColor = done ? invDoneBgStrokeColor : invBgStrokeColor;
+      const nextBgStrokeWidth = done ? invDoneBgStrokeWidth : invBgStrokeWidth;
+
+      let changed = false;
+      if (lbl.options.textColor !== nextTextColor) { lbl.options.textColor = nextTextColor; changed = true; }
+      if (lbl.options.textColorNoBg !== nextTextColorNoBg) { lbl.options.textColorNoBg = nextTextColorNoBg; changed = true; }
+      if (lbl.options.bgColor !== nextBgColor) { lbl.options.bgColor = nextBgColor; changed = true; }
+      if (lbl.options.bgStrokeColor !== nextBgStrokeColor) { lbl.options.bgStrokeColor = nextBgStrokeColor; changed = true; }
+      if (lbl.options.bgStrokeWidth !== nextBgStrokeWidth) { lbl.options.bgStrokeWidth = nextBgStrokeWidth; changed = true; }
+      if (lbl.options.textStrokeColor !== invStrokeColor) { lbl.options.textStrokeColor = invStrokeColor; changed = true; }
+      if (lbl.options.textStrokeWidthFactor !== invStrokeWidthFactor) { lbl.options.textStrokeWidthFactor = invStrokeWidthFactor; changed = true; }
+
+      if (changed) lbl.redraw?.();
+    });
+  }, [
+    isLV,
+    lvCompletedInvIds,
+    activeMode?.invIdTextStrokeColor,
+    activeMode?.invIdTextStrokeWidthFactor,
+    activeMode?.invIdTextBgColor,
+    activeMode?.invIdTextBgStrokeColor,
+    activeMode?.invIdTextBgStrokeWidth,
+    activeMode?.invIdDoneTextColor,
+    activeMode?.invIdDoneTextColorNoBg,
+    activeMode?.invIdDoneBgColor,
+    activeMode?.invIdDoneBgStrokeColor,
+    activeMode?.invIdDoneBgStrokeWidth,
+  ]);
+
   const getNoteYmd = (note) =>
     note?.noteDate ||
     (note?.createdAt ? new Date(note.createdAt).toISOString().split('T')[0] : getTodayYmd());
@@ -378,8 +564,8 @@ export default function BaseModule({
         return;
       }
 
-      // TEXT ON (always) should stay visible even when zooming out in LV.
-      const minZoom = effVis === 'always' && toggleEnabled ? 0 : STRING_LABEL_MIN_ZOOM;
+      // TEXT ON (always) should stay visible even when zooming out (LV/MVF).
+      const minZoom = effVis === 'always' && toggleEnabled ? 0 : stringTextMinZoomCfg;
       if (zoom < minZoom) return;
 
       const visibility = effVis;
@@ -476,10 +662,14 @@ export default function BaseModule({
           label = L.textLabel([pt.lat, pt.lng], {
             text: pt.text,
             renderer: stringTextRendererRef.current || canvasRenderer,
-            textBaseSize: 11,
-            refZoom: 20,
-            textStyle: '300',
-            textColor: 'rgba(255,255,255,0.92)',
+            textBaseSize: stringTextBaseSizeCfg,
+            refZoom: stringTextRefZoomCfg,
+            textStyle: stringTextStyleCfg,
+            textColor: stringTextColorCfg,
+            textStrokeColor: stringTextStrokeColorCfg,
+            textStrokeWidthFactor: stringTextStrokeWidthFactorCfg,
+            minFontSize: stringTextMinFontSizeCfg,
+            maxFontSize: stringTextMaxFontSizeCfg,
             rotation: pt.angle || 0
           });
           pool[count] = label;
@@ -516,7 +706,17 @@ export default function BaseModule({
       }
       stringTextLabelActiveCountRef.current = count;
     });
-  }, []);
+  }, [
+    stringTextBaseSizeCfg,
+    stringTextColorCfg,
+    stringTextStyleCfg,
+    stringTextStrokeColorCfg,
+    stringTextStrokeWidthFactorCfg,
+    stringTextMinZoomCfg,
+    stringTextMinFontSizeCfg,
+    stringTextMaxFontSizeCfg,
+    stringTextRefZoomCfg,
+  ]);
 
   // When the effective visibility changes (TEXT ON/OFF or module config), immediately refresh labels.
   useEffect(() => {
@@ -547,7 +747,7 @@ export default function BaseModule({
   }, [effectiveStringTextVisibility, scheduleStringTextLabelUpdate]);
   
   // Hooks for daily log and export
-  const { dailyLog, addRecord, resetLog } = useDailyLog();
+  const { dailyLog, addRecord } = useDailyLog(activeMode?.key || 'DC');
   const { exportToExcel } = useChartExport();
   
   // Save notes to localStorage
@@ -781,7 +981,7 @@ export default function BaseModule({
   // CSV load (module-aware)
   useEffect(() => {
     const csvPath = activeMode?.csvPath;
-    const csvFormat = activeMode?.csvFormat || 'dc'; // 'dc' | 'lv'
+    const csvFormat = activeMode?.csvFormat || 'dc'; // 'dc' | 'lv' | 'mvf'
     if (!csvPath) return;
 
     fetch(csvPath)
@@ -805,20 +1005,60 @@ export default function BaseModule({
               }
             }
           });
-        } else {
-          // LV CSV: tab-separated with columns: DI, *1, Length (Length is 3rd col)
-          const lines = text.split(/\r?\n/).slice(1);
-          lines.forEach((line) => {
-            if (!line.trim()) return;
+        } else if (csvFormat === 'lv') {
+          // LV CSV: usually tab-separated with columns: ID, Length (sometimes more cols)
+          const lines = text.split(/\r?\n/).filter(Boolean);
+          const header = (lines[0] || '').split(/\t|,/).map((h) => h.trim().toLowerCase());
+          const idIdx = header.findIndex((h) => h === 'id' || h === 'inv_id' || h === 'inv');
+          const lenIdx = header.findIndex((h) => h === 'length' || h === 'len' || h === 'meter' || h === 'm');
+
+          const start = 1; // data rows
+          for (let i = start; i < lines.length; i++) {
+            const line = lines[i];
+            if (!line || !line.trim()) continue;
             const parts = line.split(/\t|,/);
-            if (parts.length < 3) return;
-            const id = normalizeId(parts[0]);
-            const len = parseFloat(String(parts[2]).trim());
-            if (!id || isNaN(len)) return;
+
+            const rawId = idIdx >= 0 ? parts[idIdx] : parts[0];
+            const rawLen =
+              lenIdx >= 0 ? parts[lenIdx] : (parts.length >= 2 ? parts[1] : parts[2]);
+
+            const id = normalizeId(rawId);
+            const len = parseFloat(String(rawLen ?? '').trim());
+            if (!id || isNaN(len)) continue;
             if (!dict[id]) dict[id] = { plus: [], minus: [] };
-            // LV has no +/- separation; treat as "+" to keep UI identical
+            // LV has no +/- separation; treat as "+" (single length)
             dict[id].plus.push(len);
-          });
+          }
+        } else if (csvFormat === 'mvf') {
+          // MV+FIBER CSV: from,to,length
+          const lines = text.split(/\r?\n/).filter(Boolean);
+          if (lines.length <= 1) {
+            setLengthData({});
+            setTotalPlus(0);
+            setTotalMinus(0);
+            return;
+          }
+          const header = (lines[0] || '').split(',').map((h) => h.trim().toLowerCase());
+          const fromIdx = header.findIndex((h) => h === 'from');
+          const toIdx = header.findIndex((h) => h === 'to');
+          const lenIdx = header.findIndex((h) => h === 'length' || h === 'len' || h === 'm');
+
+          for (let i = 1; i < lines.length; i++) {
+            const line = lines[i];
+            if (!line || !line.trim()) continue;
+            const parts = line.split(',');
+            const from = fromIdx >= 0 ? parts[fromIdx] : parts[0];
+            const to = toIdx >= 0 ? parts[toIdx] : parts[1];
+            const rawLen = lenIdx >= 0 ? parts[lenIdx] : parts[2];
+            const len = parseFloat(String(rawLen ?? '').trim());
+            if (isNaN(len)) continue;
+            const key = normalizeId(`${String(from || '').trim()}-${String(to || '').trim()}`);
+            if (!key) continue;
+            if (!dict[key]) dict[key] = { plus: [], minus: [] };
+            dict[key].plus.push(len);
+          }
+        } else {
+          // Unknown format; keep empty
         }
 
         setLengthData(dict);
@@ -843,6 +1083,12 @@ export default function BaseModule({
 
   // Calculate counters when selection changes
   useEffect(() => {
+    if (isLV) {
+      // LV uses inv_id click tracking, not polygon selection.
+      setCompletedPlus(0);
+      setCompletedMinus(0);
+      return;
+    }
     let plus = 0;
     let minus = 0;
     
@@ -870,7 +1116,7 @@ export default function BaseModule({
     
     setCompletedPlus(plus);
     setCompletedMinus(minus);
-  }, [selectedPolygons, lengthData]);
+  }, [isLV, selectedPolygons, lengthData, stringMatchVersion]);
 
   // Store previous selection to compare changes
   const prevSelectedRef = useRef(new Set());
@@ -935,6 +1181,7 @@ export default function BaseModule({
     stringTextLabelPoolRef.current = [];
     stringTextLabelActiveCountRef.current = 0;
     lastStringLabelKeyRef.current = '';
+    lvInvLabelByIdRef.current = {};
     if (stringTextLayerRef.current) {
       try { stringTextLayerRef.current.remove(); } catch (_e) { void _e; }
       stringTextLayerRef.current = null;
@@ -1100,9 +1347,10 @@ export default function BaseModule({
         }
 
         // Standard processing for other GeoJSON files
+        const invInteractive = isLV && file.name === 'inv_id';
         const layer = L.geoJSON(data, {
           renderer: canvasRenderer,
-          interactive: false,
+          interactive: invInteractive,
           
           style: () => {
             // Restore the "dim white" look for all layers, with a stronger LV box outline.
@@ -1110,6 +1358,25 @@ export default function BaseModule({
               return {
                 color: 'rgba(255,255,255,0.95)',
                 weight: 3.2,
+                fill: false,
+                fillOpacity: 0
+              };
+            }
+            // MV+FIBER: make subs more prominent (pink + thicker + dashed)
+            if (isMVF && file.name === 'subs') {
+              return {
+                color: 'rgba(236,72,153,0.95)', // pink
+                weight: 2.0,
+                dashArray: '8 8',
+                fill: false,
+                fillOpacity: 0
+              };
+            }
+            if (invInteractive) {
+              // inv_id: make more prominent than general drawings
+              return {
+                color: 'rgba(255,255,255,0.85)',
+                weight: 1.6,
                 fill: false,
                 fillOpacity: 0
               };
@@ -1123,6 +1390,85 @@ export default function BaseModule({
           },
           
           pointToLayer: (feature, latlng) => {
+            if (invInteractive && feature.properties?.text) {
+              const raw = feature.properties.text;
+              const invIdNorm = normalizeId(raw);
+              const isDone = lvCompletedInvIdsRef.current?.has(invIdNorm);
+              const invScale = typeof activeMode?.invIdTextScale === 'number' ? activeMode.invIdTextScale : 1;
+              const invBase = typeof activeMode?.invIdTextBaseSize === 'number' ? activeMode.invIdTextBaseSize : 19;
+              const invRefZoom = typeof activeMode?.invIdTextRefZoom === 'number' ? activeMode.invIdTextRefZoom : 20;
+              const invTextStyle = activeMode?.invIdTextStyle || '600';
+              const invMinFs = typeof activeMode?.invIdTextMinFontSize === 'number' ? activeMode.invIdTextMinFontSize : null;
+              const invMaxFs = typeof activeMode?.invIdTextMaxFontSize === 'number' ? activeMode.invIdTextMaxFontSize : null;
+              const invStrokeColor = activeMode?.invIdTextStrokeColor || 'rgba(0,0,0,0.88)';
+              const invStrokeWidthFactor =
+                typeof activeMode?.invIdTextStrokeWidthFactor === 'number' ? activeMode.invIdTextStrokeWidthFactor : 1.45;
+              const invBgColor = activeMode?.invIdTextBgColor || null;
+              const invBgPaddingX = typeof activeMode?.invIdTextBgPaddingX === 'number' ? activeMode.invIdTextBgPaddingX : 0;
+              const invBgPaddingY = typeof activeMode?.invIdTextBgPaddingY === 'number' ? activeMode.invIdTextBgPaddingY : 0;
+              const invBgStrokeColor = activeMode?.invIdTextBgStrokeColor || null;
+              const invBgStrokeWidth = typeof activeMode?.invIdTextBgStrokeWidth === 'number' ? activeMode.invIdTextBgStrokeWidth : 0;
+              const invBgCornerRadius =
+                typeof activeMode?.invIdTextBgCornerRadius === 'number' ? activeMode.invIdTextBgCornerRadius : 0;
+              const invMinTextZoom =
+                typeof activeMode?.invIdTextMinTextZoom === 'number' ? activeMode.invIdTextMinTextZoom : null;
+              const invMinBgZoom =
+                typeof activeMode?.invIdTextMinBgZoom === 'number' ? activeMode.invIdTextMinBgZoom : null;
+              const invDoneTextColor = activeMode?.invIdDoneTextColor || 'rgba(11,18,32,0.98)'; // when badge is visible
+              const invDoneTextColorNoBg = activeMode?.invIdDoneTextColorNoBg || 'rgba(34,197,94,0.98)'; // when badge hidden
+              const invDoneBgColor = activeMode?.invIdDoneBgColor || 'rgba(34,197,94,0.92)';
+              const invDoneBgStrokeColor = activeMode?.invIdDoneBgStrokeColor || 'rgba(255,255,255,0.70)';
+              const invDoneBgStrokeWidth =
+                typeof activeMode?.invIdDoneBgStrokeWidth === 'number' ? activeMode.invIdDoneBgStrokeWidth : 2;
+              const baseSize = invBase * invScale;
+              const radius = 22 * invScale;
+              const label = L.textLabel(latlng, {
+                text: String(raw).replace(/\s+/g, ''), // match CSV style (INV 2 -> INV2)
+                renderer: canvasRenderer,
+                textBaseSize: baseSize,
+                refZoom: invRefZoom,
+                textStyle: invTextStyle,
+                textColor: isDone ? invDoneTextColor : 'rgba(255,255,255,0.98)',
+                textColorNoBg: isDone ? invDoneTextColorNoBg : null,
+                textStrokeColor: invStrokeColor,
+                textStrokeWidthFactor: invStrokeWidthFactor,
+                minFontSize: invMinFs,
+                maxFontSize: invMaxFs,
+                bgColor: isDone ? invDoneBgColor : invBgColor,
+                bgPaddingX: invBgPaddingX,
+                bgPaddingY: invBgPaddingY,
+                bgStrokeColor: isDone ? invDoneBgStrokeColor : invBgStrokeColor,
+                bgStrokeWidth: isDone ? invDoneBgStrokeWidth : invBgStrokeWidth,
+                bgCornerRadius: invBgCornerRadius,
+                minTextZoom: invMinTextZoom,
+                minBgZoom: invMinBgZoom,
+                rotation: feature.properties.angle || 0,
+                interactive: true,
+                radius
+              });
+
+              // Toggle completed on click (LV only)
+              label.on('click', (e) => {
+                try {
+                  if (e?.originalEvent) {
+                    L.DomEvent.stopPropagation(e.originalEvent);
+                    L.DomEvent.preventDefault(e.originalEvent);
+                  }
+                } catch (_e) {
+                  void _e;
+                }
+                setLvCompletedInvIds((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(invIdNorm)) next.delete(invIdNorm);
+                  else next.add(invIdNorm);
+                  return next;
+                });
+              });
+
+              lvInvLabelByIdRef.current[invIdNorm] = label;
+              return label;
+            }
+
             if (feature.properties?.text) {
               textCount++;
               return L.textLabel(latlng, {
@@ -1367,6 +1713,8 @@ export default function BaseModule({
           const uniqueStringIds = new Set(Object.values(polygonById.current).map(p => p.stringId).filter(Boolean)).size;
           console.log('Matched:', totalPolygons, 'polygons to', uniqueStringIds, 'unique string IDs');
           setStringPoints(collectedPoints);
+          // Force immediate counter recompute for already-selected polygons (removes "wait then click again" feeling)
+          setStringMatchVersion((v) => v + 1);
           setStatus(`Ready: ${totalFeatures} objects, ${textCount} labels, ${collectedPoints.length} selectable strings`);
         }
       };
@@ -1478,7 +1826,27 @@ export default function BaseModule({
             });
           }
         } else {
-          // NORMAL MODE: Select polygons
+          // LV MODE: Box select inv_id labels (daily completion)
+          if (isLV) {
+            const labels = lvInvLabelByIdRef.current || {};
+            const invIdsInBounds = [];
+            Object.keys(labels).forEach((invIdNorm) => {
+              const lbl = labels[invIdNorm];
+              if (!lbl || typeof lbl.getLatLng !== 'function') return;
+              const ll = lbl.getLatLng();
+              if (ll && bounds.contains(ll)) invIdsInBounds.push(invIdNorm);
+            });
+
+            if (invIdsInBounds.length > 0) {
+              setLvCompletedInvIds((prev) => {
+                const next = new Set(prev);
+                if (isRightClick) invIdsInBounds.forEach((id) => next.delete(id));
+                else invIdsInBounds.forEach((id) => next.add(id));
+                return next;
+              });
+            }
+          } else {
+            // NORMAL MODE: Select polygons (DC)
           const directlySelectedIds = [];
           
           Object.keys(polygonById.current).forEach(polygonId => {
@@ -1517,6 +1885,7 @@ export default function BaseModule({
               return next;
             });
           }
+          }
         }
         
         boxRectRef.current.remove();
@@ -1541,7 +1910,7 @@ export default function BaseModule({
       container.removeEventListener('mousemove', onMouseMove);
       container.removeEventListener('mouseup', onMouseUp);
     };
-  }, [stringPoints, noteMode, notes]);
+  }, [isLV, stringPoints, noteMode, notes]);
 
   useEffect(() => {
     mapRef.current = L.map('map', {
@@ -1672,12 +2041,24 @@ export default function BaseModule({
   const ICON = 'h-6 w-6';
   const ICON_SMALL = 'h-5 w-5';
 
-  const overallTotal = totalPlus + totalMinus;
-  const completedTotal = completedPlus + completedMinus;
+  // LV completion is tracked via inv_id clicks; DC uses polygon selection (+/-).
+  const lvCompletedLength = isLV
+    ? Array.from(lvCompletedInvIds).reduce((sum, invId) => {
+        const data = lengthData[normalizeId(invId)];
+        if (!data?.plus?.length) return sum;
+        return sum + data.plus.reduce((a, b) => a + b, 0);
+      }, 0)
+    : 0;
+
+  const overallTotal = isLV ? totalPlus : (totalPlus + totalMinus);
+  const completedTotal = isLV ? lvCompletedLength : (completedPlus + completedMinus);
   const completedPct = overallTotal > 0 ? (completedTotal / overallTotal) * 100 : 0;
   const remainingPlus = Math.max(0, totalPlus - completedPlus);
   const remainingMinus = Math.max(0, totalMinus - completedMinus);
   const remainingTotal = Math.max(0, overallTotal - completedTotal);
+
+  const workSelectionCount = isLV ? lvCompletedInvIds.size : selectedPolygons.size;
+  const workAmount = completedTotal; // LV: completed length; DC: completedPlus+completedMinus
 
   const [dwgUrl, setDwgUrl] = useState('');
   useEffect(() => {
@@ -1702,44 +2083,73 @@ export default function BaseModule({
               customCounters
             ) : (
               <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start">
-                <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-                  <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                    <span className="text-xs font-bold text-slate-200">+DC Cable</span>
-                    <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{totalPlus.toFixed(0)} m</span>
+                {useSimpleCounters ? (
+                  <>
+                    <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                      <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                        <span className="text-xs font-bold text-slate-200">Total</span>
+                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{overallTotal.toFixed(0)} m</span>
+                      </div>
+                    </div>
 
-                    <span className="text-xs font-bold text-slate-200">-DC Cable</span>
-                    <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{totalMinus.toFixed(0)} m</span>
+                    <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                      <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                        <span className="text-xs font-black text-emerald-400">Completed</span>
+                        <span className="text-xs font-black text-emerald-400 tabular-nums whitespace-nowrap">
+                          {completedTotal.toFixed(0)} m, {completedPct.toFixed(2)}%
+                        </span>
+                      </div>
+                    </div>
 
-                    <span className="text-xs font-bold text-slate-200">Total</span>
-                    <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{(totalPlus + totalMinus).toFixed(0)} m</span>
-                  </div>
-                </div>
+                    <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                      <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                        <span className="text-xs font-bold text-slate-200">Remaining</span>
+                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingTotal.toFixed(0)} m</span>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                      <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                        <span className="text-xs font-bold text-slate-200">+DC Cable</span>
+                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{totalPlus.toFixed(0)} m</span>
 
-                <div className="min-w-[260px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-                  <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                    <span className="text-xs font-bold text-slate-200">+DC Cable</span>
-                    <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{completedPlus.toFixed(0)} m</span>
+                        <span className="text-xs font-bold text-slate-200">-DC Cable</span>
+                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{totalMinus.toFixed(0)} m</span>
 
-                    <span className="text-xs font-bold text-slate-200">-DC Cable</span>
-                    <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{completedMinus.toFixed(0)} m</span>
+                        <span className="text-xs font-bold text-slate-200">Total</span>
+                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{(totalPlus + totalMinus).toFixed(0)} m</span>
+                      </div>
+                    </div>
 
-                    <span className="text-xs font-black text-emerald-400">Completed ({completedPct.toFixed(2)}%)</span>
-                    <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{completedTotal.toFixed(0)} m</span>
-                  </div>
-                </div>
+                    <div className="min-w-[260px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                      <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                        <span className="text-xs font-bold text-slate-200">+DC Cable</span>
+                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{completedPlus.toFixed(0)} m</span>
 
-                <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-                  <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                    <span className="text-xs font-bold text-slate-200">+DC Cable</span>
-                    <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingPlus.toFixed(0)} m</span>
+                        <span className="text-xs font-bold text-slate-200">-DC Cable</span>
+                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{completedMinus.toFixed(0)} m</span>
 
-                    <span className="text-xs font-bold text-slate-200">-DC Cable</span>
-                    <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingMinus.toFixed(0)} m</span>
+                        <span className="text-xs font-black text-emerald-400">Completed ({completedPct.toFixed(2)}%)</span>
+                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{completedTotal.toFixed(0)} m</span>
+                      </div>
+                    </div>
 
-                    <span className="text-xs font-bold text-slate-200">Remaining</span>
-                    <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingTotal.toFixed(0)} m</span>
-                  </div>
-                </div>
+                    <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                      <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                        <span className="text-xs font-bold text-slate-200">+DC Cable</span>
+                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingPlus.toFixed(0)} m</span>
+
+                        <span className="text-xs font-bold text-slate-200">-DC Cable</span>
+                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingMinus.toFixed(0)} m</span>
+
+                        <span className="text-xs font-bold text-slate-200">Remaining</span>
+                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingTotal.toFixed(0)} m</span>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             )
           ) : (
@@ -1776,7 +2186,7 @@ export default function BaseModule({
 
             <button
               onClick={() => setModalOpen(true)}
-              disabled={selectedPolygons.size === 0 || noteMode}
+              disabled={workSelectionCount === 0 || noteMode}
               className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
               title="Submit Work"
               aria-label="Submit Work"
@@ -1795,7 +2205,13 @@ export default function BaseModule({
             </button>
 
             <button
-              onClick={() => exportToExcel(dailyLog)}
+              onClick={() =>
+                exportToExcel(dailyLog, {
+                  moduleKey: activeMode?.key || '',
+                  moduleLabel: moduleName,
+                  unit: 'm',
+                })
+              }
               disabled={dailyLog.length === 0}
               className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
               title="Export Excel"
@@ -1803,14 +2219,6 @@ export default function BaseModule({
             >
               Export
             </button>
-
-            {dailyLog.length > 0 && (
-              <button onClick={resetLog} className={BTN_DANGER} title="Reset All" aria-label="Reset All">
-                <svg className={ICON} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
-                </svg>
-              </button>
-            )}
           </div>
         </div>
 
@@ -2020,8 +2428,10 @@ export default function BaseModule({
           addRecord({ ...record, notes: notesOnDate });
           alert('Work submitted successfully!');
         }}
-        completedPlus={completedPlus}
-        completedMinus={completedMinus}
+        moduleKey={activeMode?.key || ''}
+        moduleLabel={moduleName}
+        workAmount={workAmount}
+        workUnit="m"
       />
       
       {/* History Modal */}

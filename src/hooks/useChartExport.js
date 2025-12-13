@@ -7,13 +7,17 @@ import { saveAs } from "file-saver";
 Chart.register(ChartDataLabels);
 
 export function useChartExport() {
-  const exportToExcel = useCallback(async (dailyLog) => {
+  const exportToExcel = useCallback(async (dailyLog, options = {}) => {
     if (!dailyLog || dailyLog.length === 0) {
       alert("No data to export!");
       return;
     }
 
     try {
+      const moduleKey = String(options.moduleKey || "MODULE").toUpperCase();
+      const moduleLabel = String(options.moduleLabel || moduleKey);
+      const unit = String(options.unit || "m");
+
       // 1. Aggregate data by date
       const aggregated = {};
       dailyLog.forEach((record) => {
@@ -70,7 +74,7 @@ export function useChartExport() {
           labels: labels,
           datasets: [
             {
-              label: "DC Cable (m)",
+              label: `${moduleLabel} (${unit})`,
               data: cableData,
               backgroundColor: "rgba(54, 162, 235, 0.8)",
               borderColor: "rgba(54, 162, 235, 1)",
@@ -83,7 +87,7 @@ export function useChartExport() {
           plugins: {
             title: {
               display: true,
-              text: "Daily DC Cable Installation Progress",
+              text: `Daily ${moduleLabel} Progress`,
               font: { size: 16 },
             },
             legend: {
@@ -109,7 +113,7 @@ export function useChartExport() {
               beginAtZero: true,
               title: {
                 display: true,
-                text: "Cable Length (m)",
+                text: `Amount (${unit})`,
               },
             },
             x: {
@@ -133,16 +137,22 @@ export function useChartExport() {
 
       // 9. Create Excel workbook
       const workbook = new ExcelJS.Workbook();
-      workbook.creator = "DC Cable Tracking System";
+      workbook.creator = `${moduleLabel} Tracking System`;
       workbook.created = new Date();
 
       // Sheet 1: Data
       const dataSheet = workbook.addWorksheet("Daily Progress");
+
+      const hasDcBreakdown = sorted.some((r) => (r.plus_dc || 0) !== 0 || (r.minus_dc || 0) !== 0);
       dataSheet.columns = [
         { header: "Date", key: "date", width: 12 },
-        { header: "+DC Cable (m)", key: "plus_dc", width: 15 },
-        { header: "-DC Cable (m)", key: "minus_dc", width: 15 },
-        { header: "Total Cable (m)", key: "total_cable", width: 15 },
+        ...(hasDcBreakdown
+          ? [
+              { header: `+DC Cable (${unit})`, key: "plus_dc", width: 15 },
+              { header: `-DC Cable (${unit})`, key: "minus_dc", width: 15 },
+            ]
+          : []),
+        { header: `Amount of Work (${unit})`, key: "total_cable", width: 18 },
         { header: "Workers", key: "workers", width: 10 },
         { header: "Subcontractor", key: "subcontractor", width: 20 },
       ];
@@ -158,25 +168,31 @@ export function useChartExport() {
 
       // Add data
       sorted.forEach((row) => {
-        dataSheet.addRow({
+        const out = {
           date: row.date,
-          plus_dc: Math.round(row.plus_dc),
-          minus_dc: Math.round(row.minus_dc),
           total_cable: Math.round(row.total_cable),
           workers: row.workers,
           subcontractor: row.subcontractor,
-        });
+        };
+        if (hasDcBreakdown) {
+          out.plus_dc = Math.round(row.plus_dc);
+          out.minus_dc = Math.round(row.minus_dc);
+        }
+        dataSheet.addRow(out);
       });
 
       // Add totals row
-      const totalRow = dataSheet.addRow({
+      const totals = {
         date: "TOTAL",
-        plus_dc: sorted.reduce((sum, r) => sum + r.plus_dc, 0),
-        minus_dc: sorted.reduce((sum, r) => sum + r.minus_dc, 0),
         total_cable: sorted.reduce((sum, r) => sum + r.total_cable, 0),
         workers: "",
         subcontractor: "",
-      });
+      };
+      if (hasDcBreakdown) {
+        totals.plus_dc = sorted.reduce((sum, r) => sum + r.plus_dc, 0);
+        totals.minus_dc = sorted.reduce((sum, r) => sum + r.minus_dc, 0);
+      }
+      const totalRow = dataSheet.addRow(totals);
       totalRow.font = { bold: true };
       totalRow.fill = {
         type: "pattern",
@@ -203,7 +219,7 @@ export function useChartExport() {
       const blob = new Blob([buffer], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
-      const fileName = `DC_Cable_Progress_${new Date().toISOString().split("T")[0]}.xlsx`;
+      const fileName = `${moduleKey}_Progress_${new Date().toISOString().split("T")[0]}.xlsx`;
       saveAs(blob, fileName);
 
       console.log("Excel exported successfully!");

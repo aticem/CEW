@@ -1,7 +1,15 @@
 import { useState } from 'react';
 import './SubmitModal.css';
 
-export default function SubmitModal({ isOpen, onClose, onSubmit, completedPlus, completedMinus }) {
+export default function SubmitModal({
+  isOpen,
+  onClose,
+  onSubmit,
+  moduleKey,
+  moduleLabel,
+  workAmount = 0,
+  workUnit = 'm',
+}) {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [subcontractor, setSubcontractor] = useState('');
   const [workers, setWorkers] = useState(1);
@@ -16,9 +24,10 @@ export default function SubmitModal({ isOpen, onClose, onSubmit, completedPlus, 
 
     const record = {
       date,
-      plus_dc: completedPlus,
-      minus_dc: completedMinus,
-      total_cable: completedPlus + completedMinus,
+      module_key: moduleKey || '',
+      module_label: moduleLabel || '',
+      // Keep `total_cable` for backwards compatibility with existing history/export logic.
+      total_cable: Number(workAmount) || 0,
       subcontractor,
       workers: parseInt(workers),
       timestamp: new Date().toISOString()
@@ -79,16 +88,8 @@ export default function SubmitModal({ isOpen, onClose, onSubmit, completedPlus, 
 
           <div className="form-summary">
             <div className="summary-row">
-              <span>+DC Cable:</span>
-              <strong>{completedPlus.toFixed(0)} m</strong>
-            </div>
-            <div className="summary-row">
-              <span>-DC Cable:</span>
-              <strong>{completedMinus.toFixed(0)} m</strong>
-            </div>
-            <div className="summary-row total">
-              <span>Total Cable:</span>
-              <strong>{(completedPlus + completedMinus).toFixed(0)} m</strong>
+              <span>Amount of Work</span>
+              <strong>{(Number(workAmount) || 0).toFixed(0)} {workUnit}</strong>
             </div>
           </div>
 

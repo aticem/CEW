@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import DCModule from './modules/DCModule.jsx';
 import LVModule from './modules/LVModule.jsx';
+import MVFiberModule from './modules/MVFiberModule.jsx';
 
 const MODULES = {
   DC: { key: 'DC', label: 'DC CABLE PULLING PROGRESS', Component: DCModule },
   LV: { key: 'LV', label: 'LV CABLE PULLING PROGRESS', Component: LVModule },
+  MVF: { key: 'MVF', label: 'MV+FIBER PULLING PROGRESS', Component: MVFiberModule },
 };
 
 export default function App() {
@@ -27,8 +29,8 @@ export default function App() {
     <>
       <ActiveComponent />
 
-      {/* Mode button (left), aligned with Legend (right) */}
-      <div className="fixed left-3 sm:left-5 top-[40%] -translate-y-1/2 z-[1200]" ref={menuRef}>
+      {/* Mode button (left), under the header and aligned with the title row */}
+      <div className="fixed left-3 sm:left-5 top-[104px] z-[1200]" ref={menuRef}>
         <div className="relative">
           <button
             type="button"
@@ -47,10 +49,10 @@ export default function App() {
           {menuOpen && (
             <div className="absolute left-0 mt-2 w-72 border-2 border-slate-700 bg-slate-900 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
               {Object.values(MODULES).map((m, idx) => (
-                <button
+              <button 
                   key={m.key}
                   type="button"
-                  onClick={() => {
+                onClick={() => {
                     setActiveKey(m.key);
                     setMenuOpen(false);
                   }}
@@ -59,12 +61,12 @@ export default function App() {
                   } ${activeKey === m.key ? 'bg-amber-500 text-black' : 'bg-slate-900 text-slate-200 hover:bg-slate-800'}`}
                 >
                   {m.label}
-                </button>
-              ))}
+              </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
             </div>
-          )}
-        </div>
-      </div>
     </>
   );
 }
