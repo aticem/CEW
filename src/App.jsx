@@ -273,6 +273,14 @@ function App() {
   // Performance knobs (labels are the #1 cost in this app)
   const STRING_LABEL_MIN_ZOOM = 18; // only render string_text IDs when zoomed in
   const STRING_LABEL_MAX = 2500; // hard cap to avoid blowing up canvas on huge datasets
+  const STRING_LABEL_PAD = 0.12; // smaller pad = fewer offscreen labels to build
+  const STRING_LABEL_GRID_CELL_DEG = 0.001; // ~111m latitude; good speed/accuracy tradeoff
+
+  // Reuse label instances to avoid GC churn on pan/zoom
+  const stringTextLabelPoolRef = useRef([]); // L.TextLabel[]
+  const stringTextLabelActiveCountRef = useRef(0);
+  const lastStringLabelKeyRef = useRef(''); // bounds+zoom key; skip identical work
+  const stringTextGridRef = useRef(null); // Map<cellKey, number[]> indices into stringTextPointsRef.current
 
   const scheduleStringTextLabelUpdate = useCallback(() => {
     if (!mapRef.current || !stringTextLayerRef.current) return;
@@ -282,27 +290,89 @@ function App() {
       const layer = stringTextLayerRef.current;
       const zoom = map.getZoom();
 
-      layer.clearLayers();
-
       if (zoom < STRING_LABEL_MIN_ZOOM) return;
 
-      const bounds = map.getBounds().pad(0.15);
-      let count = 0;
-      for (const pt of stringTextPointsRef.current) {
-        if (count >= STRING_LABEL_MAX) break;
-        if (!bounds.contains([pt.lat, pt.lng])) continue;
-        count++;
-        const label = L.textLabel([pt.lat, pt.lng], {
-          text: pt.text,
-          renderer: canvasRenderer,
-          textBaseSize: 11,
-          refZoom: 20,
-          textStyle: '300',
-          textColor: 'rgba(255,255,255,0.92)',
-          rotation: pt.angle || 0
-        });
-        label.addTo(layer);
+      const bounds = map.getBounds().pad(STRING_LABEL_PAD);
+      const key = `${zoom}|${bounds.getSouth().toFixed(5)},${bounds.getWest().toFixed(5)},${bounds.getNorth().toFixed(5)},${bounds.getEast().toFixed(5)}`;
+      if (key === lastStringLabelKeyRef.current) return;
+      lastStringLabelKeyRef.current = key;
+
+      // Query candidates using the spatial grid if available; otherwise fall back to scanning.
+      const candidates = [];
+      const grid = stringTextGridRef.current;
+      if (grid && grid.size) {
+        const sw = bounds.getSouthWest();
+        const ne = bounds.getNorthEast();
+        const minLat = Math.floor(sw.lat / STRING_LABEL_GRID_CELL_DEG);
+        const maxLat = Math.floor(ne.lat / STRING_LABEL_GRID_CELL_DEG);
+        const minLng = Math.floor(sw.lng / STRING_LABEL_GRID_CELL_DEG);
+        const maxLng = Math.floor(ne.lng / STRING_LABEL_GRID_CELL_DEG);
+
+        for (let a = minLat; a <= maxLat; a++) {
+          for (let b = minLng; b <= maxLng; b++) {
+            const arr = grid.get(`${a}:${b}`);
+            if (arr && arr.length) candidates.push(...arr);
+          }
+        }
+
+        // Preserve original draw order to avoid visual changes under the MAX cap.
+        candidates.sort((i, j) => i - j);
       }
+
+      const points = stringTextPointsRef.current;
+      const pool = stringTextLabelPoolRef.current;
+      let count = 0;
+
+      const iterateIndices = candidates.length ? candidates : null;
+      const total = iterateIndices ? iterateIndices.length : points.length;
+      for (let k = 0; k < total; k++) {
+        if (count >= STRING_LABEL_MAX) break;
+        const idx = iterateIndices ? iterateIndices[k] : k;
+        const pt = points[idx];
+        if (!pt) continue;
+        if (!bounds.contains([pt.lat, pt.lng])) continue;
+
+        // Create once, then reuse
+        let label = pool[count];
+        if (!label) {
+          label = L.textLabel([pt.lat, pt.lng], {
+            text: pt.text,
+            renderer: canvasRenderer,
+            textBaseSize: 11,
+            refZoom: 20,
+            textStyle: '300',
+            textColor: 'rgba(255,255,255,0.92)',
+            rotation: pt.angle || 0
+          });
+          pool[count] = label;
+        }
+
+        // Update position + text/rotation then ensure it's on the layer
+        const nextLatLng = [pt.lat, pt.lng];
+        label.setLatLng(nextLatLng);
+        let needsRedraw = false;
+        if (label.options.text !== pt.text) {
+          label.options.text = pt.text;
+          needsRedraw = true;
+        }
+        const nextRot = pt.angle || 0;
+        if (label.options.rotation !== nextRot) {
+          label.options.rotation = nextRot;
+          needsRedraw = true;
+        }
+        if (!layer.hasLayer(label)) layer.addLayer(label);
+        if (needsRedraw) label.redraw?.();
+
+        count++;
+      }
+
+      // Remove unused pooled labels from the layer (but keep them for reuse)
+      const prevActive = stringTextLabelActiveCountRef.current;
+      for (let i = count; i < prevActive; i++) {
+        const lbl = pool[i];
+        if (lbl && layer.hasLayer(lbl)) layer.removeLayer(lbl);
+      }
+      stringTextLabelActiveCountRef.current = count;
     });
   }, []);
   
@@ -935,9 +1005,10 @@ function App() {
     mapRef.current.off('zoomend moveend', scheduleStringTextLabelUpdate);
     mapRef.current.on('zoomend moveend', scheduleStringTextLabelUpdate);
 
-    // Build a tiny spatial grid for string_text points to speed up polygon matching.
+    // Build a tiny spatial grid for string_text points to speed up polygon matching
+    // and label rendering (avoid scanning all points on every pan/zoom).
     // This avoids O(polygons * allStringPoints) scans.
-    const GRID_CELL_DEG = 0.001; // ~111m latitude; good balance between speed and accuracy
+    const GRID_CELL_DEG = 0.001; // keep consistent with STRING_LABEL_GRID_CELL_DEG
     const stringGrid = (() => {
       const grid = new Map(); // key -> [{stringId, latLng}]
       const seen = new Set();
@@ -949,6 +1020,21 @@ function App() {
         const key = `${iLat}:${iLng}`;
         if (!grid.has(key)) grid.set(key, []);
         grid.get(key).push({ stringId: p.stringId, latLng: L.latLng(p.lat, p.lng) });
+      }
+      return grid;
+    })();
+
+    // Label grid: key -> [pointIndex] (preserves stable ordering via index sort)
+    stringTextGridRef.current = (() => {
+      const grid = new Map();
+      for (let idx = 0; idx < stringTextPointsRef.current.length; idx++) {
+        const p = stringTextPointsRef.current[idx];
+        if (!p) continue;
+        const iLat = Math.floor(p.lat / GRID_CELL_DEG);
+        const iLng = Math.floor(p.lng / GRID_CELL_DEG);
+        const key = `${iLat}:${iLng}`;
+        if (!grid.has(key)) grid.set(key, []);
+        grid.get(key).push(idx);
       }
       return grid;
     })();
@@ -1332,11 +1418,11 @@ function App() {
       {/* Header with Buttons and Counters */}
       <div className="sticky top-0 left-0 z-[1100] w-full min-h-[92px] border-b-2 border-slate-700 bg-slate-900 px-4 py-0 sm:px-6 relative flex items-center">
         <div className="w-full">
-        <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+        <div className="grid grid-cols-[1fr_auto] items-center gap-1">
           {/* Counters (left) */}
-          <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start translate-x-2">
-            <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 p-3">
-              <div className="grid w-full grid-cols-[max-content_1fr] items-center gap-x-4 gap-y-2">
+          <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start">
+            <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+              <div className="grid w-full grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2">
                 <span className="text-xs font-bold text-slate-200">+DC Cable</span>
                 <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{totalPlus.toFixed(0)} m</span>
 
@@ -1348,8 +1434,8 @@ function App() {
               </div>
             </div>
 
-            <div className="min-w-[260px] border-2 border-slate-700 bg-slate-800 p-3">
-              <div className="grid w-full grid-cols-[max-content_1fr] items-center gap-x-4 gap-y-2">
+            <div className="min-w-[260px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+              <div className="grid w-full grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2">
                 <span className="text-xs font-bold text-slate-200">+DC Cable</span>
                 <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{completedPlus.toFixed(0)} m</span>
 
@@ -1361,8 +1447,8 @@ function App() {
               </div>
             </div>
 
-            <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 p-3">
-              <div className="grid w-full grid-cols-[max-content_1fr] items-center gap-x-4 gap-y-2">
+            <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+              <div className="grid w-full grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2">
                 <span className="text-xs font-bold text-slate-200">+DC Cable</span>
                 <span className="justify-self-end text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap text-right">{remainingPlus.toFixed(0)} m</span>
 
@@ -1376,7 +1462,7 @@ function App() {
           </div>
 
           {/* Controls (right) */}
-          <div className="flex flex-shrink-0 items-center gap-2 justify-self-end -translate-x-2">
+          <div className="flex flex-shrink-0 items-center gap-2 justify-self-end">
             {noteMode && selectedNotes.size > 0 && (
               <button onClick={deleteSelectedNotes} className={BTN_DANGER} title="Delete Selected" aria-label="Delete Selected">
                 <svg className={ICON} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1471,7 +1557,7 @@ function App() {
         </div>
 
         {/* NOTE (between header and legend, right-aligned with legend/DWG) */}
-        <div className="fixed right-3 sm:right-5 top-[20%] z-[1090]">
+        <div className="fixed right-3 sm:right-5 top-[20%] z-[1090] note-btn-wrap">
           <button
             type="button"
             onClick={() => {
@@ -1487,8 +1573,12 @@ function App() {
             className="relative inline-flex h-6 items-center justify-center border-2 border-slate-700 bg-slate-900 px-2 text-[10px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
           >
             Note
-            {/* Red corner indicator */}
-            <svg className="absolute -right-1 -top-1 h-2 w-2" viewBox="0 0 12 12" aria-hidden="true">
+            {/* Red corner indicator (always visible; pulses only when note mode is active AND hovered) */}
+            <svg
+              className={`note-dot absolute -right-1 -top-1 h-2 w-2 ${noteMode ? 'note-dot--active' : ''}`}
+              viewBox="0 0 12 12"
+              aria-hidden="true"
+            >
               <circle cx="6" cy="6" r="4" fill="#e23a3a" stroke="#7a0f0f" strokeWidth="2" />
             </svg>
           </button>
@@ -1503,15 +1593,6 @@ function App() {
 
       <div className="map-wrapper">
         <div id="map" />
-        
-        {/* Note Mode Indicator */}
-        {noteMode && (
-          <div className="note-mode-indicator" onClick={() => setNoteMode(false)}>
-            <span className="note-mode-dot" aria-hidden="true" />
-            <span>NOTE MODE ON</span>
-            <span className="note-mode-hint">Click to add • Drag to select</span>
-          </div>
-        )}        
       </div>
       
       {/* Note Edit Popup */}
