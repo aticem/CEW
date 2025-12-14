@@ -194,6 +194,7 @@ export function computeNewPartsForBox({
   lineLatLngs,
   coveredIntervals = [], // merged intervals in meters along line
   committedPartIds = new Set(), // Set<string>
+  idSuffix = '', // optional suffix appended to generated part IDs (e.g. ":seg:SS03-CSS")
   minMeters = 0.5,
   minSliverMeters = 0.2,
 }) {
@@ -223,7 +224,7 @@ export function computeNewPartsForBox({
     newIntervals.forEach(([a, b]) => {
       const meters = Math.max(0, b - a);
       if (meters < minMeters) return;
-      const id = `${fid}:${lineIndex}:${a.toFixed(2)}-${b.toFixed(2)}`;
+      const id = `${fid}:${lineIndex}:${a.toFixed(2)}-${b.toFixed(2)}${idSuffix || ''}`;
       if (committedPartIds.has(id)) return;
       const coords = sliceLineByMeters({ lineLatLngs, cumData, startM: a, endM: b });
       if (!coords || coords.length < 2) return;

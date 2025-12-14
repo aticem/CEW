@@ -254,7 +254,37 @@ export default function BaseModule({
   const moduleName = name || activeMode?.label || 'MODULE';
   const showCounters = Boolean(counters);
   const isLV = String(activeMode?.key || '').toUpperCase() === 'LV';
-  const isMVF = String(activeMode?.key || '').toUpperCase() === 'MVF';
+  // Treat any module with mvf-style CSV/logic as MVF-mode (e.g., MV + FIBRE modules).
+  const isMVF = String(activeMode?.csvFormat || '').toLowerCase() === 'mvf';
+  const mvfCircuitsMultiplier =
+    typeof activeMode?.circuitsMultiplier === 'number' && Number.isFinite(activeMode.circuitsMultiplier)
+      ? activeMode.circuitsMultiplier
+      : 1;
+  // Segment colors must never use green (reserved for "completed").
+  const mvfSegmentPalette = [
+    '#ef4444', // red
+    '#f97316', // orange
+    '#eab308', // amber
+    '#06b6d4', // cyan
+    '#3b82f6', // blue
+    '#6366f1', // indigo
+    '#a855f7', // purple
+    '#ec4899', // pink
+    '#0ea5e9', // sky
+    '#94a3b8', // slate
+  ];
+  const mvfColorOfSegment = useCallback((key) => {
+    const k = String(key || '');
+    if (!k) return '#94a3b8';
+    const cached = mvfSegmentColorByKeyRef.current?.[k];
+    if (cached) return cached;
+    // stable hash
+    let h = 0;
+    for (let i = 0; i < k.length; i++) h = (h * 31 + k.charCodeAt(i)) >>> 0;
+    const c = mvfSegmentPalette[h % mvfSegmentPalette.length];
+    mvfSegmentColorByKeyRef.current[k] = c;
+    return c;
+  }, []);
   const useSimpleCounters = Boolean(activeMode?.simpleCounters) || isLV;
   const stringTextToggleEnabled = Boolean(activeMode?.stringTextToggle);
   const [stringTextUserOn, setStringTextUserOn] = useState(Boolean(activeMode?.stringTextDefaultOn));
@@ -338,6 +368,13 @@ export default function BaseModule({
   const [mvfActiveSegmentKeys, setMvfActiveSegmentKeys] = useState(() => new Set()); // Set<string>
   const mvfActiveSegmentKeysRef = useRef(mvfActiveSegmentKeys);
   const mvfPrevActiveSegmentKeysRef = useRef(new Set());
+  const [mvfCurrentSegmentKey, setMvfCurrentSegmentKey] = useState(''); // required for box selection
+  const mvfCurrentSegmentKeyRef = useRef(mvfCurrentSegmentKey);
+  const mvfSegmentScaleByKeyRef = useRef({}); // key -> scale (CSV meters per trench meter)
+  const mvfSegmentColorByKeyRef = useRef({}); // key -> css color
+  const mvfRouteIntervalsBySegmentKeyRef = useRef({}); // key -> Map<"fid:lineIndex", [[a,b],...]>
+  const [mvfDoneSegmentKeys, setMvfDoneSegmentKeys] = useState(() => new Set()); // Set<string>
+  const mvfDoneSegmentKeysRef = useRef(mvfDoneSegmentKeys);
   const [mvfCompletedSegments, setMvfCompletedSegments] = useState(() => new Set());
   const mvfCompletedSegmentsRef = useRef(mvfCompletedSegments);
   const mvfSegmentLenByKeyRef = useRef({}); // key -> length
@@ -468,9 +505,11 @@ export default function BaseModule({
 
   // MVF: daily completion tracking for segments (click in panel to mark completed)
   const mvfTodayYmd = getTodayYmd();
-  const mvfStorageKey = `cew:mvf:segments_completed:${mvfTodayYmd}`;
-  const mvfCommittedTrenchStorageKey = `cew:mvf:trench_committed:${mvfTodayYmd}`;
-  const mvfCommittedTrenchPartsStorageKey = `cew:mvf:trench_parts_committed:${mvfTodayYmd}`;
+  const mvfStoragePrefix = `cew:${String(activeMode?.key || 'MVF').toLowerCase()}`;
+  const mvfStorageKey = `${mvfStoragePrefix}:segments_completed:${mvfTodayYmd}`;
+  const mvfCommittedTrenchStorageKey = `${mvfStoragePrefix}:trench_committed:${mvfTodayYmd}`;
+  const mvfCommittedTrenchPartsStorageKey = `${mvfStoragePrefix}:trench_parts_committed:${mvfTodayYmd}`;
+  const mvfDoneSegmentsStorageKey = `${mvfStoragePrefix}:segments_done:${mvfTodayYmd}`;
   useEffect(() => {
     mvfCompletedSegmentsRef.current = mvfCompletedSegments;
   }, [mvfCompletedSegments]);
@@ -486,6 +525,14 @@ export default function BaseModule({
   useEffect(() => {
     mvfActiveSegmentKeysRef.current = mvfActiveSegmentKeys;
   }, [mvfActiveSegmentKeys]);
+
+  useEffect(() => {
+    mvfDoneSegmentKeysRef.current = mvfDoneSegmentKeys;
+  }, [mvfDoneSegmentKeys]);
+
+  useEffect(() => {
+    mvfCurrentSegmentKeyRef.current = mvfCurrentSegmentKey;
+  }, [mvfCurrentSegmentKey]);
 
   useEffect(() => {
     mvfSelectedTrenchPartsRef.current = mvfSelectedTrenchParts;
@@ -536,6 +583,20 @@ export default function BaseModule({
     }
   }, [isMVF, mvfCommittedTrenchPartsStorageKey]);
 
+  // MVF: load done segments for today
+  useEffect(() => {
+    if (!isMVF) return;
+    try {
+      const raw = localStorage.getItem(mvfDoneSegmentsStorageKey);
+      const arr = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(arr)) setMvfDoneSegmentKeys(new Set(arr.map(String)));
+      else setMvfDoneSegmentKeys(new Set());
+    } catch (_e) {
+      void _e;
+      setMvfDoneSegmentKeys(new Set());
+    }
+  }, [isMVF, mvfDoneSegmentsStorageKey]);
+
   useEffect(() => {
     if (!isMVF) return;
     try {
@@ -565,11 +626,21 @@ export default function BaseModule({
     }
   }, [isMVF, mvfCommittedTrenchPartsStorageKey, mvfCommittedTrenchParts]);
 
+  // MVF: persist done segments for today
+  useEffect(() => {
+    if (!isMVF) return;
+    try {
+      localStorage.setItem(mvfDoneSegmentsStorageKey, JSON.stringify(Array.from(mvfDoneSegmentKeys)));
+    } catch (_e) {
+      void _e;
+    }
+  }, [isMVF, mvfDoneSegmentsStorageKey, mvfDoneSegmentKeys]);
+
   // MVF: keep mv_trench selection style in sync without reloading GeoJSON.
   useEffect(() => {
     if (!isMVF) return;
     const baseStyle = {
-      color: 'rgba(250,204,21,0.95)', // yellow-ish (mv trench)
+      color: 'rgba(255,255,255,0.85)', // white (uncompleted)
       weight: 1.25,
       fill: false,
       fillOpacity: 0,
@@ -1632,10 +1703,10 @@ export default function BaseModule({
                 fillOpacity: 0
               };
             }
-            // MVF: show mv_trench as yellow (instead of dim white) so selection/highlight is meaningful.
+            // MVF: default mv_trench should be WHITE (uncompleted)
             if (mvfTrenchInteractive) {
               return {
-                color: 'rgba(250,204,21,0.95)',
+                color: 'rgba(255,255,255,0.85)',
                 weight: 1.25,
                 fill: false,
                 fillOpacity: 0,
@@ -2069,28 +2140,26 @@ export default function BaseModule({
     }, 50);
   };
 
-  // MVF: segment selection should behave like other partial selections:
-  // - adds trench parts (mapped onto mv_trench intervals) so box select/unselect works everywhere
-  // - no double counting if already green
+  // MVF: render segment ROUTES on the map:
+  // - each segment has its own (non-green) color
+  // - if Done, render in green
+  // Also compute per-segment scale (CSV meters per trench meter) for selection box meters.
   useEffect(() => {
     if (!isMVF) return;
     const map = mapRef.current;
-    if (!map) return;
+    const hl = mvfHighlightLayerRef.current;
+    if (!map || !hl) return;
 
     const graph = mvfTrenchGraphRef.current;
-    const edgeIndex = mvfTrenchEdgeIndexRef.current;
-    const byId = mvfTrenchByIdRef.current || {};
-    if (!graph || !edgeIndex || edgeIndex.size === 0) return;
+    if (!graph?.adj) return;
 
-    const activeKeys = Array.from(mvfActiveSegmentKeys || []).map(String);
-    const activeSet = new Set(activeKeys);
-    const prevActive = mvfPrevActiveSegmentKeysRef.current || new Set();
-    const addedKeys = activeKeys.filter((k) => !prevActive.has(k));
-    const removedKeys = Array.from(prevActive).filter((k) => !activeSet.has(k));
+    const clear = () => {
+      try { hl.clearLayers(); } catch (_e) { void _e; }
+    };
+    clear();
 
     const pts = stringTextPointsRef.current || [];
     const findPoint = (id) => pts.find((p) => p?.stringId === id) || null;
-    const round = (v) => Number(v).toFixed(6);
 
     const nearestNodeKey = (ll) => {
       if (!graph?.nodes?.size) return null;
@@ -2138,7 +2207,7 @@ export default function BaseModule({
       const bLL = L.latLng(bPt.lat, bPt.lng);
       const startK = nearestNodeKey(aLL);
       const endK = nearestNodeKey(bLL);
-      if (!startK || !endK || !graph?.adj) return null;
+      if (!startK || !endK) return null;
 
       const dist = new Map([[startK, 0]]);
       const prev = new Map();
@@ -2182,110 +2251,81 @@ export default function BaseModule({
       return path.length >= 2 ? path : null;
     };
 
-    setMvfSelectedTrenchParts((prev) => {
-      const base = prev || [];
-      // Drop segment-sourced parts for segments that are no longer active
-      const kept = removedKeys.length
-        ? base.filter((p) => !(p?.source === 'segment' && p?.segmentKey && removedKeys.includes(String(p.segmentKey))))
-        : base;
-      if (addedKeys.length === 0) return kept;
+    const keysToRender = Array.from(
+      new Set([
+        ...Array.from(mvfActiveSegmentKeys || []).map(String),
+        ...Array.from(mvfDoneSegmentKeysRef.current || []).map(String),
+      ])
+    );
+    keysToRender.forEach((k) => {
+      const coords = buildPathCoords(k);
+      if (!coords || coords.length < 2) return;
 
-      const committed = mvfCommittedTrenchPartsRef.current || [];
-
-      // Coverage map from kept+committed to avoid double-counting
-      const coveredByKey = new Map(); // fid:lineIndex -> [[a,b],...]
-      const addCovered = (p) => {
-        const fid = String(p?.fid || '');
-        const lineIndex = Number(p?.lineIndex);
-        const a = Number(p?.startM);
-        const b = Number(p?.endM);
-        if (!fid || !Number.isFinite(lineIndex) || !Number.isFinite(a) || !Number.isFinite(b)) return;
-        const lo = Math.min(a, b);
-        const hi = Math.max(a, b);
-        if (!(hi > lo)) return;
-        const k = `${fid}:${lineIndex}`;
-        if (!coveredByKey.has(k)) coveredByKey.set(k, []);
-        coveredByKey.get(k).push([lo, hi]);
-      };
-      kept.forEach(addCovered);
-      committed.forEach(addCovered);
-      for (const [k, arr] of coveredByKey.entries()) coveredByKey.set(k, mergeIntervals(arr));
-
-      const committedIds = new Set(committed.map((p) => String(p?.id || '')));
-      const existingIds = new Set(kept.map((p) => String(p?.id || '')));
-
-      const toAdd = [];
-      addedKeys.forEach((segKey) => {
-        const coords = buildPathCoords(segKey);
-        if (!coords || coords.length < 2) return;
-
-        // Convert route edges into trench intervals
-        const intervalsByTrench = new Map(); // fid:lineIndex -> [[a,b]]
+      // Save route intervals (for "select only on this route" behavior)
+      try {
+        const edgeIndex = mvfTrenchEdgeIndexRef.current;
+        const round = (v) => Number(v).toFixed(6);
+        const mapByKey = new Map();
         for (let i = 0; i < coords.length - 1; i++) {
           const a = coords[i];
           const b = coords[i + 1];
           if (!a || !b) continue;
           const aK = `${round(a[0])},${round(a[1])}`;
           const bK = `${round(b[0])},${round(b[1])}`;
-          const edgeKey = `${aK}|${bK}`;
-          const rec = edgeIndex.get(edgeKey);
+          const rec = edgeIndex.get(`${aK}|${bK}`);
           if (!rec) continue;
           const fid = String(rec.fid || '');
           const lineIndex = Number(rec.lineIndex) || 0;
           const lo = Math.min(Number(rec.startM) || 0, Number(rec.endM) || 0);
           const hi = Math.max(Number(rec.startM) || 0, Number(rec.endM) || 0);
           if (!(hi > lo)) continue;
-          const k = `${fid}:${lineIndex}`;
-          if (!intervalsByTrench.has(k)) intervalsByTrench.set(k, []);
-          intervalsByTrench.get(k).push([lo, hi]);
+          const kk = `${fid}:${lineIndex}`;
+          if (!mapByKey.has(kk)) mapByKey.set(kk, []);
+          mapByKey.get(kk).push([lo, hi]);
         }
+        // merge per line
+        for (const [kk, arr] of mapByKey.entries()) mapByKey.set(kk, mergeIntervals(arr));
+        mvfRouteIntervalsBySegmentKeyRef.current[k] = mapByKey;
+      } catch (_e) {
+        void _e;
+      }
 
-        for (const [k, arr] of intervalsByTrench.entries()) {
-          const merged = mergeIntervals(arr);
-          if (merged.length === 0) continue;
-          const covered = coveredByKey.get(k) || [];
-          const [fid, lineIndexStr] = k.split(':');
-          const lineIndex = Number(lineIndexStr) || 0;
-          const layer = byId[fid];
-          if (!layer || typeof layer.getLatLngs !== 'function') continue;
-          const lines = asLineStrings(layer.getLatLngs());
-          const lineLL = lines[lineIndex];
-          if (!lineLL || lineLL.length < 2) continue;
-          const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+      // trench meters along the displayed route
+      let trenchM = 0;
+      for (let i = 0; i < coords.length - 1; i++) {
+        const a = coords[i];
+        const b = coords[i + 1];
+        if (!a || !b) continue;
+        trenchM += L.latLng(a[0], a[1]).distanceTo(L.latLng(b[0], b[1]));
+      }
+      const csvLen = Number(mvfSegmentLenByKeyRef.current?.[k]) || 0;
+      const segScale = trenchM > 0 ? (csvLen / trenchM) : 1;
+      mvfSegmentScaleByKeyRef.current[k] = segScale;
+      try { mvfColorOfSegment(k); } catch (_e) { void _e; }
 
-          let nextCovered = covered;
-          merged.forEach(([a, b]) => {
-            const newIntervals = subtractInterval([a, b], nextCovered, 0.2);
-            if (!newIntervals.length) return;
-            nextCovered = mergeIntervals([...nextCovered, ...newIntervals]);
-            newIntervals.forEach(([x, y]) => {
-              const id = `${fid}:${lineIndex}:${x.toFixed(2)}-${y.toFixed(2)}`;
-              if (committedIds.has(id) || existingIds.has(id)) return;
-              const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: x, endM: y });
-              if (!coords || coords.length < 2) return;
-              existingIds.add(id);
-              toAdd.push({
-                id,
-                fid,
-                lineIndex,
-                startM: x,
-                endM: y,
-                coords,
-                meters: Math.max(0, y - x),
-                source: 'segment',
-                segmentKey: String(segKey),
-              });
-            });
-          });
-          coveredByKey.set(k, nextCovered);
+      const done = mvfDoneSegmentKeysRef.current?.has?.(k);
+      const color = done ? '#16a34a' : mvfColorOfSegment(k);
+      const line = L.polyline(coords, { color, weight: 4.6, opacity: 0.98, interactive: true });
+      line._mvfSegmentKey = k;
+      // Right-click on route removes segment highlight (does not erase completed parts).
+      line.on('contextmenu', (evt) => {
+        try {
+          if (evt?.originalEvent) {
+            L.DomEvent.stopPropagation(evt.originalEvent);
+            L.DomEvent.preventDefault(evt.originalEvent);
+          }
+        } catch (_e) {
+          void _e;
         }
+        setMvfActiveSegmentKeys((prev) => {
+          const next = new Set(prev);
+          next.delete(k);
+          return next;
+        });
       });
-
-      if (toAdd.length === 0) return kept;
-      return [...kept, ...toAdd];
+      hl.addLayer(line);
     });
-    mvfPrevActiveSegmentKeysRef.current = new Set(activeSet);
-  }, [isMVF, mvfActiveSegmentKeys, mvfSegments]);
+  }, [isMVF, mvfActiveSegmentKeys, mvfSegments, mvfColorOfSegment, mvfDoneSegmentKeys]);
 
   // Box Selection event handlers - left click to select, right click to unselect
   useEffect(() => {
@@ -2393,7 +2433,7 @@ export default function BaseModule({
           // MVF MODE: Box select ONLY mv_trench (avoid selecting tables/other layers)
           if (isMVF) {
             const byId = mvfTrenchByIdRef.current || {};
-            const committedPartIds = new Set((mvfCommittedTrenchPartsRef.current || []).map((p) => String(p?.id || '')));
+            const isFibreMode = String(activeMode?.key || '').toUpperCase() === 'FIB';
 
             if (isRightClick) {
               // Unselect PARTS within the box (do not touch committed).
@@ -2455,14 +2495,16 @@ export default function BaseModule({
                     remainIntervals.forEach(([a, b]) => {
                       const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: a, endM: b });
                       if (!coords || coords.length < 2) return;
+                      const suffix = p?.segmentKey ? `:seg:${String(p.segmentKey)}` : '';
                       out.push({
                         ...p,
-                        id: `${fid}:${lineIndex}:${a.toFixed(2)}-${b.toFixed(2)}`,
+                        id: `${fid}:${lineIndex}:${a.toFixed(2)}-${b.toFixed(2)}${suffix}`,
                         lineIndex,
                         startM: a,
                         endM: b,
                         coords,
                         meters: Math.max(0, b - a),
+                        metersMultiplier: typeof p?.metersMultiplier === 'number' ? p.metersMultiplier : (p?.source === 'segment' ? 1 : mvfCircuitsMultiplier),
                       });
                     });
                   });
@@ -2470,63 +2512,127 @@ export default function BaseModule({
                 return out;
               });
             } else {
-              // Select ONLY the part of trench lines inside the box
-              const toAdd = [];
+              // Require an active "current segment" to be chosen before selecting trench parts.
+              // IMPORTANT: never return early (we must still clean up the selection rectangle + drag state).
+              const rawSegKey = String(mvfCurrentSegmentKeyRef.current || '');
+              const segKey = isFibreMode ? rawSegKey : (rawSegKey || '__FREE__');
+              const doneSet = mvfDoneSegmentKeysRef.current || new Set();
+              if (!isFibreMode || (isFibreMode && segKey && segKey !== '__FREE__')) {
+                // If segment is DONE, ignore further box selection for that segment.
+                if (segKey && segKey !== '__FREE__' && doneSet.has(segKey)) {
+                  // no-op
+                } else {
+                // Select ONLY the part of trench lines inside the box
+                const toAdd = [];
 
-              // Build coverage intervals per (fid,lineIndex) from already selected + committed parts
-              const coveredIntervalsByKey = new Map(); // key -> [[a,b],...]
-              const addCovered = (p) => {
-                const fid = String(p?.fid || '');
-                const lineIndex = Number(p?.lineIndex);
-                const a = Number(p?.startM);
-                const b = Number(p?.endM);
-                if (!fid || !Number.isFinite(lineIndex) || !Number.isFinite(a) || !Number.isFinite(b)) return;
-                const lo = Math.min(a, b);
-                const hi = Math.max(a, b);
-                if (!(hi > lo)) return;
-                const key = `${fid}:${lineIndex}`;
-                if (!coveredIntervalsByKey.has(key)) coveredIntervalsByKey.set(key, []);
-                coveredIntervalsByKey.get(key).push([lo, hi]);
-              };
-              (mvfSelectedTrenchPartsRef.current || []).forEach(addCovered);
-              (mvfCommittedTrenchPartsRef.current || []).forEach(addCovered);
+                const segScale =
+                  segKey && segKey !== '__FREE__' && typeof mvfSegmentScaleByKeyRef.current?.[segKey] === 'number'
+                    ? mvfSegmentScaleByKeyRef.current[segKey]
+                    : mvfCircuitsMultiplier;
 
-              Object.keys(byId).forEach((fid) => {
-                const layer = byId[fid];
-                if (!layer || typeof layer.getBounds !== 'function' || typeof layer.getLatLngs !== 'function') return;
-                try {
-                  const lb = layer.getBounds();
-                  if (!lb || !bounds.intersects(lb)) return;
-                } catch (_e) {
-                  void _e;
-                  return;
-                }
+                const committedPartIds = new Set(
+                  (mvfCommittedTrenchPartsRef.current || [])
+                    .filter((p) => String(p?.segmentKey || '') === String(segKey))
+                    .map((p) => String(p?.id || ''))
+                );
 
-                const lines = asLineStrings(layer.getLatLngs());
-                lines.forEach((lineLL, lineIndex) => {
-                  const key = `${fid}:${lineIndex}`;
-                  const coveredMerged = mergeIntervals(coveredIntervalsByKey.get(key) || []);
-                  const res = computeNewPartsForBox({
-                    L,
-                    map,
-                    bounds,
-                    fid,
-                    lineIndex,
-                    lineLatLngs: lineLL,
-                    coveredIntervals: coveredMerged,
-                    committedPartIds,
-                    minMeters: 0.5,
-                    minSliverMeters: 0.2,
-                  });
-                  if (res?.parts?.length) {
-                    toAdd.push(...res.parts);
-                    coveredIntervalsByKey.set(key, res.coveredIntervals || coveredMerged);
+                // Allowed intervals: if a real segment is selected, box selection only applies on that segment route.
+                // MV mode can still select without picking a segment (segKey === '__FREE__' => unrestricted).
+                const allowedMap =
+                  segKey && segKey !== '__FREE__'
+                    ? (mvfRouteIntervalsBySegmentKeyRef.current?.[segKey] || null)
+                    : null;
+
+                const intersectIntervals = (aList, bList) => {
+                  const out = [];
+                  let i = 0, j = 0;
+                  while (i < aList.length && j < bList.length) {
+                    const a = aList[i];
+                    const b = bList[j];
+                    const lo = Math.max(a[0], b[0]);
+                    const hi = Math.min(a[1], b[1]);
+                    if (hi > lo) out.push([lo, hi]);
+                    if (a[1] < b[1]) i++;
+                    else j++;
                   }
-                });
-              });
+                  return out;
+                };
 
-              if (toAdd.length > 0) {
-                setMvfSelectedTrenchParts((prev) => [...(prev || []), ...toAdd]);
+                // Coverage (idempotent) only within this segment key
+                const coveredIntervalsByKey = new Map(); // fid:lineIndex -> merged intervals
+                const addCovered = (p) => {
+                  if (String(p?.segmentKey || '') !== String(segKey)) return;
+                  const fid = String(p?.fid || '');
+                  const lineIndex = Number(p?.lineIndex);
+                  const a = Number(p?.startM);
+                  const b = Number(p?.endM);
+                  if (!fid || !Number.isFinite(lineIndex) || !Number.isFinite(a) || !Number.isFinite(b)) return;
+                  const lo = Math.min(a, b);
+                  const hi = Math.max(a, b);
+                  if (!(hi > lo)) return;
+                  const key = `${fid}:${lineIndex}`;
+                  if (!coveredIntervalsByKey.has(key)) coveredIntervalsByKey.set(key, []);
+                  coveredIntervalsByKey.get(key).push([lo, hi]);
+                };
+                (mvfSelectedTrenchPartsRef.current || []).forEach(addCovered);
+                (mvfCommittedTrenchPartsRef.current || []).forEach(addCovered);
+                for (const [k, arr] of coveredIntervalsByKey.entries()) coveredIntervalsByKey.set(k, mergeIntervals(arr));
+
+                Object.keys(byId).forEach((fid) => {
+                  const layer = byId[fid];
+                  if (!layer || typeof layer.getBounds !== 'function' || typeof layer.getLatLngs !== 'function') return;
+                  try {
+                    const lb = layer.getBounds();
+                    if (!lb || !bounds.intersects(lb)) return;
+                  } catch (_e) {
+                    void _e;
+                    return;
+                  }
+                  const lines = asLineStrings(layer.getLatLngs());
+                  lines.forEach((lineLL, lineIndex) => {
+                    if (!lineLL || lineLL.length < 2) return;
+                    const key = `${fid}:${lineIndex}`;
+                    let candidates = computeIntervalsInBox({ L, map, bounds, lineLatLngs: lineLL, minMeters: 0.5 });
+                    if (!candidates.length) return;
+                    if (allowedMap) {
+                      const allowed = allowedMap.get(key) || [];
+                      if (!allowed.length) return;
+                      candidates = intersectIntervals(candidates, allowed);
+                      if (!candidates.length) return;
+                    }
+                    let covered = coveredIntervalsByKey.get(key) || [];
+                    const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+                    candidates.forEach(([a, b]) => {
+                      const newInts = subtractInterval([a, b], covered, 0.2);
+                      if (!newInts.length) return;
+                      covered = mergeIntervals([...covered, ...newInts]);
+                      coveredIntervalsByKey.set(key, covered);
+                      newInts.forEach(([x, y]) => {
+                        const id = `${fid}:${lineIndex}:${x.toFixed(2)}-${y.toFixed(2)}:seg:${segKey}`;
+                        if (committedPartIds.has(id)) return;
+                        const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: x, endM: y });
+                        if (!coords || coords.length < 2) return;
+                        toAdd.push({
+                          id,
+                          fid: String(fid),
+                          lineIndex,
+                          startM: x,
+                          endM: y,
+                          coords,
+                          meters: Math.max(0, y - x),
+                          metersMultiplier: segScale,
+                          segmentKey: segKey,
+                          source: 'box',
+                        });
+                      });
+                    });
+                  });
+                });
+
+                if (toAdd.length > 0) {
+                  setMvfSelectedTrenchParts((prev) => [...(prev || []), ...toAdd]);
+                }
+                }
               }
             }
 
@@ -2719,17 +2825,19 @@ export default function BaseModule({
     try { selectedLayer.clearLayers(); } catch (_e) { void _e; }
     try { committedLayer.clearLayers(); } catch (_e) { void _e; }
 
-    // Committed parts (locked)
+            // Committed parts (locked) - completed GREEN
     (mvfCommittedTrenchParts || []).forEach((p) => {
       if (!p?.coords || p.coords.length < 2) return;
-      const line = L.polyline(p.coords, { color: '#16a34a', weight: 4.5, opacity: 0.96, interactive: false });
+              const line = L.polyline(p.coords, { color: '#16a34a', weight: 6.0, opacity: 1.0, interactive: false });
       committedLayer.addLayer(line);
     });
 
-    // Selected (pending) parts (can be unselected by right-click on the green part)
+            // Selected (pending) parts (completed-in-progress): always vivid GREEN
     (mvfSelectedTrenchParts || []).forEach((p) => {
       if (!p?.coords || p.coords.length < 2) return;
-      const line = L.polyline(p.coords, { color: '#22c55e', weight: 4.5, opacity: 0.96, interactive: true });
+      const segKey = String(p?.segmentKey || '');
+      const color = '#22c55e';
+      const line = L.polyline(p.coords, { color: '#00e676', weight: 6.4, opacity: 1.0, interactive: true });
       line._mvfTrenchPartId = p.id;
       line.on('contextmenu', (evt) => {
         try {
@@ -2838,27 +2946,46 @@ export default function BaseModule({
       }, 0)
     : 0;
 
-  const MVF_CIRCUITS = 3;
-
-  const mvfSelectedPartMeters = isMVF
-    ? (mvfSelectedTrenchParts || []).reduce((sum, p) => sum + (Number(p?.meters) || 0), 0)
+  const mvfSelectedCableMeters = isMVF
+    ? (mvfSelectedTrenchParts || []).reduce((sum, p) => {
+        const segKey = String(p?.segmentKey || '');
+        if (segKey && mvfDoneSegmentKeysRef.current?.has?.(segKey)) return sum; // done segments count via CSV length
+        const m = Number(p?.meters) || 0; // trench meters
+        const mult =
+          typeof p?.metersMultiplier === 'number' && Number.isFinite(p.metersMultiplier)
+            ? p.metersMultiplier
+            : mvfCircuitsMultiplier;
+        return sum + m * mult;
+      }, 0)
     : 0;
-  const mvfCommittedPartMeters = isMVF
-    ? (mvfCommittedTrenchParts || []).reduce((sum, p) => sum + (Number(p?.meters) || 0), 0)
+  const mvfCommittedCableMeters = isMVF
+    ? (mvfCommittedTrenchParts || []).reduce((sum, p) => {
+        const segKey = String(p?.segmentKey || '');
+        if (segKey && mvfDoneSegmentKeysRef.current?.has?.(segKey)) return sum; // done segments count via CSV length
+        const m = Number(p?.meters) || 0;
+        const mult =
+          typeof p?.metersMultiplier === 'number' && Number.isFinite(p.metersMultiplier)
+            ? p.metersMultiplier
+            : mvfCircuitsMultiplier;
+        return sum + m * mult;
+      }, 0)
     : 0;
-  const mvfMarkedTrenchCableMeters = (mvfSelectedPartMeters + mvfCommittedPartMeters) * MVF_CIRCUITS;
-  const mvfSelectedCableMeters = mvfSelectedPartMeters * MVF_CIRCUITS;
+  const mvfDoneCableMeters = isMVF
+    ? (mvfSegments || []).reduce((sum, s) => (mvfDoneSegmentKeys.has(s.key) ? sum + (Number(s.length) || 0) : sum), 0)
+    : 0;
 
   // MVF Total must come from CSV (already represents 3 circuits); completed comes from selected trench meters * 3.
   const overallTotal = isMVF ? totalPlus : ((isLV || useSimpleCounters) ? totalPlus : (totalPlus + totalMinus));
-  const completedTotal = isLV ? lvCompletedLength : (isMVF ? mvfMarkedTrenchCableMeters : (completedPlus + completedMinus));
+  const completedTotal = isLV
+    ? lvCompletedLength
+    : (isMVF ? (mvfSelectedCableMeters + mvfCommittedCableMeters + mvfDoneCableMeters) : (completedPlus + completedMinus));
   const completedPct = overallTotal > 0 ? (completedTotal / overallTotal) * 100 : 0;
   const remainingPlus = Math.max(0, totalPlus - completedPlus);
   const remainingMinus = Math.max(0, totalMinus - completedMinus);
   const remainingTotal = Math.max(0, overallTotal - completedTotal);
 
   const workSelectionCount = isLV ? lvCompletedInvIds.size : (isMVF ? (mvfSelectedTrenchParts?.length || 0) : selectedPolygons.size);
-  const workAmount = isMVF ? mvfSelectedCableMeters : completedTotal; // MVF: selected trench meters * 3 circuits
+  const workAmount = isMVF ? mvfSelectedCableMeters : completedTotal; // MVF: pending selected cable meters (scaled)
 
   const [dwgUrl, setDwgUrl] = useState('');
   useEffect(() => {
@@ -3032,18 +3159,26 @@ export default function BaseModule({
             <div className="max-h-[260px] overflow-y-auto p-2">
               {mvfSegments.map((s) => {
                 const active = mvfActiveSegmentKeys.has(s.key);
+                const done = mvfDoneSegmentKeys.has(s.key);
+                const current = String(mvfCurrentSegmentKey || '') === String(s.key || '');
+                const segColor = mvfColorOfSegment(s.key);
                 return (
                   <div
                     key={s.key}
                     className={`mb-2 flex w-full items-center justify-between border px-2 py-2 text-left ${
-                      active
-                        ? 'border-emerald-600 bg-emerald-200 ring-2 ring-emerald-500 shadow-[0_0_0_1px_rgba(16,185,129,0.65)]'
-                        : 'border-slate-200 bg-white hover:bg-slate-50'
+                      done
+                        ? 'border-emerald-600 bg-emerald-100'
+                        : active
+                          ? 'border-slate-300 bg-slate-50 animate-pulse'
+                          : 'border-slate-200 bg-white hover:bg-slate-50'
                     }`}
                   >
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
+                        const ck = String(s.key || '');
+                        mvfCurrentSegmentKeyRef.current = ck; // immediate for box handler
+                        setMvfCurrentSegmentKey(ck);
                         setMvfActiveSegmentKeys((prev) => {
                           // If this segment route was already submitted (committed), don't allow recounting.
                           try {
@@ -3057,12 +3192,17 @@ export default function BaseModule({
                           if (next.has(s.key)) next.delete(s.key);
                           else next.add(s.key);
                           return next;
-                        })
-                      }
+                        });
+                      }}
                       className="flex min-w-0 flex-1 items-center gap-2 pr-2 text-left"
-                      title={active ? `${s.label} (hide highlight)` : `${s.label} (highlight)`}
+                      title={done ? `${s.label} (DONE)` : active ? `${s.label} (selected)` : `${s.label} (select)`}
                       aria-pressed={active}
                     >
+                      <span
+                        className={`inline-block h-3 w-3 border ${current ? 'animate-pulse' : ''}`}
+                        style={{ background: segColor, borderColor: segColor }}
+                        aria-hidden="true"
+                      />
                       <span className={`min-w-0 truncate text-[13px] font-semibold ${active ? 'text-emerald-900' : 'text-slate-800'}`}>
                         {s.label}
                       </span>
@@ -3070,8 +3210,58 @@ export default function BaseModule({
 
                     <div className="flex flex-shrink-0 items-center gap-2">
                       <span className={`text-[13px] font-bold tabular-nums ${active ? 'text-emerald-900' : 'text-slate-600'}`}>
-                        {`${Math.round(Number(s.length || 0) / 3)}*3`}
+                        {mvfCircuitsMultiplier > 1
+                          ? `${Math.round(Number(s.length || 0) / mvfCircuitsMultiplier)}*${mvfCircuitsMultiplier}`
+                          : `${Math.round(Number(s.length || 0))}`}
                       </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const key = String(s.key || '');
+                          if (!key) return;
+                          // Make sure the segment is visible/active when toggling Done.
+                          mvfCurrentSegmentKeyRef.current = key;
+                          setMvfCurrentSegmentKey(key);
+                          setMvfActiveSegmentKeys((prev) => {
+                            const next = new Set(prev);
+                            next.add(key);
+                            return next;
+                          });
+                          setMvfDoneSegmentKeys((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(key)) next.delete(key);
+                            else next.add(key);
+                            return next;
+                          });
+                          // When marking done: lock current selected parts for this segment by moving them to committed.
+                          if (!done) {
+                            setMvfCommittedTrenchParts((prev) => {
+                              const base = prev || [];
+                              const add = (mvfSelectedTrenchPartsRef.current || []).filter((p) => String(p?.segmentKey || '') === key);
+                              if (!add.length) return base;
+                              const seen = new Set(base.map((p) => String(p?.id || '')));
+                              const out = [...base];
+                              add.forEach((p) => {
+                                const id = String(p?.id || '');
+                                if (!id || seen.has(id)) return;
+                                seen.add(id);
+                                out.push(p);
+                              });
+                              return out;
+                            });
+                            setMvfSelectedTrenchParts((prev) => (prev || []).filter((p) => String(p?.segmentKey || '') !== key));
+                          }
+                        }}
+                        className={`inline-flex h-6 w-6 items-center justify-center border text-[12px] font-black leading-none ${
+                          done ? 'border-emerald-600 bg-white text-emerald-600' : 'border-slate-300 bg-white text-transparent hover:bg-slate-100'
+                        }`}
+                        title="Done"
+                        aria-pressed={done}
+                        aria-label={done ? `Undone ${s.label}` : `Done ${s.label}`}
+                      >
+                        {done ? '✓' : ''}
+                      </button>
                     </div>
                   </div>
                 );
@@ -3086,10 +3276,7 @@ export default function BaseModule({
             <div className="text-base font-black uppercase tracking-wide text-white">Legend</div>
             <div className="mt-2 border-2 border-slate-700 bg-slate-800 px-3 py-2">
               <div className="flex items-center gap-2">
-                <span
-                  className={`h-3 w-3 border-2 ${isMVF ? 'border-amber-300 bg-amber-300' : 'border-white bg-transparent'}`}
-                  aria-hidden="true"
-                />
+                <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
                 <span className="text-[11px] font-bold uppercase tracking-wide text-white">Uncompleted</span>
               </div>
               <div className="mt-2 flex items-center gap-2">
@@ -3290,7 +3477,7 @@ export default function BaseModule({
           if (isMVF) {
             const toCommitParts = mvfSelectedTrenchPartsRef.current || [];
             if (toCommitParts.length > 0 && recordDate) {
-              const key = `cew:mvf:trench_parts_committed:${recordDate}`;
+              const key = `${mvfStoragePrefix}:trench_parts_committed:${recordDate}`;
               try {
                 const raw = localStorage.getItem(key);
                 const arr = raw ? JSON.parse(raw) : [];
@@ -3313,6 +3500,10 @@ export default function BaseModule({
                     endM: Number.isFinite(Number(p?.endM)) ? Number(p.endM) : null,
                     source: p?.source || null,
                     segmentKey: p?.segmentKey ? String(p.segmentKey) : null,
+                    metersMultiplier:
+                      typeof p?.metersMultiplier === 'number' && Number.isFinite(p.metersMultiplier)
+                        ? p.metersMultiplier
+                        : null,
                     coords,
                     meters: Number(p?.meters) || 0,
                   });

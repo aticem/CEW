@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import DCModule from './modules/DCModule.jsx';
 import LVModule from './modules/LVModule.jsx';
 import MVFiberModule from './modules/MVFiberModule.jsx';
+import FibreModule from './modules/FibreModule.jsx';
 
 const MODULES = {
   DC: { key: 'DC', label: 'DC CABLE PULLING PROGRESS', Component: DCModule },
   LV: { key: 'LV', label: 'LV CABLE PULLING PROGRESS', Component: LVModule },
   MVF: { key: 'MVF', label: 'MV+FIBER PULLING PROGRESS', Component: MVFiberModule },
+  FIB: { key: 'FIB', label: 'FIBRE PULLING PROGRESS', Component: FibreModule },
 };
 
 export default function App() {
