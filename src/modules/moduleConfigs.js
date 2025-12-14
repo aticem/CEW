@@ -134,4 +134,60 @@ export const FIBRE_MODULE_CONFIG = {
   ],
 };
 
+export const MC4_MODULE_CONFIG = {
+  key: 'MC4',
+  label: 'MC4 INSTALLATION',
+  // Files live in: public/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/
+  csvFormat: 'mc4_strings',
+  csvPath: '/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/dc_strings.csv',
+  linkPath: '/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/link',
+  // Spec: CSV contains 9056 strings -> total endpoints = 9056 * 2 = 18112
+  mc4DefaultStrings: 9056,
+  // Render inv_id points as LV-style text plates (visual only; not clickable completion).
+  invIdLabelMode: true,
+  // Match LV inv_id appearance
+  invIdTextScale: 1.2,
+  invIdTextBaseSize: 16,
+  invIdTextStyle: '400',
+  invIdTextMinFontSize: 10,
+  invIdTextMaxFontSize: 18,
+  invIdTextRefZoom: 20,
+  invIdTextStrokeColor: 'rgba(0,0,0,0.65)',
+  invIdTextStrokeWidthFactor: 1.0,
+  invIdTextBgColor: 'rgba(11,18,32,0.86)',
+  invIdTextBgPaddingX: 5,
+  invIdTextBgPaddingY: 2,
+  invIdTextBgStrokeColor: 'rgba(255,255,255,0.35)',
+  invIdTextBgStrokeWidth: 1,
+  invIdTextBgCornerRadius: 0,
+  invIdTextMinTextZoom: 16,
+  invIdTextMinBgZoom: 18,
+  // For MC4: do NOT render string_text at all.
+  stringTextVisibility: 'none',
+  stringTextToggle: false,
+  stringTextDefaultOn: false,
+  geojsonFiles: [
+    {
+      url: '/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/full.geojson',
+      name: 'full',
+      color: '#2563eb',
+      fillColor: '#3b82f6',
+    },
+    {
+      url: '/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/inv_id.geojson',
+      name: 'inv_id',
+      color: '#16a34a',
+      fillColor: '#22c55e',
+    },
+    {
+      url: '/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/lv_box.geojson',
+      name: 'lv_box',
+      color: '#eab308',
+      fillColor: '#facc15',
+      weight: 3,
+      fillOpacity: 0.6,
+    },
+  ],
+};
+
 

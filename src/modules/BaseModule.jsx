@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import '../App.css';
@@ -256,6 +256,7 @@ export default function BaseModule({
   const isLV = String(activeMode?.key || '').toUpperCase() === 'LV';
   // Treat any module with mvf-style CSV/logic as MVF-mode (e.g., MV + FIBRE modules).
   const isMVF = String(activeMode?.csvFormat || '').toLowerCase() === 'mvf';
+  const isMC4 = String(activeMode?.key || '').toUpperCase() === 'MC4';
   const mvfCircuitsMultiplier =
     typeof activeMode?.circuitsMultiplier === 'number' && Number.isFinite(activeMode.circuitsMultiplier)
       ? activeMode.circuitsMultiplier
@@ -347,6 +348,7 @@ export default function BaseModule({
   }, [_customPanelLogic, moduleName, activeMode]);
 
   const mapRef = useRef(null);
+  const [mapReady, setMapReady] = useState(false);
   const stringTextRendererRef = useRef(null); // dedicated canvas renderer for string_text to avoid ghosting
   const layersRef = useRef([]);
   const polygonIdCounter = useRef(0); // Counter for unique polygon IDs
@@ -503,6 +505,153 @@ export default function BaseModule({
     }
   }, [isLV, lvStorageKey, lvCompletedInvIds]);
 
+  // MC4: panel-end progress tracking (two ends per panel: left/right)
+  const MC4_PANEL_STATES = {
+    NONE: null,
+    MC4: 'mc4',
+    TERMINATED: 'terminated',
+  };
+  // MC4 selection mode: 'mc4' or 'termination' - determines what type of work is being done
+  const [mc4SelectionMode, setMc4SelectionMode] = useState(null); // null | 'mc4' | 'termination'
+  const mc4SelectionModeRef = useRef(mc4SelectionMode);
+  useEffect(() => {
+    mc4SelectionModeRef.current = mc4SelectionMode;
+  }, [mc4SelectionMode]);
+
+  // MC4: default to MC4 selection mode so selection always works (user can switch to termination)
+  useEffect(() => {
+    if (!isMC4) return;
+    if (!mc4SelectionModeRef.current) {
+      setMc4SelectionMode('mc4');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMC4]);
+  const mc4TodayYmd = getTodayYmd();
+  const mc4PanelStatesStorageKey = `cew:mc4:panel_states:${mc4TodayYmd}`;
+  const [mc4PanelStates, setMc4PanelStates] = useState(() => ({})); // { [panelId]: { left, right } }
+  const mc4PanelStatesRef = useRef(mc4PanelStates);
+  const [mc4TotalStringsCsv, setMc4TotalStringsCsv] = useState(null); // number | null
+  const mc4HistoryRef = useRef({ actions: [], index: -1 });
+  const [mc4HistoryTick, setMc4HistoryTick] = useState(0);
+  const mc4EndsLayerRef = useRef(null); // L.LayerGroup
+
+  useEffect(() => {
+    mc4PanelStatesRef.current = mc4PanelStates;
+  }, [mc4PanelStates]);
+
+  const mc4GetPanelState = useCallback((panelId) => {
+    const s = mc4PanelStatesRef.current?.[panelId];
+    return s && typeof s === 'object' ? { left: s.left ?? null, right: s.right ?? null } : { left: null, right: null };
+  }, []);
+
+  // mc4Cycle: cycle through states based on current selection mode
+  const mc4Cycle = useCallback((cur) => {
+    if (mc4SelectionMode === 'mc4') {
+      // MC4 mode: toggle between NONE and MC4 (blue)
+      if (cur == null) return MC4_PANEL_STATES.MC4;
+      if (cur === MC4_PANEL_STATES.MC4) return MC4_PANEL_STATES.NONE;
+      // If already terminated, can't change in MC4 mode
+      return cur;
+    } else if (mc4SelectionMode === 'termination') {
+      // Termination mode: MC4 -> TERMINATED, or toggle TERMINATED off
+      if (cur === MC4_PANEL_STATES.MC4) return MC4_PANEL_STATES.TERMINATED;
+      if (cur === MC4_PANEL_STATES.TERMINATED) return MC4_PANEL_STATES.MC4; // back to MC4, not NONE
+      // Can't terminate if not MC4 first
+      return cur;
+    }
+    // No mode selected - default cycle
+    if (cur == null) return MC4_PANEL_STATES.MC4;
+    if (cur === MC4_PANEL_STATES.MC4) return MC4_PANEL_STATES.TERMINATED;
+    return MC4_PANEL_STATES.NONE;
+  }, [mc4SelectionMode]);
+
+  // mc4ForwardOnly: for box selection - only advance state, never go back
+  const mc4ForwardOnly = useCallback((cur) => {
+    if (mc4SelectionMode === 'mc4') {
+      // MC4 mode: set to MC4 (blue) if not already
+      if (cur == null) return MC4_PANEL_STATES.MC4;
+      return cur; // Don't change if already MC4 or TERMINATED
+    } else if (mc4SelectionMode === 'termination') {
+      // Termination mode: advance to TERMINATED if currently MC4
+      if (cur === MC4_PANEL_STATES.MC4) return MC4_PANEL_STATES.TERMINATED;
+      if (cur === MC4_PANEL_STATES.TERMINATED) return MC4_PANEL_STATES.TERMINATED;
+      // Can't terminate if not MC4 first - leave as is
+      return cur;
+    }
+    // No mode selected - default forward
+    if (cur == null) return MC4_PANEL_STATES.MC4;
+    if (cur === MC4_PANEL_STATES.MC4) return MC4_PANEL_STATES.TERMINATED;
+    return MC4_PANEL_STATES.TERMINATED;
+  }, [mc4SelectionMode]);
+
+  const mc4ApplyAction = useCallback((action, direction) => {
+    if (!action?.changes?.length) return;
+    setMc4PanelStates((prev) => {
+      const out = { ...(prev || {}) };
+      action.changes.forEach((c) => {
+        if (!c?.id) return;
+        const v = direction === 'undo' ? c.prev : c.next;
+        if (!v || (v.left == null && v.right == null)) delete out[c.id];
+        else out[c.id] = { left: v.left ?? null, right: v.right ?? null };
+      });
+      return out;
+    });
+  }, []);
+
+  const mc4PushHistory = useCallback((changes) => {
+    if (!changes?.length) return;
+    const h = mc4HistoryRef.current;
+    const nextActions = h.actions.slice(0, h.index + 1);
+    nextActions.push({ changes, ts: Date.now() });
+    h.actions = nextActions.slice(-80);
+    h.index = h.actions.length - 1;
+    setMc4HistoryTick((t) => t + 1);
+  }, []);
+
+  const mc4CanUndo = isMC4 && mc4HistoryRef.current.index >= 0;
+  const mc4CanRedo = isMC4 && mc4HistoryRef.current.index < (mc4HistoryRef.current.actions.length - 1);
+  const mc4Undo = useCallback(() => {
+    const h = mc4HistoryRef.current;
+    if (h.index < 0) return;
+    const action = h.actions[h.index];
+    mc4ApplyAction(action, 'undo');
+    h.index -= 1;
+    setMc4HistoryTick((t) => t + 1);
+  }, [mc4ApplyAction]);
+
+  const mc4Redo = useCallback(() => {
+    const h = mc4HistoryRef.current;
+    if (h.index >= h.actions.length - 1) return;
+    const action = h.actions[h.index + 1];
+    mc4ApplyAction(action, 'redo');
+    h.index += 1;
+    setMc4HistoryTick((t) => t + 1);
+  }, [mc4ApplyAction]);
+
+  useEffect(() => {
+    if (!isMC4) return;
+    try {
+      const raw = localStorage.getItem(mc4PanelStatesStorageKey);
+      const obj = raw ? JSON.parse(raw) : {};
+      if (obj && typeof obj === 'object') setMc4PanelStates(obj);
+      else setMc4PanelStates({});
+    } catch (_e) {
+      void _e;
+      setMc4PanelStates({});
+    }
+    mc4HistoryRef.current = { actions: [], index: -1 };
+    setMc4HistoryTick((t) => t + 1);
+  }, [isMC4, mc4PanelStatesStorageKey]);
+
+  useEffect(() => {
+    if (!isMC4) return;
+    try {
+      localStorage.setItem(mc4PanelStatesStorageKey, JSON.stringify(mc4PanelStates || {}));
+    } catch (_e) {
+      void _e;
+    }
+  }, [isMC4, mc4PanelStatesStorageKey, mc4PanelStates]);
+
   // MVF: daily completion tracking for segments (click in panel to mark completed)
   const mvfTodayYmd = getTodayYmd();
   const mvfStoragePrefix = `cew:${String(activeMode?.key || 'MVF').toLowerCase()}`;
@@ -657,6 +806,99 @@ export default function BaseModule({
     mvfPrevSelectedTrenchRef.current = new Set();
   }, [isMVF]);
 
+  // MC4: render panel end-status markers (blue=mc4, green=terminated)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!isMC4) {
+      if (mc4EndsLayerRef.current) {
+        try { mc4EndsLayerRef.current.remove(); } catch (_e) { void _e; }
+      }
+      mc4EndsLayerRef.current = null;
+      return;
+    }
+
+    let layer = mc4EndsLayerRef.current;
+    if (!layer) {
+      // Create a custom pane for MC4 markers that doesn't capture mouse events
+      if (!map.getPane('mc4markers')) {
+        const pane = map.createPane('mc4markers');
+        pane.style.pointerEvents = 'none';
+        pane.style.zIndex = '650'; // Above polygons but below popups
+      }
+      layer = L.layerGroup({ pane: 'mc4markers' });
+      mc4EndsLayerRef.current = layer;
+      layer.addTo(map);
+    }
+    layer.clearLayers();
+
+    const states = mc4PanelStatesRef.current || {};
+    const panels = polygonById.current || {};
+    
+    // Zoom-based radius: scale markers based on zoom level (always visible)
+    const zoom = map.getZoom();
+    const baseRadius = 4;
+    // Scale radius based on zoom (smaller when zoomed out, larger when zoomed in)
+    const radius = Math.max(1.5, Math.min(8, baseRadius * Math.pow(1.2, zoom - 20)));
+    
+    const mk = (pos, st) => {
+      const isMc4 = st === MC4_PANEL_STATES.MC4;
+      const isTerm = st === MC4_PANEL_STATES.TERMINATED;
+      if (!isMc4 && !isTerm) return null; // Don't create marker for null state
+      const fill = isMc4 ? '#0066cc' : '#00aa00';
+      const stroke = isMc4 ? '#004499' : '#007700';
+      return L.circleMarker(pos, {
+        radius: radius,
+        color: stroke,
+        weight: 1.5,
+        fillColor: fill,
+        fillOpacity: 0.9,
+        opacity: 1,
+        interactive: false,
+        pane: 'mc4markers', // Use custom pane that doesn't capture clicks
+      });
+    };
+
+    let markersAdded = 0;
+    Object.keys(panels).forEach((id) => {
+      const panel = panels[id];
+      // Lazy compute mc4Ends if not yet calculated
+      if (!panel.mc4Ends && typeof panel.computeEnds === 'function') {
+        try {
+          const ends = panel.computeEnds();
+          if (ends) panel.mc4Ends = ends;
+        } catch (_e) {
+          // Map still not ready, skip
+        }
+      }
+      const ends = panel.mc4Ends;
+      if (!ends?.leftPos || !ends?.rightPos) return;
+      const st = states[id] || { left: null, right: null };
+      // Only add marker for ends that have a state (mc4 or terminated)
+      if (st.left) {
+        const m = mk(ends.leftPos, st.left);
+        if (m) { layer.addLayer(m); markersAdded++; }
+      }
+      if (st.right) {
+        const m = mk(ends.rightPos, st.right);
+        if (m) { layer.addLayer(m); markersAdded++; }
+      }
+    });
+  }, [isMC4, mc4HistoryTick, mc4PanelStates]);
+
+  // MC4: update markers on zoom change (size/visibility depends on zoom)
+  useEffect(() => {
+    if (!isMC4) return;
+    const map = mapRef.current;
+    if (!map) return;
+    const onZoom = () => {
+      // Force re-render of markers by triggering state update
+      setMc4HistoryTick((t) => t + 0.001);
+    };
+    map.on('zoomend', onZoom);
+    return () => { map.off('zoomend', onZoom); };
+  }, [isMC4]);
+
   // LV: keep inv_id label colors in sync with completion state without reloading GeoJSON.
   useEffect(() => {
     if (!isLV) return;
@@ -808,6 +1050,12 @@ export default function BaseModule({
           const lbl = pool[i];
           if (lbl && layer.hasLayer(lbl)) layer.removeLayer(lbl);
         }
+        // Clear the label canvas too (prevents stale glyphs lingering for a frame)
+        try {
+          stringTextRendererRef.current?._clear?.();
+        } catch (_e) {
+          void _e;
+        }
         stringTextLabelActiveCountRef.current = 0;
         lastStringLabelKeyRef.current = '';
         return;
@@ -946,6 +1194,27 @@ export default function BaseModule({
     stringTextMaxFontSizeCfg,
     stringTextRefZoomCfg,
   ]);
+
+  // Instant clear (no RAF delay) for cursor-leave / polygon-gate disable.
+  const clearStringTextLabelsNow = useCallback(() => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    const layer = stringTextLayerRef.current;
+    if (!layer) return;
+    const pool = stringTextLabelPoolRef.current;
+    const prevActive = stringTextLabelActiveCountRef.current;
+    for (let i = 0; i < prevActive; i++) {
+      const lbl = pool[i];
+      if (lbl && layer.hasLayer(lbl)) layer.removeLayer(lbl);
+    }
+    try {
+      stringTextRendererRef.current?._clear?.();
+    } catch (_e) {
+      void _e;
+    }
+    stringTextLabelActiveCountRef.current = 0;
+    lastStringLabelKeyRef.current = '';
+  }, []);
 
   // When the effective visibility changes (TEXT ON/OFF or module config), immediately refresh labels.
   useEffect(() => {
@@ -1102,12 +1371,14 @@ export default function BaseModule({
 
         if (isUndo) {
           e.preventDefault();
-          undoNotes();
+          if (isMC4 && !noteMode) mc4Undo();
+          else undoNotes();
           return;
         }
         if (isRedo) {
           e.preventDefault();
-          redoNotes();
+          if (isMC4 && !noteMode) mc4Redo();
+          else redoNotes();
           return;
         }
       }
@@ -1128,7 +1399,7 @@ export default function BaseModule({
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [noteMode, selectedNotes]);
+  }, [noteMode, selectedNotes, isMC4, mc4Undo, mc4Redo, undoNotes, redoNotes]);
   
   // Create new note at click position (no popup on create)
   const createNote = (latlng) => {
@@ -1216,6 +1487,38 @@ export default function BaseModule({
     fetch(csvPath)
       .then((res) => res.text())
       .then((text) => {
+        // MC4 strings CSV: count unique IDs, used for totals (strings * 2 ends)
+        if (csvFormat === 'mc4_strings') {
+          try {
+            const lines = text.split(/\r?\n/).filter((l) => l && l.trim());
+            if (lines.length <= 1) {
+              setMc4TotalStringsCsv(0);
+            } else {
+              const header = (lines[0] || '').toLowerCase();
+              const hasHeader = header.includes('id') && header.includes('length');
+              const start = hasHeader ? 1 : 0;
+              // IMPORTANT: spec says "CSV contains 9056 strings" => count rows (not unique IDs).
+              // (In the uploaded file each ID appears twice, so unique IDs would be 4528.)
+              const rowCount = Math.max(0, lines.length - start);
+              setMc4TotalStringsCsv(rowCount);
+            }
+          } catch (_e) {
+            void _e;
+            setMc4TotalStringsCsv(null);
+          }
+          // This mode doesn't use lengthData totals.
+          setLengthData({});
+          setTotalPlus(0);
+          setTotalMinus(0);
+          setMvfSegments([]);
+          mvfSegmentLenByKeyRef.current = {};
+          // Reset selection when switching modules (avoids mismatched IDs)
+          setSelectedPolygons(new Set());
+          setCompletedPlus(0);
+          setCompletedMinus(0);
+          return;
+        }
+
         const dict = {}; // id -> {plus: number[], minus: number[]}
 
         if (csvFormat === 'dc') {
@@ -1592,88 +1895,227 @@ export default function BaseModule({
             }),
             
             onEachFeature: (feature, featureLayer) => {
-              if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon' || feature.geometry.type === 'LineString')) {
-                // Assign unique ID to this polygon
-                const uniqueId = `polygon_${polygonIdCounter.current++}`;
-                featureLayer._uniquePolygonId = uniqueId;
-                
-                // Store reference (will be updated with stringId and size later)
-                polygonById.current[uniqueId] = {
-                  layer: featureLayer,
-                  stringId: null,
-                  isSmallTable: false
-                };
-                
-                // Add click events - left click to select
-                featureLayer.on('click', (e) => {
-                  L.DomEvent.stopPropagation(e);
-                  if (noteMode) return;
-                  const polygonId = featureLayer._uniquePolygonId;
-                  if (polygonId) {
-                    // For small tables: select all polygons with same string ID
-                    const polygonInfo = polygonById.current[polygonId];
-                    if (polygonInfo && polygonInfo.stringId && polygonInfo.isSmallTable) {
-                      setSelectedPolygons(prev => {
-                        const next = new Set(prev);
-                        const groupIds = [];
-                        // Find all polygons with same string ID
-                        Object.keys(polygonById.current).forEach(pid => {
-                          const info = polygonById.current[pid];
-                          if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
-                            groupIds.push(pid);
-                          }
-                        });
+              const gType = feature?.geometry?.type;
+              const isPoly = gType === 'Polygon' || gType === 'MultiPolygon';
+              const isLine = gType === 'LineString';
+              // MC4 panel logic only applies to polygons (panels). DC selection can include other shapes.
+              if (!gType || (!isPoly && !(isLine && !isMC4))) return;
 
-                        const allSelected = groupIds.length > 0 && groupIds.every(id => next.has(id));
-                        if (allSelected) {
-                          groupIds.forEach(id => next.delete(id));
-                        } else {
-                          groupIds.forEach(id => next.add(id));
-                        }
-                        return next;
-                      });
-                    } else {
-                      // For large tables: toggle only this polygon
-                      setSelectedPolygons(prev => {
-                        const next = new Set(prev);
-                        if (next.has(polygonId)) next.delete(polygonId);
-                        else next.add(polygonId);
-                        return next;
-                      });
+              // Assign unique ID to this panel/polygon
+              const uniqueId = `polygon_${polygonIdCounter.current++}`;
+              featureLayer._uniquePolygonId = uniqueId;
+
+              // Store reference (will be updated with stringId and size later)
+              polygonById.current[uniqueId] = {
+                layer: featureLayer,
+                stringId: null,
+                isSmallTable: false,
+              };
+
+              // MC4 MODE: click/dblclick change left/right end states
+              if (isMC4 && isPoly) {
+                const safeStop = (evt) => {
+                  try {
+                    const oe = evt?.originalEvent || evt;
+                    if (oe) {
+                      L.DomEvent.stopPropagation(oe);
+                      L.DomEvent.preventDefault(oe);
                     }
+                  } catch (_e) {
+                    void _e;
                   }
-                });
-                
-                featureLayer.on('contextmenu', (e) => {
-                  L.DomEvent.stopPropagation(e);
+                };
+
+                const computeEnds = () => {
+                  const map = mapRef.current;
+                  if (!map || typeof featureLayer.getLatLngs !== 'function') return null;
+                  let ll = featureLayer.getLatLngs();
+                  // Drill down until we have an array of LatLngs
+                  while (Array.isArray(ll) && ll.length && Array.isArray(ll[0])) ll = ll[0];
+                  while (Array.isArray(ll) && ll.length && Array.isArray(ll[0])) ll = ll[0];
+                  const ring = Array.isArray(ll) ? ll : null;
+                  if (!ring || ring.length < 4) return null;
+                  const pts = ring.map((p) => map.latLngToLayerPoint(p));
+                  
+                  // Calculate centroid (center of polygon)
+                  let cx = 0, cy = 0;
+                  pts.forEach((p) => { cx += p.x; cy += p.y; });
+                  cx /= pts.length;
+                  cy /= pts.length;
+                  
+                  const edges = [];
+                  const n = pts.length;
+                  for (let i = 0; i < n; i++) {
+                    const p1 = pts[i];
+                    const p2 = pts[(i + 1) % n];
+                    if (!p1 || !p2) continue;
+                    const len = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+                    edges.push({ p1, p2, len, center: { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 } });
+                  }
+                  if (edges.length < 2) return null;
+                  edges.sort((a, b) => a.len - b.len);
+                  const shortEdges = edges.slice(0, 2);
+                  shortEdges.sort((a, b) => (a.center.x - b.center.x) || (a.center.y - b.center.y));
+                  
+                  // Pull points inward toward centroid (30% of distance to center)
+                  const inwardRatio = 0.3;
+                  const pullInward = (edgeCenter) => {
+                    const dx = cx - edgeCenter.x;
+                    const dy = cy - edgeCenter.y;
+                    return {
+                      x: edgeCenter.x + dx * inwardRatio,
+                      y: edgeCenter.y + dy * inwardRatio
+                    };
+                  };
+                  
+                  const leftPt = pullInward(shortEdges[0].center);
+                  const rightPt = pullInward(shortEdges[1].center);
+                  
+                  const leftPos = map.layerPointToLatLng(L.point(leftPt.x, leftPt.y));
+                  const rightPos = map.layerPointToLatLng(L.point(rightPt.x, rightPt.y));
+                  return { leftPos, rightPos };
+                };
+
+                // Store computeEnds function for lazy evaluation (map may not be ready yet)
+                polygonById.current[uniqueId].computeEnds = computeEnds;
+
+                const sideFromClick = (evt) => {
+                  const map = mapRef.current;
+                  const info = polygonById.current?.[uniqueId];
+                  // Lazy compute ends if needed
+                  if (!info.mc4Ends && typeof info.computeEnds === 'function') {
+                    try { info.mc4Ends = info.computeEnds(); } catch (_e) { /* ignore */ }
+                  }
+                  const ends = info?.mc4Ends;
+                  if (!map || !ends?.leftPos || !ends?.rightPos) return 'left';
+                  const clickPt = map.latLngToLayerPoint(evt.latlng);
+                  const lp = map.latLngToLayerPoint(ends.leftPos);
+                  const rp = map.latLngToLayerPoint(ends.rightPos);
+                  const dl = Math.hypot(clickPt.x - lp.x, clickPt.y - lp.y);
+                  const dr = Math.hypot(clickPt.x - rp.x, clickPt.y - rp.y);
+                  return dl <= dr ? 'left' : 'right';
+                };
+
+                featureLayer.on('click', (evt) => {
+                  safeStop(evt);
                   if (noteMode) return;
-                  const polygonId = featureLayer._uniquePolygonId;
-                  if (polygonId) {
-                    // For small tables: unselect all polygons with same string ID
-                    const polygonInfo = polygonById.current[polygonId];
-                    if (polygonInfo && polygonInfo.stringId && polygonInfo.isSmallTable) {
-                      setSelectedPolygons(prev => {
-                        const next = new Set(prev);
-                        // Find all polygons with same string ID
-                        Object.keys(polygonById.current).forEach(pid => {
-                          const info = polygonById.current[pid];
-                          if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
-                            next.delete(pid);
-                          }
-                        });
-                        return next;
-                      });
-                    } else {
-                      // For large tables: unselect only this polygon
-                      setSelectedPolygons(prev => {
-                        const next = new Set(prev);
-                        next.delete(polygonId);
-                        return next;
-                      });
-                    }
+                  // Require selection mode to be set
+                  const currentMode = mc4SelectionModeRef.current || 'mc4';
+                  const side = sideFromClick(evt);
+                  const prev = mc4GetPanelState(uniqueId);
+                  // Calculate next state based on current mode (using ref to get latest value)
+                  let nextState = prev[side];
+                  if (currentMode === 'mc4') {
+                    // MC4 mode: toggle between NONE and MC4 (blue)
+                    if (nextState == null) nextState = 'mc4';
+                    else if (nextState === 'mc4') nextState = null;
+                    // If already terminated, don't change
+                  } else if (currentMode === 'termination') {
+                    // Termination mode: MC4 -> TERMINATED, or toggle TERMINATED off
+                    if (nextState === 'mc4') nextState = 'terminated';
+                    else if (nextState === 'terminated') nextState = 'mc4'; // back to MC4
+                    // Can't terminate if not MC4 first
                   }
+                  const next = { ...prev, [side]: nextState };
+                  setMc4PanelStates((s) => ({ ...(s || {}), [uniqueId]: next }));
+                  mc4PushHistory([{ id: uniqueId, prev, next }]);
                 });
+
+                featureLayer.on('dblclick', (evt) => {
+                  safeStop(evt);
+                  if (noteMode) return;
+                  const side = sideFromClick(evt);
+                  const prev = mc4GetPanelState(uniqueId);
+                  const next = { ...prev, [side]: MC4_PANEL_STATES.TERMINATED };
+                  setMc4PanelStates((s) => ({ ...(s || {}), [uniqueId]: next }));
+                  mc4PushHistory([{ id: uniqueId, prev, next }]);
+                });
+
+                featureLayer.on('contextmenu', (evt) => {
+                  safeStop(evt);
+                  if (noteMode) return;
+                  const prev = mc4GetPanelState(uniqueId);
+                  const next = { left: null, right: null };
+                  setMc4PanelStates((s) => {
+                    const out = { ...(s || {}) };
+                    delete out[uniqueId];
+                    return out;
+                  });
+                  mc4PushHistory([{ id: uniqueId, prev, next }]);
+                });
+
+                return;
               }
+
+              // DC/LV DEFAULT: Add click events - left click to select
+              featureLayer.on('click', (e) => {
+                L.DomEvent.stopPropagation(e);
+                if (noteMode) return;
+                const polygonId = featureLayer._uniquePolygonId;
+                if (polygonId) {
+                  // For small tables: select all polygons with same string ID
+                  const polygonInfo = polygonById.current[polygonId];
+                  if (polygonInfo && polygonInfo.stringId && polygonInfo.isSmallTable) {
+                    setSelectedPolygons(prev => {
+                      const next = new Set(prev);
+                      const groupIds = [];
+                      // Find all polygons with same string ID
+                      Object.keys(polygonById.current).forEach(pid => {
+                        const info = polygonById.current[pid];
+                        if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
+                          groupIds.push(pid);
+                        }
+                      });
+
+                      const allSelected = groupIds.length > 0 && groupIds.every(id => next.has(id));
+                      if (allSelected) {
+                        groupIds.forEach(id => next.delete(id));
+                      } else {
+                        groupIds.forEach(id => next.add(id));
+                      }
+                      return next;
+                    });
+                  } else {
+                    // For large tables: toggle only this polygon
+                    setSelectedPolygons(prev => {
+                      const next = new Set(prev);
+                      if (next.has(polygonId)) next.delete(polygonId);
+                      else next.add(polygonId);
+                      return next;
+                    });
+                  }
+                }
+              });
+              
+              featureLayer.on('contextmenu', (e) => {
+                L.DomEvent.stopPropagation(e);
+                if (noteMode) return;
+                const polygonId = featureLayer._uniquePolygonId;
+                if (polygonId) {
+                  // For small tables: unselect all polygons with same string ID
+                  const polygonInfo = polygonById.current[polygonId];
+                  if (polygonInfo && polygonInfo.stringId && polygonInfo.isSmallTable) {
+                    setSelectedPolygons(prev => {
+                      const next = new Set(prev);
+                      // Find all polygons with same string ID
+                      Object.keys(polygonById.current).forEach(pid => {
+                        const info = polygonById.current[pid];
+                        if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
+                          next.delete(pid);
+                        }
+                      });
+                      return next;
+                    });
+                  } else {
+                    // For large tables: unselect only this polygon
+                    setSelectedPolygons(prev => {
+                      const next = new Set(prev);
+                      next.delete(polygonId);
+                      return next;
+                    });
+                  }
+                }
+              });
             }
           });
           
@@ -1687,6 +2129,8 @@ export default function BaseModule({
         }
 
         // Standard processing for other GeoJSON files
+        // LV: inv_id labels are clickable (daily completion). Other modules can opt into LV-style label appearance.
+        const invLabelMode = file.name === 'inv_id' && (isLV || activeMode?.invIdLabelMode);
         const invInteractive = isLV && file.name === 'inv_id';
         const mvfTrenchInteractive = isMVF && file.name === 'mv_trench';
         const layer = L.geoJSON(data, {
@@ -1722,7 +2166,7 @@ export default function BaseModule({
                 fillOpacity: 0
               };
             }
-            if (invInteractive) {
+            if (invLabelMode) {
               // inv_id: make more prominent than general drawings
               return {
                 color: 'rgba(255,255,255,0.85)',
@@ -1740,10 +2184,10 @@ export default function BaseModule({
           },
           
           pointToLayer: (feature, latlng) => {
-            if (invInteractive && feature.properties?.text) {
+            if (invLabelMode && feature.properties?.text) {
               const raw = feature.properties.text;
               const invIdNorm = normalizeId(raw);
-              const isDone = lvCompletedInvIdsRef.current?.has(invIdNorm);
+              const isDone = isLV && lvCompletedInvIdsRef.current?.has(invIdNorm);
               const invScale = typeof activeMode?.invIdTextScale === 'number' ? activeMode.invIdTextScale : 1;
               const invBase = typeof activeMode?.invIdTextBaseSize === 'number' ? activeMode.invIdTextBaseSize : 19;
               const invRefZoom = typeof activeMode?.invIdTextRefZoom === 'number' ? activeMode.invIdTextRefZoom : 20;
@@ -1793,27 +2237,29 @@ export default function BaseModule({
                 minTextZoom: invMinTextZoom,
                 minBgZoom: invMinBgZoom,
                 rotation: feature.properties.angle || 0,
-                interactive: true,
+                interactive: isLV,
                 radius
               });
 
               // Toggle completed on click (LV only)
-              label.on('click', (e) => {
-                try {
-                  if (e?.originalEvent) {
-                    L.DomEvent.stopPropagation(e.originalEvent);
-                    L.DomEvent.preventDefault(e.originalEvent);
+              if (isLV) {
+                label.on('click', (e) => {
+                  try {
+                    if (e?.originalEvent) {
+                      L.DomEvent.stopPropagation(e.originalEvent);
+                      L.DomEvent.preventDefault(e.originalEvent);
+                    }
+                  } catch (_e) {
+                    void _e;
                   }
-                } catch (_e) {
-                  void _e;
-                }
-                setLvCompletedInvIds((prev) => {
-                  const next = new Set(prev);
-                  if (next.has(invIdNorm)) next.delete(invIdNorm);
-                  else next.add(invIdNorm);
-                  return next;
+                  setLvCompletedInvIds((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(invIdNorm)) next.delete(invIdNorm);
+                    else next.add(invIdNorm);
+                    return next;
+                  });
                 });
-              });
+              }
 
               lvInvLabelByIdRef.current[invIdNorm] = label;
               return label;
@@ -1954,6 +2400,26 @@ export default function BaseModule({
     // Set bounds first
     if (allBounds.isValid()) {
       mapRef.current.fitBounds(allBounds, { padding: [20, 20] });
+    }
+
+    // MC4: Now that map has bounds, compute mc4Ends for all panels
+    if (isMC4) {
+      const panels = polygonById.current || {};
+      let computed = 0;
+      Object.keys(panels).forEach((id) => {
+        const panel = panels[id];
+        if (!panel.mc4Ends && typeof panel.computeEnds === 'function') {
+          try {
+            const ends = panel.computeEnds();
+            if (ends) {
+              panel.mc4Ends = ends;
+              computed++;
+            }
+          } catch (_e) {
+            // Still not ready, will be computed lazily
+          }
+        }
+      });
     }
 
     // Initial label draw + update on view changes (lazy string_text rendering)
@@ -2329,7 +2795,7 @@ export default function BaseModule({
 
   // Box Selection event handlers - left click to select, right click to unselect
   useEffect(() => {
-    if (!mapRef.current) return;
+    if (!mapReady || !mapRef.current) return;
     
     const map = mapRef.current;
     const container = map.getContainer();
@@ -2360,14 +2826,24 @@ export default function BaseModule({
       
       // Reset marker click flag at start of new interaction
       markerClickedRef.current = false;
+
+      // Leaflet can throw here if the map pane isn't fully initialized (or was just torn down during a mode switch).
+      let startLatLng = null;
+      try {
+        if (!map || !map._loaded || !map._mapPane) return;
+        startLatLng = map.mouseEventToLatLng(e);
+      } catch (_e) {
+        void _e;
+        return;
+      }
       
       draggingRef.current = {
-        start: map.mouseEventToLatLng(e),
+        start: startLatLng,
         startPoint: { x: e.clientX, y: e.clientY },
         isRightClick: e.button === 2,
         isDrag: false
       };
-      map.dragging.disable();
+      try { map.dragging?.disable?.(); } catch (_e) { void _e; }
     };
     
     const onMouseMove = (e) => {
@@ -2380,7 +2856,14 @@ export default function BaseModule({
         draggingRef.current.isDrag = true;
       }
       
-      const current = map.mouseEventToLatLng(e);
+      let current = null;
+      try {
+        if (!map || !map._loaded || !map._mapPane) return;
+        current = map.mouseEventToLatLng(e);
+      } catch (_e) {
+        void _e;
+        return;
+      }
       const bounds = L.latLngBounds(draggingRef.current.start, current);
       
       if (boxRectRef.current) {
@@ -2543,6 +3026,25 @@ export default function BaseModule({
                     ? (mvfRouteIntervalsBySegmentKeyRef.current?.[segKey] || null)
                     : null;
 
+                // MV mode: when selecting freely, do NOT add selection over DONE segment routes (green is "completed").
+                const blockedMap = (() => {
+                  if (isFibreMode) return null;
+                  if (segKey !== '__FREE__') return null;
+                  const doneKeys = Array.from(mvfDoneSegmentKeysRef.current || []);
+                  if (doneKeys.length === 0) return null;
+                  const out = new Map(); // fid:lineIndex -> merged [[a,b]]
+                  doneKeys.forEach((dk) => {
+                    const m = mvfRouteIntervalsBySegmentKeyRef.current?.[String(dk)];
+                    if (!m) return;
+                    for (const [lk, arr] of m.entries()) {
+                      if (!out.has(lk)) out.set(lk, []);
+                      out.get(lk).push(...arr);
+                    }
+                  });
+                  for (const [lk, arr] of out.entries()) out.set(lk, mergeIntervals(arr));
+                  return out;
+                })();
+
                 const intersectIntervals = (aList, bList) => {
                   const out = [];
                   let i = 0, j = 0;
@@ -2600,6 +3102,19 @@ export default function BaseModule({
                       candidates = intersectIntervals(candidates, allowed);
                       if (!candidates.length) return;
                     }
+                    if (blockedMap) {
+                      const blocked = blockedMap.get(key) || [];
+                      if (blocked.length) {
+                        // subtract blocked from each candidate interval
+                        const remaining = [];
+                        candidates.forEach((c) => {
+                          const pieces = subtractInterval(c, blocked, 0.2);
+                          remaining.push(...pieces);
+                        });
+                        candidates = mergeIntervals(remaining);
+                        if (!candidates.length) return;
+                      }
+                    }
                     let covered = coveredIntervalsByKey.get(key) || [];
                     const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
                     candidates.forEach(([a, b]) => {
@@ -2638,6 +3153,156 @@ export default function BaseModule({
 
             // MVF segment selections are mapped into trench PARTs now,
             // so partial erase/select via box works automatically (no separate segment-route unselect needed).
+          } else if (isMC4) {
+            // MC4 MODE: Box advance/reset panel-end states (both ends)
+            const ids = [];
+            const panels = polygonById.current || {};
+            const map = mapRef.current;
+
+            const latLngsToLayerPoints = (layer) => {
+              if (!map || !layer || typeof layer.getLatLngs !== 'function') return null;
+              let ll = layer.getLatLngs();
+              // Drill down until we have a ring (array of LatLng)
+              while (Array.isArray(ll) && ll.length && Array.isArray(ll[0])) ll = ll[0];
+              while (Array.isArray(ll) && ll.length && Array.isArray(ll[0])) ll = ll[0];
+              const ring = Array.isArray(ll) ? ll : null;
+              if (!ring || ring.length < 3) return null;
+              const pts = ring.map((p) => map.latLngToLayerPoint(p)).filter(Boolean);
+              if (pts.length < 3) return null;
+              // drop duplicate last point if it equals first
+              const a = pts[0];
+              const z = pts[pts.length - 1];
+              if (a && z && a.x === z.x && a.y === z.y) pts.pop();
+              return pts;
+            };
+
+            const rectPts = (() => {
+              if (!map) return null;
+              const sw = bounds.getSouthWest();
+              const ne = bounds.getNorthEast();
+              const nw = L.latLng(ne.lat, sw.lng);
+              const se = L.latLng(sw.lat, ne.lng);
+              return [
+                map.latLngToLayerPoint(nw),
+                map.latLngToLayerPoint(ne),
+                map.latLngToLayerPoint(se),
+                map.latLngToLayerPoint(sw),
+              ];
+            })();
+
+            const isPointInBox = (p, minX, maxX, minY, maxY) => p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY;
+
+            const isPointInPoly = (pt, poly) => {
+              // Ray casting
+              let inside = false;
+              for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+                const xi = poly[i].x, yi = poly[i].y;
+                const xj = poly[j].x, yj = poly[j].y;
+                const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+                  (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi + 1e-12) + xi);
+                if (intersect) inside = !inside;
+              }
+              return inside;
+            };
+
+            const segIntersects = (p1, p2, q1, q2) => {
+              const orient = (a, b, c) => (b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y);
+              const onSeg = (a, b, c) =>
+                Math.min(a.x, c.x) <= b.x && b.x <= Math.max(a.x, c.x) &&
+                Math.min(a.y, c.y) <= b.y && b.y <= Math.max(a.y, c.y);
+              const o1 = orient(p1, p2, q1);
+              const o2 = orient(p1, p2, q2);
+              const o3 = orient(q1, q2, p1);
+              const o4 = orient(q1, q2, p2);
+              if ((o1 > 0 && o2 < 0 || o1 < 0 && o2 > 0) && (o3 > 0 && o4 < 0 || o3 < 0 && o4 > 0)) return true;
+              if (Math.abs(o1) < 1e-9 && onSeg(p1, q1, p2)) return true;
+              if (Math.abs(o2) < 1e-9 && onSeg(p1, q2, p2)) return true;
+              if (Math.abs(o3) < 1e-9 && onSeg(q1, p1, q2)) return true;
+              if (Math.abs(o4) < 1e-9 && onSeg(q1, p2, q2)) return true;
+              return false;
+            };
+
+            const panelIntersectsSelection = (layer) => {
+              if (!map || !rectPts) return false;
+              const poly = latLngsToLayerPoints(layer);
+              if (!poly) return false;
+
+              const xs = rectPts.map((p) => p.x);
+              const ys = rectPts.map((p) => p.y);
+              const minX = Math.min(...xs), maxX = Math.max(...xs);
+              const minY = Math.min(...ys), maxY = Math.max(...ys);
+
+              // 1) Any panel vertex in selection box
+              if (poly.some((p) => isPointInBox(p, minX, maxX, minY, maxY))) return true;
+              // 2) Any selection corner inside polygon
+              if (rectPts.some((c) => isPointInPoly(c, poly))) return true;
+              // 3) Any edge intersection
+              const rectEdges = [
+                [rectPts[0], rectPts[1]],
+                [rectPts[1], rectPts[2]],
+                [rectPts[2], rectPts[3]],
+                [rectPts[3], rectPts[0]],
+              ];
+              for (let i = 0; i < poly.length; i++) {
+                const a = poly[i];
+                const b = poly[(i + 1) % poly.length];
+                for (let k = 0; k < rectEdges.length; k++) {
+                  const [c, d] = rectEdges[k];
+                  if (segIntersects(a, b, c, d)) return true;
+                }
+              }
+              return false;
+            };
+
+            Object.keys(panels).forEach((pid) => {
+              const info = panels[pid];
+              const layer = info?.layer;
+              if (!layer || typeof layer.getBounds !== 'function') return;
+              try {
+                // Use robust polygon-vs-rect intersection (matches MC4 spec) instead of bounds-only.
+                if (panelIntersectsSelection(layer)) ids.push(pid);
+              } catch (_e) {
+                void _e;
+              }
+            });
+            if (ids.length > 0) {
+              // Calculate next state based on current mode (using ref to get latest value)
+              const currentMode = mc4SelectionModeRef.current || 'mc4';
+              const advanceState = (cur) => {
+                if (currentMode === 'mc4') {
+                  // MC4 mode: set to MC4 (blue) if not already
+                  if (cur == null) return 'mc4';
+                  return cur; // Don't change if already MC4 or TERMINATED
+                } else if (currentMode === 'termination') {
+                  // Termination mode: advance to TERMINATED if currently MC4
+                  if (cur === 'mc4') return 'terminated';
+                  if (cur === 'terminated') return 'terminated';
+                  // Can't terminate if not MC4 first - leave as is
+                  return cur;
+                }
+                // No mode - default forward
+                if (cur == null) return 'mc4';
+                if (cur === 'mc4') return 'terminated';
+                return 'terminated';
+              };
+              const changes = ids.map((pid) => {
+                const prev = mc4GetPanelState(pid);
+                const next = isRightClick
+                  ? { left: null, right: null }
+                  : { left: advanceState(prev.left), right: advanceState(prev.right) };
+                return { id: pid, prev, next };
+              });
+              setMc4PanelStates((s) => {
+                const out = { ...(s || {}) };
+                changes.forEach((c) => {
+                  if (!c?.id) return;
+                  if (isRightClick) delete out[c.id];
+                  else out[c.id] = { left: c.next.left ?? null, right: c.next.right ?? null };
+                });
+                return out;
+              });
+              mc4PushHistory(changes);
+            }
           } else if (isLV) {
           // LV MODE: Box select inv_id labels (daily completion)
             const labels = lvInvLabelByIdRef.current || {};
@@ -2738,7 +3403,8 @@ export default function BaseModule({
       container.removeEventListener('mousemove', onMouseMove);
       container.removeEventListener('mouseup', onMouseUp);
     };
-  }, [isLV, isMVF, stringPoints, noteMode, notes]);
+  // IMPORTANT: include isMC4 (and module key) so drag-selection behavior updates when switching modes.
+  }, [mapReady, activeMode?.key, isLV, isMVF, isMC4, stringPoints, noteMode, notes]);
 
   useEffect(() => {
     mapRef.current = L.map('map', {
@@ -2749,6 +3415,7 @@ export default function BaseModule({
       markerZoomAnimation: false,
       fadeAnimation: false,
     });
+    setMapReady(true);
 
     // Dedicated canvas renderer + pane for string_text labels (prevents ghosting when hiding/showing)
     try {
@@ -2810,8 +3477,22 @@ export default function BaseModule({
         mapRef.current?.off('zoomend moveend', scheduleStringTextLabelUpdate);
       } catch (_e) { void _e; }
       mapRef.current?.remove();
+      mapRef.current = null;
+      setMapReady(false);
     };
   }, []);
+
+  // MC4: disable map double-click zoom so polygon dblclick can be used for TERMINATED instantly.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    try {
+      if (isMC4) map.doubleClickZoom?.disable?.();
+      else map.doubleClickZoom?.enable?.();
+    } catch (_e) {
+      void _e;
+    }
+  }, [isMC4]);
 
   // MVF: render selected/committed trench PART overlays (only the selected portion turns green).
   useEffect(() => {
@@ -2878,6 +3559,7 @@ export default function BaseModule({
         stringLabelsEnabledRef.current = false;
         cursorLabelBoundsRef.current = null;
         cursorPointRef.current = null;
+        clearStringTextLabelsNow();
         scheduleStringTextLabelUpdate(); // ensures nothing is rendered
       }
     };
@@ -2885,6 +3567,7 @@ export default function BaseModule({
       stringLabelsEnabledRef.current = false;
       cursorLabelBoundsRef.current = null;
       cursorPointRef.current = null;
+      clearStringTextLabelsNow(); // instant hide (no ghosting)
       scheduleStringTextLabelUpdate(); // clears active labels
     };
 
@@ -2904,7 +3587,32 @@ export default function BaseModule({
         const sw = map.containerPointToLatLng([p.x - r, p.y + r]);
         const ne = map.containerPointToLatLng([p.x + r, p.y - r]);
         cursorLabelBoundsRef.current = L.latLngBounds(sw, ne);
-        stringLabelsEnabledRef.current = true;
+        // Optional gate: only enable cursor labels when cursor is over a table polygon (MC4 requirement).
+        const requiresPoly = Boolean(activeMode?.stringTextCursorRequiresPolygon);
+        if (requiresPoly) {
+          const ll = map.containerPointToLatLng(p);
+          let onPoly = false;
+          try {
+            const entries = Object.values(polygonById.current || {});
+            for (let i = 0; i < entries.length; i++) {
+              const layer = entries[i]?.layer;
+              if (!layer || typeof layer.getBounds !== 'function') continue;
+              const b = layer.getBounds();
+              if (b && b.contains(ll)) { onPoly = true; break; }
+            }
+          } catch (_e) {
+            void _e;
+          }
+          stringLabelsEnabledRef.current = onPoly;
+          if (!onPoly) {
+            cursorLabelBoundsRef.current = null;
+            clearStringTextLabelsNow(); // instant hide when cursor leaves any polygon
+            scheduleStringTextLabelUpdate();
+            return;
+          }
+        } else {
+          stringLabelsEnabledRef.current = true;
+        }
         scheduleStringTextLabelUpdate();
       });
     };
@@ -2919,7 +3627,7 @@ export default function BaseModule({
       if (cursorMoveRafRef.current) cancelAnimationFrame(cursorMoveRafRef.current);
       cursorMoveRafRef.current = null;
     };
-  }, [effectiveStringTextVisibility, scheduleStringTextLabelUpdate]);
+  }, [activeMode, clearStringTextLabelsNow, effectiveStringTextVisibility, scheduleStringTextLabelUpdate]);
 
   // Seçimi temizle
 
@@ -2936,6 +3644,14 @@ export default function BaseModule({
   const BTN_SMALL_NEUTRAL = `${BTN_SMALL_BASE} bg-slate-800 border-slate-500 hover:bg-slate-700 hover:border-slate-400`;
   const ICON = 'h-6 w-6';
   const ICON_SMALL = 'h-5 w-5';
+
+  // Shared counter typography (match DC cable pulling look across all modules)
+  const COUNTER_BOX = 'min-w-[140px] border-2 border-slate-700 bg-slate-800 py-2 px-2';
+  const COUNTER_GRID = 'grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-1';
+  const COUNTER_LABEL = 'text-xs font-bold text-slate-200';
+  const COUNTER_VALUE = 'text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap';
+  const COUNTER_DONE_LABEL = 'text-xs font-bold text-emerald-400';
+  const COUNTER_DONE_VALUE = 'text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap';
 
   // LV completion is tracked via inv_id clicks; MVF uses segment completion; DC uses polygon selection (+/-).
   const lvCompletedLength = isLV
@@ -2984,8 +3700,82 @@ export default function BaseModule({
   const remainingMinus = Math.max(0, totalMinus - completedMinus);
   const remainingTotal = Math.max(0, overallTotal - completedTotal);
 
-  const workSelectionCount = isLV ? lvCompletedInvIds.size : (isMVF ? (mvfSelectedTrenchParts?.length || 0) : selectedPolygons.size);
-  const workAmount = isMVF ? mvfSelectedCableMeters : completedTotal; // MVF: pending selected cable meters (scaled)
+  // MC4 counters (per string_text count; each string/table has 2 ends)
+  // IMPORTANT: Must be defined before workSelectionCount/workAmount which depend on it
+  const mc4Counts = useMemo(() => {
+    if (!isMC4) return null;
+    // Source of truth for total strings:
+    // 1) MC4 dc_strings.csv row count (9056)
+    // 2) module default (9056)
+    // Never fall back to string_text.geojson because it can be incomplete/different.
+    const totalStrings =
+      typeof mc4TotalStringsCsv === 'number' && Number.isFinite(mc4TotalStringsCsv)
+        ? mc4TotalStringsCsv
+        : (Number(activeMode?.mc4DefaultStrings) || 9056);
+    const totalEnds = totalStrings * 2;
+
+    // Completed ends should match the number of VISIBLE dots.
+    // Many panels can overlap the same physical table/end; dedupe by end position.
+    const panels = polygonById.current || {};
+    const mc4Keys = new Set(); // endpoints that are MC4 or TERMINATED
+    const termKeys = new Set(); // endpoints that are TERMINATED
+    const toKey = (latLng) => {
+      if (!latLng) return null;
+      const lat = Number(latLng.lat);
+      const lng = Number(latLng.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      return `${lat.toFixed(6)},${lng.toFixed(6)}`;
+    };
+
+    Object.keys(mc4PanelStates || {}).forEach((id) => {
+      const st = mc4PanelStates[id] || { left: null, right: null };
+      const panel = panels[id];
+      if (panel && !panel.mc4Ends && typeof panel.computeEnds === 'function') {
+        try {
+          const ends = panel.computeEnds();
+          if (ends) panel.mc4Ends = ends;
+        } catch (_e) {
+          void _e;
+        }
+      }
+      const ends = panel?.mc4Ends;
+      if (!ends?.leftPos || !ends?.rightPos) return;
+
+      const leftKey = toKey(ends.leftPos);
+      const rightKey = toKey(ends.rightPos);
+
+      if (leftKey) {
+        if (st.left === MC4_PANEL_STATES.MC4 || st.left === MC4_PANEL_STATES.TERMINATED) mc4Keys.add(leftKey);
+        if (st.left === MC4_PANEL_STATES.TERMINATED) termKeys.add(leftKey);
+      }
+      if (rightKey) {
+        if (st.right === MC4_PANEL_STATES.MC4 || st.right === MC4_PANEL_STATES.TERMINATED) mc4Keys.add(rightKey);
+        if (st.right === MC4_PANEL_STATES.TERMINATED) termKeys.add(rightKey);
+      }
+    });
+
+    let mc4Completed = mc4Keys.size;
+    let terminatedCompleted = termKeys.size;
+
+    // Safety clamp if polygons != strings for any reason
+    mc4Completed = Math.min(mc4Completed, totalEnds);
+    terminatedCompleted = Math.min(terminatedCompleted, totalEnds);
+
+    return { totalStrings, totalEnds, mc4Completed, terminatedCompleted };
+  }, [isMC4, mc4PanelStates, mc4HistoryTick, mc4TotalStringsCsv]);
+
+  const workSelectionCount = isLV 
+    ? lvCompletedInvIds.size 
+    : (isMVF 
+      ? (mvfSelectedTrenchParts?.length || 0) 
+      : (isMC4 
+        ? Object.keys(mc4PanelStates || {}).length 
+        : selectedPolygons.size));
+  const workAmount = isMVF 
+    ? mvfSelectedCableMeters 
+    : (isMC4 
+      ? (mc4Counts?.mc4Completed || 0) 
+      : completedTotal); // MVF: pending selected cable meters (scaled), MC4: completed ends count
 
   const [dwgUrl, setDwgUrl] = useState('');
   useEffect(() => {
@@ -2997,6 +3787,99 @@ export default function BaseModule({
       .catch(() => setDwgUrl(linkPath));
   }, [activeMode.linkPath]);
 
+  const effectiveCustomCounters =
+    customCounters ||
+    (isMC4 && mc4Counts ? (
+      <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start">
+        {(() => {
+          const total = Number(mc4Counts.totalEnds) || 0; // expected: 9056 * 2 = 18112
+          const mc4Done = Number(mc4Counts.mc4Completed) || 0;
+          const termDone = Number(mc4Counts.terminatedCompleted) || 0;
+          const mc4Rem = Math.max(0, total - mc4Done);
+          const termRem = Math.max(0, total - termDone);
+          const mc4Pct = total > 0 ? ((mc4Done / total) * 100).toFixed(1) : '0.0';
+          const termPct = total > 0 ? ((termDone / total) * 100).toFixed(1) : '0.0';
+          const isMc4Mode = mc4SelectionMode === 'mc4';
+          const isTermMode = mc4SelectionMode === 'termination';
+          return (
+            <div className="min-w-[800px] border-2 border-slate-700 bg-slate-900/40 py-3 px-3">
+              <div className="flex flex-col gap-2">
+                {/* MC4 Install row with checkbox */}
+                <div className="grid grid-cols-[24px_170px_repeat(3,max-content)] items-center gap-x-3 gap-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setMc4SelectionMode(isMc4Mode ? null : 'mc4')}
+                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
+                      isMc4Mode 
+                        ? 'border-blue-500 bg-blue-500 text-white' 
+                        : 'border-slate-500 bg-slate-800 hover:border-blue-400'
+                    }`}
+                    title="Select MC4 Installation mode"
+                  >
+                    {isMc4Mode && <span className="text-xs font-bold">✓</span>}
+                  </button>
+                  <div className={`text-sm font-bold ${isMc4Mode ? 'text-blue-300' : 'text-blue-400/60'}`}>MC4 Install:</div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_LABEL}>Total</span>
+                      <span className={COUNTER_VALUE}>{total}</span>
+                    </div>
+                  </div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className="text-xs font-bold text-blue-400">Done</span>
+                      <span className="text-xs font-bold text-blue-400 tabular-nums">{mc4Done} ({mc4Pct}%)</span>
+                    </div>
+                  </div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_LABEL}>Remaining</span>
+                      <span className={COUNTER_VALUE}>{mc4Rem}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Cable Termination row with checkbox */}
+                <div className="grid grid-cols-[24px_170px_repeat(3,max-content)] items-center gap-x-3 gap-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setMc4SelectionMode(isTermMode ? null : 'termination')}
+                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
+                      isTermMode 
+                        ? 'border-emerald-500 bg-emerald-500 text-white' 
+                        : 'border-slate-500 bg-slate-800 hover:border-emerald-400'
+                    }`}
+                    title="Select Cable Termination mode"
+                  >
+                    {isTermMode && <span className="text-xs font-bold">✓</span>}
+                  </button>
+                  <div className={`text-sm font-bold ${isTermMode ? 'text-emerald-300' : 'text-emerald-400/60'}`}>Cable Termination:</div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_LABEL}>Total</span>
+                      <span className={COUNTER_VALUE}>{total}</span>
+                    </div>
+                  </div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_DONE_LABEL}>Done</span>
+                      <span className={COUNTER_DONE_VALUE}>{termDone} ({termPct}%)</span>
+                    </div>
+                  </div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_LABEL}>Remaining</span>
+                      <span className={COUNTER_VALUE}>{termRem}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+    ) : null);
+
   return (
     <div className="app">
       {_customSidebar}
@@ -3006,8 +3889,8 @@ export default function BaseModule({
         <div className="grid grid-cols-[1fr_auto] items-center gap-1">
           {/* Counters (left) */}
           {showCounters ? (
-            customCounters ? (
-              customCounters
+            effectiveCustomCounters ? (
+              effectiveCustomCounters
             ) : (
               <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start">
                 {useSimpleCounters ? (
@@ -3021,8 +3904,8 @@ export default function BaseModule({
 
                     <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
                       <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                        <span className="text-xs font-black text-emerald-400">Completed</span>
-                        <span className="text-xs font-black text-emerald-400 tabular-nums whitespace-nowrap">
+                        <span className="text-xs font-bold text-emerald-400">Completed</span>
+                        <span className="text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap">
                           {completedTotal.toFixed(0)} m, {completedPct.toFixed(2)}%
                         </span>
                       </div>
@@ -3058,7 +3941,7 @@ export default function BaseModule({
                         <span className="text-xs font-bold text-slate-200">-DC Cable</span>
                         <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{completedMinus.toFixed(0)} m</span>
 
-                        <span className="text-xs font-black text-emerald-400">Completed ({completedPct.toFixed(2)}%)</span>
+                        <span className="text-xs font-bold text-emerald-400">Completed ({completedPct.toFixed(2)}%)</span>
                         <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{completedTotal.toFixed(0)} m</span>
                       </div>
                     </div>
@@ -3097,14 +3980,32 @@ export default function BaseModule({
 
             <div className="mx-1 h-10 w-[2px] bg-slate-600" />
 
-            <button onClick={undoNotes} disabled={!canUndoNotes} className={BTN_SMALL_NEUTRAL} title="Undo (Ctrl+Z)" aria-label="Undo">
+            <button
+              onClick={() => {
+                if (isMC4 && !noteMode) mc4Undo();
+                else undoNotes();
+              }}
+              disabled={isMC4 && !noteMode ? !mc4CanUndo : !canUndoNotes}
+              className={BTN_SMALL_NEUTRAL}
+              title="Undo (Ctrl+Z)"
+              aria-label="Undo"
+            >
               <svg className={ICON_SMALL} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M9 14l-4-4 4-4" />
                 <path d="M5 10h9a6 6 0 010 12h-1" />
               </svg>
             </button>
 
-            <button onClick={redoNotes} disabled={!canRedoNotes} className={BTN_SMALL_NEUTRAL} title="Redo (Ctrl+Y / Ctrl+Shift+Z)" aria-label="Redo">
+            <button
+              onClick={() => {
+                if (isMC4 && !noteMode) mc4Redo();
+                else redoNotes();
+              }}
+              disabled={isMC4 && !noteMode ? !mc4CanRedo : !canRedoNotes}
+              className={BTN_SMALL_NEUTRAL}
+              title="Redo (Ctrl+Y / Ctrl+Shift+Z)"
+              aria-label="Redo"
+            >
               <svg className={ICON_SMALL} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M15 14l4-4-4-4" />
                 <path d="M19 10H10a6 6 0 000 12h1" />
@@ -3113,9 +4014,9 @@ export default function BaseModule({
 
             <button
               onClick={() => setModalOpen(true)}
-              disabled={workSelectionCount === 0 || noteMode}
+              disabled={workSelectionCount === 0 || noteMode || (isMC4 && !mc4SelectionMode)}
               className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-              title="Submit Work"
+              title={isMC4 && !mc4SelectionMode ? "Select MC4 Install or Cable Termination first" : "Submit Work"}
               aria-label="Submit Work"
             >
               Submit
@@ -3169,9 +4070,9 @@ export default function BaseModule({
                       done
                         ? 'border-emerald-600 bg-emerald-100'
                         : active
-                          ? 'border-slate-300 bg-slate-50 animate-pulse'
+                          ? 'border-slate-300 bg-slate-50'
                           : 'border-slate-200 bg-white hover:bg-slate-50'
-                    }`}
+                    } ${current ? 'ring-2 ring-sky-400 shadow-[0_0_0_3px_rgba(56,189,248,0.22)] animate-pulse' : ''}`}
                   >
                     <button
                       type="button"
@@ -3275,14 +4176,33 @@ export default function BaseModule({
           <div className="border-2 border-slate-700 bg-slate-900 px-4 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
             <div className="text-base font-black uppercase tracking-wide text-white">Legend</div>
             <div className="mt-2 border-2 border-slate-700 bg-slate-800 px-3 py-2">
-              <div className="flex items-center gap-2">
-                <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
-                <span className="text-[11px] font-bold uppercase tracking-wide text-white">Uncompleted</span>
-              </div>
-              <div className="mt-2 flex items-center gap-2">
-                <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
-                <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Completed</span>
-              </div>
+              {isMC4 ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-white">Uncompleted</span>
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full border-2 border-blue-700 bg-blue-500" aria-hidden="true" />
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-blue-400">Completed MC4</span>
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full border-2 border-emerald-700 bg-emerald-500" aria-hidden="true" />
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-400">Completed Termination</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-white">Uncompleted</span>
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Completed</span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -3536,10 +4456,16 @@ export default function BaseModule({
           addRecord({ ...record, notes: notesOnDate });
           alert('Work submitted successfully!');
         }}
-        moduleKey={activeMode?.key || ''}
-        moduleLabel={moduleName}
-        workAmount={workAmount}
-        workUnit="m"
+        moduleKey={isMC4 ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST') : (activeMode?.key || '')}
+        moduleLabel={isMC4 
+          ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
+          : moduleName}
+        workAmount={isMC4 
+          ? (mc4SelectionMode === 'termination' 
+            ? (mc4Counts?.terminatedCompleted || 0) 
+            : (mc4Counts?.mc4Completed || 0))
+          : workAmount}
+        workUnit={isMC4 ? 'ends' : 'm'}
       />
       
       {/* History Modal */}

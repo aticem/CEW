@@ -3,12 +3,14 @@ import DCModule from './modules/DCModule.jsx';
 import LVModule from './modules/LVModule.jsx';
 import MVFiberModule from './modules/MVFiberModule.jsx';
 import FibreModule from './modules/FibreModule.jsx';
+import MC4Module from './modules/MC4Module.jsx';
 
 const MODULES = {
   DC: { key: 'DC', label: 'DC CABLE PULLING PROGRESS', Component: DCModule },
   LV: { key: 'LV', label: 'LV CABLE PULLING PROGRESS', Component: LVModule },
   MVF: { key: 'MVF', label: 'MV+FIBER PULLING PROGRESS', Component: MVFiberModule },
   FIB: { key: 'FIB', label: 'FIBRE PULLING PROGRESS', Component: FibreModule },
+  MC4: { key: 'MC4', label: 'MC4 INSTALLATION', Component: MC4Module },
 };
 
 export default function App() {
@@ -31,8 +33,8 @@ export default function App() {
     <>
       <ActiveComponent />
 
-      {/* Mode button (left), under the header and aligned with the title row */}
-      <div className="fixed left-3 sm:left-5 top-[104px] z-[1200]" ref={menuRef}>
+      {/* Mode button (left). Keep it aligned with the Note button across all modules. */}
+      <div className="fixed left-3 sm:left-5 top-[20%] z-[1200]" ref={menuRef}>
         <div className="relative">
           <button
             type="button"
