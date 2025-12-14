@@ -5,6 +5,15 @@ import '../App.css';
 import SubmitModal from '../components/SubmitModal';
 import useDailyLog from '../hooks/useDailyLog';
 import { useChartExport } from '../hooks/useChartExport';
+import {
+  asLineStrings,
+  mergeIntervals,
+  computeNewPartsForBox,
+  computeIntervalsInBox,
+  buildCumulativeMeters,
+  sliceLineByMeters,
+  subtractInterval,
+} from '../utils/lineBoxSelection';
 
 // ═══════════════════════════════════════════════════════════════
 // CUSTOM CANVAS TEXT LABEL CLASS
@@ -328,6 +337,7 @@ export default function BaseModule({
   const [mvfSegments, setMvfSegments] = useState([]); // [{key,label,length}]
   const [mvfActiveSegmentKeys, setMvfActiveSegmentKeys] = useState(() => new Set()); // Set<string>
   const mvfActiveSegmentKeysRef = useRef(mvfActiveSegmentKeys);
+  const mvfPrevActiveSegmentKeysRef = useRef(new Set());
   const [mvfCompletedSegments, setMvfCompletedSegments] = useState(() => new Set());
   const mvfCompletedSegmentsRef = useRef(mvfCompletedSegments);
   const mvfSegmentLenByKeyRef = useRef({}); // key -> length
@@ -341,6 +351,14 @@ export default function BaseModule({
   const mvfTrenchIdCounterRef = useRef(0);
   const mvfTrenchLenByIdRef = useRef({}); // id -> meters
   const [mvfTrenchTotalMeters, setMvfTrenchTotalMeters] = useState(0);
+  const mvfTrenchEdgeIndexRef = useRef(new Map()); // "lat,lng|lat,lng" -> { fid, lineIndex, startM, endM }
+  // MVF: partial trench completion via selection box (store selected/committed PART geometries)
+  const [mvfSelectedTrenchParts, setMvfSelectedTrenchParts] = useState([]); // [{id, fid, coords:[[lat,lng],...], meters}]
+  const [mvfCommittedTrenchParts, setMvfCommittedTrenchParts] = useState([]); // same shape, locked
+  const mvfSelectedTrenchPartsRef = useRef(mvfSelectedTrenchParts);
+  const mvfCommittedTrenchPartsRef = useRef(mvfCommittedTrenchParts);
+  const mvfTrenchSelectedLayerRef = useRef(null); // L.LayerGroup
+  const mvfTrenchCommittedLayerRef = useRef(null); // L.LayerGroup
   // MVF: committed (submitted/locked) trenches by day
   const [mvfCommittedTrenchIds, setMvfCommittedTrenchIds] = useState(() => new Set()); // Set<string>
   const mvfCommittedTrenchIdsRef = useRef(mvfCommittedTrenchIds);
@@ -452,6 +470,7 @@ export default function BaseModule({
   const mvfTodayYmd = getTodayYmd();
   const mvfStorageKey = `cew:mvf:segments_completed:${mvfTodayYmd}`;
   const mvfCommittedTrenchStorageKey = `cew:mvf:trench_committed:${mvfTodayYmd}`;
+  const mvfCommittedTrenchPartsStorageKey = `cew:mvf:trench_parts_committed:${mvfTodayYmd}`;
   useEffect(() => {
     mvfCompletedSegmentsRef.current = mvfCompletedSegments;
   }, [mvfCompletedSegments]);
@@ -467,6 +486,14 @@ export default function BaseModule({
   useEffect(() => {
     mvfActiveSegmentKeysRef.current = mvfActiveSegmentKeys;
   }, [mvfActiveSegmentKeys]);
+
+  useEffect(() => {
+    mvfSelectedTrenchPartsRef.current = mvfSelectedTrenchParts;
+  }, [mvfSelectedTrenchParts]);
+
+  useEffect(() => {
+    mvfCommittedTrenchPartsRef.current = mvfCommittedTrenchParts;
+  }, [mvfCommittedTrenchParts]);
 
   useEffect(() => {
     if (!isMVF) return;
@@ -495,6 +522,20 @@ export default function BaseModule({
     }
   }, [isMVF, mvfCommittedTrenchStorageKey]);
 
+  // MVF: load committed trench PARTS for today (submitted/locked)
+  useEffect(() => {
+    if (!isMVF) return;
+    try {
+      const raw = localStorage.getItem(mvfCommittedTrenchPartsStorageKey);
+      const arr = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(arr)) setMvfCommittedTrenchParts(arr);
+      else setMvfCommittedTrenchParts([]);
+    } catch (_e) {
+      void _e;
+      setMvfCommittedTrenchParts([]);
+    }
+  }, [isMVF, mvfCommittedTrenchPartsStorageKey]);
+
   useEffect(() => {
     if (!isMVF) return;
     try {
@@ -514,6 +555,16 @@ export default function BaseModule({
     }
   }, [isMVF, mvfCommittedTrenchStorageKey, mvfCommittedTrenchIds]);
 
+  // MVF: persist committed trench PARTS for today
+  useEffect(() => {
+    if (!isMVF) return;
+    try {
+      localStorage.setItem(mvfCommittedTrenchPartsStorageKey, JSON.stringify(mvfCommittedTrenchParts || []));
+    } catch (_e) {
+      void _e;
+    }
+  }, [isMVF, mvfCommittedTrenchPartsStorageKey, mvfCommittedTrenchParts]);
+
   // MVF: keep mv_trench selection style in sync without reloading GeoJSON.
   useEffect(() => {
     if (!isMVF) return;
@@ -523,31 +574,17 @@ export default function BaseModule({
       fill: false,
       fillOpacity: 0,
     };
-    const selectedStyle = { color: '#22c55e', weight: 3, fill: false, fillOpacity: 0 };
-    const committedStyle = { color: '#16a34a', weight: 3.6, fill: false, fillOpacity: 0 };
-
-    const prev = mvfPrevSelectedTrenchRef.current || new Set();
-    const cur = new Set([...mvfSelectedTrenchIds, ...mvfCommittedTrenchIds]);
-    const toUpdate = new Set();
-    cur.forEach((id) => {
-      if (!prev.has(id)) toUpdate.add(id);
-    });
-    prev.forEach((id) => {
-      if (!cur.has(id)) toUpdate.add(id);
-    });
-
+    // NOTE: MVF "completion" is now tracked via clipped PART overlays.
+    // Keep base mv_trench geometry always yellow; only the selected/committed portion is drawn in green overlays.
     const byId = mvfTrenchByIdRef.current || {};
-    toUpdate.forEach((id) => {
+    Object.keys(byId).forEach((id) => {
       const layer = byId[id];
       if (layer && typeof layer.setStyle === 'function') {
-        const isCommitted = mvfCommittedTrenchIds.has(id);
-        const isSelected = mvfSelectedTrenchIds.has(id);
-        layer.setStyle(isCommitted ? committedStyle : (isSelected ? selectedStyle : baseStyle));
+        layer.setStyle(baseStyle);
       }
     });
-
-    mvfPrevSelectedTrenchRef.current = new Set(cur);
-  }, [isMVF, mvfSelectedTrenchIds, mvfCommittedTrenchIds]);
+    mvfPrevSelectedTrenchRef.current = new Set();
+  }, [isMVF]);
 
   // LV: keep inv_id label colors in sync with completion state without reloading GeoJSON.
   useEffect(() => {
@@ -1208,7 +1245,13 @@ export default function BaseModule({
             if (!prev) uniq.set(s.key, { ...s });
             else uniq.set(s.key, { ...prev, length: (prev.length || 0) + (s.length || 0) });
           });
-          const list = Array.from(uniq.values()).sort((a, b) => a.label.localeCompare(b.label));
+          // Order: CSS legs first (SSxx-CSS), then the rest (SSxx-SSyy)
+          const list = Array.from(uniq.values()).sort((a, b) => {
+            const aCss = String(a.label || '').toUpperCase().includes('CSS');
+            const bCss = String(b.label || '').toUpperCase().includes('CSS');
+            if (aCss !== bCss) return aCss ? -1 : 1;
+            return String(a.label || '').localeCompare(String(b.label || ''));
+          });
           setMvfSegments(list);
           mvfSegmentLenByKeyRef.current = lenByKey;
         } else {
@@ -1350,9 +1393,11 @@ export default function BaseModule({
     mvfTrenchByIdRef.current = {};
     mvfTrenchIdCounterRef.current = 0;
     mvfTrenchLenByIdRef.current = {};
+    mvfTrenchEdgeIndexRef.current = new Map();
     setMvfTrenchTotalMeters(0);
     mvfPrevSelectedTrenchRef.current = new Set();
     setMvfSelectedTrenchIds(new Set());
+    setMvfSelectedTrenchParts([]);
     
     const allBounds = L.latLngBounds();
     let totalFeatures = 0;
@@ -1737,20 +1782,41 @@ export default function BaseModule({
               try {
                 const geom = feature?.geometry;
                 let meters = 0;
-                const addLineMeters = (coords) => {
+                const round = (v) => Number(v).toFixed(6);
+                const addLineMeters = (coords, lineIndex) => {
                   if (!Array.isArray(coords) || coords.length < 2) return;
                   let prev = null;
+                  let cum = 0;
                   for (const c of coords) {
                     const lng = c?.[0];
                     const lat = c?.[1];
                     if (typeof lat !== 'number' || typeof lng !== 'number') continue;
                     const ll = L.latLng(lat, lng);
-                    if (prev) meters += prev.distanceTo(ll);
+                    if (prev) {
+                      const segM = prev.distanceTo(ll);
+                      meters += segM;
+                      // Build edge index for mapping segment-route highlights onto trench intervals.
+                      // Key by rounded coordinates (6dp) to match mvf graph nodes.
+                      try {
+                        const aK = `${round(prev.lat)},${round(prev.lng)}`;
+                        const bK = `${round(ll.lat)},${round(ll.lng)}`;
+                        const keyAB = `${aK}|${bK}`;
+                        const keyBA = `${bK}|${aK}`;
+                        const startM = cum;
+                        const endM = cum + segM;
+                        cum = endM;
+                        const rec = { fid: String(fid), lineIndex: Number(lineIndex) || 0, startM, endM };
+                        mvfTrenchEdgeIndexRef.current.set(keyAB, rec);
+                        mvfTrenchEdgeIndexRef.current.set(keyBA, rec);
+                      } catch (_e) {
+                        void _e;
+                      }
+                    }
                     prev = ll;
                   }
                 };
-                if (geom?.type === 'LineString') addLineMeters(geom.coordinates);
-                else if (geom?.type === 'MultiLineString') (geom.coordinates || []).forEach(addLineMeters);
+                if (geom?.type === 'LineString') addLineMeters(geom.coordinates, 0);
+                else if (geom?.type === 'MultiLineString') (geom.coordinates || []).forEach((c, idx) => addLineMeters(c, idx));
                 mvfTrenchLenByIdRef.current[fid] = meters;
                 setMvfTrenchTotalMeters((prev) => prev + meters);
               } catch (_e) {
@@ -1767,13 +1833,8 @@ export default function BaseModule({
                   void _e;
                 }
                 if (noteMode) return;
-                if (mvfCommittedTrenchIdsRef.current?.has?.(fid)) return; // locked after submit
-                setMvfSelectedTrenchIds((prev) => {
-                  const next = new Set(prev);
-                  if (next.has(fid)) next.delete(fid);
-                  else next.add(fid);
-                  return next;
-                });
+                // MVF trench selection is handled via selection box -> clipped PARTs
+                // (clicking the base trench line does nothing to avoid "whole feature turns green")
               });
             }
 
@@ -2008,26 +2069,28 @@ export default function BaseModule({
     }, 50);
   };
 
-  // MVF: clicking segments should highlight the trench between the two nodes (multi-select).
+  // MVF: segment selection should behave like other partial selections:
+  // - adds trench parts (mapped onto mv_trench intervals) so box select/unselect works everywhere
+  // - no double counting if already green
   useEffect(() => {
     if (!isMVF) return;
     const map = mapRef.current;
-    const hl = mvfHighlightLayerRef.current;
-    if (!map || !hl) return;
-
-    const clear = () => {
-      try { hl.clearLayers(); } catch (_e) { void _e; }
-    };
-
-    const activeKeys = Array.from(mvfActiveSegmentKeys || []);
-    if (activeKeys.length === 0) {
-      clear();
-      return;
-    }
+    if (!map) return;
 
     const graph = mvfTrenchGraphRef.current;
+    const edgeIndex = mvfTrenchEdgeIndexRef.current;
+    const byId = mvfTrenchByIdRef.current || {};
+    if (!graph || !edgeIndex || edgeIndex.size === 0) return;
+
+    const activeKeys = Array.from(mvfActiveSegmentKeys || []).map(String);
+    const activeSet = new Set(activeKeys);
+    const prevActive = mvfPrevActiveSegmentKeysRef.current || new Set();
+    const addedKeys = activeKeys.filter((k) => !prevActive.has(k));
+    const removedKeys = Array.from(prevActive).filter((k) => !activeSet.has(k));
+
     const pts = stringTextPointsRef.current || [];
     const findPoint = (id) => pts.find((p) => p?.stringId === id) || null;
+    const round = (v) => Number(v).toFixed(6);
 
     const nearestNodeKey = (ll) => {
       if (!graph?.nodes?.size) return null;
@@ -2054,7 +2117,6 @@ export default function BaseModule({
           }
         }
       };
-      // Expand search radius until we find something reasonable
       for (let r = 0; r <= 6; r++) {
         scanCells(r);
         if (best && bestD < 250) break;
@@ -2076,13 +2138,8 @@ export default function BaseModule({
       const bLL = L.latLng(bPt.lat, bPt.lng);
       const startK = nearestNodeKey(aLL);
       const endK = nearestNodeKey(bLL);
+      if (!startK || !endK || !graph?.adj) return null;
 
-      // If graph is missing, fallback to straight line.
-      if (!startK || !endK || !graph?.adj) {
-        return [[aPt.lat, aPt.lng], [bPt.lat, bPt.lng]];
-      }
-
-      // Dijkstra (small network)
       const dist = new Map([[startK, 0]]);
       const prev = new Map();
       const visited = new Set();
@@ -2114,9 +2171,7 @@ export default function BaseModule({
 
       const path = [];
       let cur = endK;
-      if (!prev.has(cur) && cur !== startK) {
-        return [[aPt.lat, aPt.lng], [bPt.lat, bPt.lng]];
-      }
+      if (!prev.has(cur) && cur !== startK) return null;
       while (cur) {
         const n = graph.nodes.get(cur);
         if (n) path.push([n.lat, n.lng]);
@@ -2124,33 +2179,112 @@ export default function BaseModule({
         cur = prev.get(cur);
       }
       path.reverse();
-      return path.length >= 2 ? path : [[aPt.lat, aPt.lng], [bPt.lat, bPt.lng]];
+      return path.length >= 2 ? path : null;
     };
 
-    clear();
-    activeKeys.forEach((k) => {
-      const coords = buildPathCoords(k);
-      if (!coords || coords.length < 2) return;
-      const line = L.polyline(coords, { color: '#22c55e', weight: 5, opacity: 0.95, interactive: true });
-      line._mvfSegmentKey = k;
-      // Right-click on the green route removes only that segment from the active set.
-      line.on('contextmenu', (evt) => {
-        try {
-          if (evt?.originalEvent) {
-            L.DomEvent.stopPropagation(evt.originalEvent);
-            L.DomEvent.preventDefault(evt.originalEvent);
-          }
-        } catch (_e) {
-          void _e;
+    setMvfSelectedTrenchParts((prev) => {
+      const base = prev || [];
+      // Drop segment-sourced parts for segments that are no longer active
+      const kept = removedKeys.length
+        ? base.filter((p) => !(p?.source === 'segment' && p?.segmentKey && removedKeys.includes(String(p.segmentKey))))
+        : base;
+      if (addedKeys.length === 0) return kept;
+
+      const committed = mvfCommittedTrenchPartsRef.current || [];
+
+      // Coverage map from kept+committed to avoid double-counting
+      const coveredByKey = new Map(); // fid:lineIndex -> [[a,b],...]
+      const addCovered = (p) => {
+        const fid = String(p?.fid || '');
+        const lineIndex = Number(p?.lineIndex);
+        const a = Number(p?.startM);
+        const b = Number(p?.endM);
+        if (!fid || !Number.isFinite(lineIndex) || !Number.isFinite(a) || !Number.isFinite(b)) return;
+        const lo = Math.min(a, b);
+        const hi = Math.max(a, b);
+        if (!(hi > lo)) return;
+        const k = `${fid}:${lineIndex}`;
+        if (!coveredByKey.has(k)) coveredByKey.set(k, []);
+        coveredByKey.get(k).push([lo, hi]);
+      };
+      kept.forEach(addCovered);
+      committed.forEach(addCovered);
+      for (const [k, arr] of coveredByKey.entries()) coveredByKey.set(k, mergeIntervals(arr));
+
+      const committedIds = new Set(committed.map((p) => String(p?.id || '')));
+      const existingIds = new Set(kept.map((p) => String(p?.id || '')));
+
+      const toAdd = [];
+      addedKeys.forEach((segKey) => {
+        const coords = buildPathCoords(segKey);
+        if (!coords || coords.length < 2) return;
+
+        // Convert route edges into trench intervals
+        const intervalsByTrench = new Map(); // fid:lineIndex -> [[a,b]]
+        for (let i = 0; i < coords.length - 1; i++) {
+          const a = coords[i];
+          const b = coords[i + 1];
+          if (!a || !b) continue;
+          const aK = `${round(a[0])},${round(a[1])}`;
+          const bK = `${round(b[0])},${round(b[1])}`;
+          const edgeKey = `${aK}|${bK}`;
+          const rec = edgeIndex.get(edgeKey);
+          if (!rec) continue;
+          const fid = String(rec.fid || '');
+          const lineIndex = Number(rec.lineIndex) || 0;
+          const lo = Math.min(Number(rec.startM) || 0, Number(rec.endM) || 0);
+          const hi = Math.max(Number(rec.startM) || 0, Number(rec.endM) || 0);
+          if (!(hi > lo)) continue;
+          const k = `${fid}:${lineIndex}`;
+          if (!intervalsByTrench.has(k)) intervalsByTrench.set(k, []);
+          intervalsByTrench.get(k).push([lo, hi]);
         }
-        setMvfActiveSegmentKeys((prev) => {
-          const next = new Set(prev);
-          next.delete(k);
-          return next;
-        });
+
+        for (const [k, arr] of intervalsByTrench.entries()) {
+          const merged = mergeIntervals(arr);
+          if (merged.length === 0) continue;
+          const covered = coveredByKey.get(k) || [];
+          const [fid, lineIndexStr] = k.split(':');
+          const lineIndex = Number(lineIndexStr) || 0;
+          const layer = byId[fid];
+          if (!layer || typeof layer.getLatLngs !== 'function') continue;
+          const lines = asLineStrings(layer.getLatLngs());
+          const lineLL = lines[lineIndex];
+          if (!lineLL || lineLL.length < 2) continue;
+          const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+
+          let nextCovered = covered;
+          merged.forEach(([a, b]) => {
+            const newIntervals = subtractInterval([a, b], nextCovered, 0.2);
+            if (!newIntervals.length) return;
+            nextCovered = mergeIntervals([...nextCovered, ...newIntervals]);
+            newIntervals.forEach(([x, y]) => {
+              const id = `${fid}:${lineIndex}:${x.toFixed(2)}-${y.toFixed(2)}`;
+              if (committedIds.has(id) || existingIds.has(id)) return;
+              const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: x, endM: y });
+              if (!coords || coords.length < 2) return;
+              existingIds.add(id);
+              toAdd.push({
+                id,
+                fid,
+                lineIndex,
+                startM: x,
+                endM: y,
+                coords,
+                meters: Math.max(0, y - x),
+                source: 'segment',
+                segmentKey: String(segKey),
+              });
+            });
+          });
+          coveredByKey.set(k, nextCovered);
+        }
       });
-      hl.addLayer(line);
+
+      if (toAdd.length === 0) return kept;
+      return [...kept, ...toAdd];
     });
+    mvfPrevActiveSegmentKeysRef.current = new Set(activeSet);
   }, [isMVF, mvfActiveSegmentKeys, mvfSegments]);
 
   // Box Selection event handlers - left click to select, right click to unselect
@@ -2259,58 +2393,145 @@ export default function BaseModule({
           // MVF MODE: Box select ONLY mv_trench (avoid selecting tables/other layers)
           if (isMVF) {
             const byId = mvfTrenchByIdRef.current || {};
-            const trenchIdsInBounds = [];
-            Object.keys(byId).forEach((id) => {
-              const layer = byId[id];
-              if (!layer || typeof layer.getBounds !== 'function') return;
-              try {
-                const lb = layer.getBounds();
-                if (lb && bounds.intersects(lb)) trenchIdsInBounds.push(id);
-              } catch (_e) {
-                void _e;
-              }
-            });
+            const committedPartIds = new Set((mvfCommittedTrenchPartsRef.current || []).map((p) => String(p?.id || '')));
 
-            if (trenchIdsInBounds.length > 0) {
-              setMvfSelectedTrenchIds((prev) => {
-                const next = new Set(prev);
-                const committed = mvfCommittedTrenchIdsRef.current || new Set();
-                if (isRightClick) trenchIdsInBounds.forEach((id) => { if (!committed.has(id)) next.delete(id); });
-                else trenchIdsInBounds.forEach((id) => { if (!committed.has(id)) next.add(id); });
-                return next;
-              });
-            }
+            if (isRightClick) {
+              // Unselect PARTS within the box (do not touch committed).
+              // This is partial erase: only the portion inside the box is removed; outside stays selected.
+              setMvfSelectedTrenchParts((prev) => {
+                const parts = prev || [];
+                if (parts.length === 0) return parts;
 
-            // MVF: Right-click selection box should also UNSELECT green segment routes selected from the segment list.
-            if (isRightClick && (mvfActiveSegmentKeysRef.current?.size || 0) > 0) {
-              const keysToRemove = [];
-              try {
-                const hl = mvfHighlightLayerRef.current;
-                if (hl && typeof hl.eachLayer === 'function') {
-                  hl.eachLayer((l) => {
-                    const k = l?._mvfSegmentKey;
-                    if (!k) return;
-                    if (typeof l.getBounds !== 'function') return;
-                    try {
-                      const lb = l.getBounds();
-                      if (lb && bounds.intersects(lb)) keysToRemove.push(String(k));
-                    } catch (_e) {
-                      void _e;
-                    }
+                // Group by fid/lineIndex (only parts created from mv_trench box selection have these fields)
+                const groups = new Map(); // key -> parts[]
+                parts.forEach((p) => {
+                  const fid = String(p?.fid || '');
+                  const lineIndex = Number(p?.lineIndex);
+                  if (!fid || !Number.isFinite(lineIndex) || !Number.isFinite(Number(p?.startM)) || !Number.isFinite(Number(p?.endM))) {
+                    // unknown shape; keep as-is (should be rare)
+                    const k = `__raw__:${Math.random()}`;
+                    groups.set(k, [p]);
+                    return;
+                  }
+                  const k = `${fid}:${lineIndex}`;
+                  if (!groups.has(k)) groups.set(k, []);
+                  groups.get(k).push(p);
+                });
+
+                const out = [];
+                for (const [k, arr] of groups.entries()) {
+                  if (k.startsWith('__raw__')) {
+                    out.push(...arr);
+                    continue;
+                  }
+                  const [fid, lineIndexStr] = k.split(':');
+                  const lineIndex = Number(lineIndexStr);
+                  const layer = byId[fid];
+                  if (!layer || typeof layer.getLatLngs !== 'function') {
+                    out.push(...arr);
+                    continue;
+                  }
+                  const lines = asLineStrings(layer.getLatLngs());
+                  const lineLL = lines[lineIndex];
+                  if (!lineLL || lineLL.length < 2) {
+                    out.push(...arr);
+                    continue;
+                  }
+
+                  const eraseIntervals = computeIntervalsInBox({ L, map, bounds, lineLatLngs: lineLL, minMeters: 0.5 });
+                  if (!eraseIntervals.length) {
+                    out.push(...arr);
+                    continue;
+                  }
+                  const eraseMerged = mergeIntervals(eraseIntervals);
+                  const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+
+                  arr.forEach((p) => {
+                    const startM = Number(p.startM);
+                    const endM = Number(p.endM);
+                    const lo = Math.min(startM, endM);
+                    const hi = Math.max(startM, endM);
+                    const remainIntervals = subtractInterval([lo, hi], eraseMerged, 0.2);
+                    remainIntervals.forEach(([a, b]) => {
+                      const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: a, endM: b });
+                      if (!coords || coords.length < 2) return;
+                      out.push({
+                        ...p,
+                        id: `${fid}:${lineIndex}:${a.toFixed(2)}-${b.toFixed(2)}`,
+                        lineIndex,
+                        startM: a,
+                        endM: b,
+                        coords,
+                        meters: Math.max(0, b - a),
+                      });
+                    });
                   });
                 }
-              } catch (_e) {
-                void _e;
-              }
+                return out;
+              });
+            } else {
+              // Select ONLY the part of trench lines inside the box
+              const toAdd = [];
 
-              if (keysToRemove.length > 0) {
-                setMvfActiveSegmentKeys((prev) => {
-                  const next = new Set(prev);
-                  keysToRemove.forEach((k) => next.delete(k));
-                  return next;
+              // Build coverage intervals per (fid,lineIndex) from already selected + committed parts
+              const coveredIntervalsByKey = new Map(); // key -> [[a,b],...]
+              const addCovered = (p) => {
+                const fid = String(p?.fid || '');
+                const lineIndex = Number(p?.lineIndex);
+                const a = Number(p?.startM);
+                const b = Number(p?.endM);
+                if (!fid || !Number.isFinite(lineIndex) || !Number.isFinite(a) || !Number.isFinite(b)) return;
+                const lo = Math.min(a, b);
+                const hi = Math.max(a, b);
+                if (!(hi > lo)) return;
+                const key = `${fid}:${lineIndex}`;
+                if (!coveredIntervalsByKey.has(key)) coveredIntervalsByKey.set(key, []);
+                coveredIntervalsByKey.get(key).push([lo, hi]);
+              };
+              (mvfSelectedTrenchPartsRef.current || []).forEach(addCovered);
+              (mvfCommittedTrenchPartsRef.current || []).forEach(addCovered);
+
+              Object.keys(byId).forEach((fid) => {
+                const layer = byId[fid];
+                if (!layer || typeof layer.getBounds !== 'function' || typeof layer.getLatLngs !== 'function') return;
+                try {
+                  const lb = layer.getBounds();
+                  if (!lb || !bounds.intersects(lb)) return;
+                } catch (_e) {
+                  void _e;
+                  return;
+                }
+
+                const lines = asLineStrings(layer.getLatLngs());
+                lines.forEach((lineLL, lineIndex) => {
+                  const key = `${fid}:${lineIndex}`;
+                  const coveredMerged = mergeIntervals(coveredIntervalsByKey.get(key) || []);
+                  const res = computeNewPartsForBox({
+                    L,
+                    map,
+                    bounds,
+                    fid,
+                    lineIndex,
+                    lineLatLngs: lineLL,
+                    coveredIntervals: coveredMerged,
+                    committedPartIds,
+                    minMeters: 0.5,
+                    minSliverMeters: 0.2,
+                  });
+                  if (res?.parts?.length) {
+                    toAdd.push(...res.parts);
+                    coveredIntervalsByKey.set(key, res.coveredIntervals || coveredMerged);
+                  }
                 });
+              });
+
+              if (toAdd.length > 0) {
+                setMvfSelectedTrenchParts((prev) => [...(prev || []), ...toAdd]);
               }
             }
+
+            // MVF segment selections are mapped into trench PARTs now,
+            // so partial erase/select via box works automatically (no separate segment-route unselect needed).
           } else if (isLV) {
           // LV MODE: Box select inv_id labels (daily completion)
             const labels = lvInvLabelByIdRef.current || {};
@@ -2378,10 +2599,14 @@ export default function BaseModule({
       } else if (!wasDrag && isRightClick) {
         // Right-click without dragging: always allow MVF "unselect"
         // - Clear current, unsubmitted mv_trench selections
+        // - Clear current, unsubmitted mv_trench PART selections
         // - Clear MVF segment highlights selected from the segment list
         if (isMVF) {
           if ((mvfSelectedTrenchIdsRef.current?.size || 0) > 0) {
             setMvfSelectedTrenchIds(new Set());
+          }
+          if ((mvfSelectedTrenchPartsRef.current?.length || 0) > 0) {
+            setMvfSelectedTrenchParts([]);
           }
           if ((mvfActiveSegmentKeysRef.current?.size || 0) > 0) {
             setMvfActiveSegmentKeys(new Set());
@@ -2407,7 +2632,7 @@ export default function BaseModule({
       container.removeEventListener('mousemove', onMouseMove);
       container.removeEventListener('mouseup', onMouseUp);
     };
-  }, [isLV, stringPoints, noteMode, notes]);
+  }, [isLV, isMVF, stringPoints, noteMode, notes]);
 
   useEffect(() => {
     mapRef.current = L.map('map', {
@@ -2444,6 +2669,22 @@ export default function BaseModule({
       mvfHighlightLayerRef.current = null;
     }
 
+    // MVF: partial trench selection/completion overlay layers
+    try {
+      if (mvfTrenchSelectedLayerRef.current) mvfTrenchSelectedLayerRef.current.remove();
+      mvfTrenchSelectedLayerRef.current = L.layerGroup().addTo(mapRef.current);
+    } catch (_e) {
+      void _e;
+      mvfTrenchSelectedLayerRef.current = null;
+    }
+    try {
+      if (mvfTrenchCommittedLayerRef.current) mvfTrenchCommittedLayerRef.current.remove();
+      mvfTrenchCommittedLayerRef.current = L.layerGroup().addTo(mapRef.current);
+    } catch (_e) {
+      void _e;
+      mvfTrenchCommittedLayerRef.current = null;
+    }
+
     // Hide raster tiles for best performance + clean dark background
     // (Re-enable if you want map imagery)
     // L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -2465,6 +2706,45 @@ export default function BaseModule({
       mapRef.current?.remove();
     };
   }, []);
+
+  // MVF: render selected/committed trench PART overlays (only the selected portion turns green).
+  useEffect(() => {
+    if (!isMVF) return;
+    const map = mapRef.current;
+    if (!map) return;
+    const selectedLayer = mvfTrenchSelectedLayerRef.current;
+    const committedLayer = mvfTrenchCommittedLayerRef.current;
+    if (!selectedLayer || !committedLayer) return;
+
+    try { selectedLayer.clearLayers(); } catch (_e) { void _e; }
+    try { committedLayer.clearLayers(); } catch (_e) { void _e; }
+
+    // Committed parts (locked)
+    (mvfCommittedTrenchParts || []).forEach((p) => {
+      if (!p?.coords || p.coords.length < 2) return;
+      const line = L.polyline(p.coords, { color: '#16a34a', weight: 4.5, opacity: 0.96, interactive: false });
+      committedLayer.addLayer(line);
+    });
+
+    // Selected (pending) parts (can be unselected by right-click on the green part)
+    (mvfSelectedTrenchParts || []).forEach((p) => {
+      if (!p?.coords || p.coords.length < 2) return;
+      const line = L.polyline(p.coords, { color: '#22c55e', weight: 4.5, opacity: 0.96, interactive: true });
+      line._mvfTrenchPartId = p.id;
+      line.on('contextmenu', (evt) => {
+        try {
+          if (evt?.originalEvent) {
+            L.DomEvent.stopPropagation(evt.originalEvent);
+            L.DomEvent.preventDefault(evt.originalEvent);
+          }
+        } catch (_e) {
+          void _e;
+        }
+        setMvfSelectedTrenchParts((prev) => (prev || []).filter((x) => x?.id !== p.id));
+      });
+      selectedLayer.addLayer(line);
+    });
+  }, [isMVF, mvfSelectedTrenchParts, mvfCommittedTrenchParts]);
 
   // Reload GeoJSON layers when module changes (same UI, different dataset)
   useEffect(() => {
@@ -2558,29 +2838,27 @@ export default function BaseModule({
       }, 0)
     : 0;
 
-  const mvfMarkedTrenchMeters = isMVF
-    ? Array.from(new Set([...mvfSelectedTrenchIds, ...mvfCommittedTrenchIds])).reduce((sum, id) => {
-        const m = mvfTrenchLenByIdRef.current?.[id] || 0;
-        return sum + (Number.isFinite(m) ? m : 0);
-      }, 0)
-    : 0;
+  const MVF_CIRCUITS = 3;
 
-  const mvfPendingTrenchMeters = isMVF
-    ? Array.from(mvfSelectedTrenchIds).reduce((sum, id) => {
-        const m = mvfTrenchLenByIdRef.current?.[id] || 0;
-        return sum + (Number.isFinite(m) ? m : 0);
-      }, 0)
+  const mvfSelectedPartMeters = isMVF
+    ? (mvfSelectedTrenchParts || []).reduce((sum, p) => sum + (Number(p?.meters) || 0), 0)
     : 0;
+  const mvfCommittedPartMeters = isMVF
+    ? (mvfCommittedTrenchParts || []).reduce((sum, p) => sum + (Number(p?.meters) || 0), 0)
+    : 0;
+  const mvfMarkedTrenchCableMeters = (mvfSelectedPartMeters + mvfCommittedPartMeters) * MVF_CIRCUITS;
+  const mvfSelectedCableMeters = mvfSelectedPartMeters * MVF_CIRCUITS;
 
-  const overallTotal = isMVF ? mvfTrenchTotalMeters : ((isLV || useSimpleCounters) ? totalPlus : (totalPlus + totalMinus));
-  const completedTotal = isLV ? lvCompletedLength : (isMVF ? mvfMarkedTrenchMeters : (completedPlus + completedMinus));
+  // MVF Total must come from CSV (already represents 3 circuits); completed comes from selected trench meters * 3.
+  const overallTotal = isMVF ? totalPlus : ((isLV || useSimpleCounters) ? totalPlus : (totalPlus + totalMinus));
+  const completedTotal = isLV ? lvCompletedLength : (isMVF ? mvfMarkedTrenchCableMeters : (completedPlus + completedMinus));
   const completedPct = overallTotal > 0 ? (completedTotal / overallTotal) * 100 : 0;
   const remainingPlus = Math.max(0, totalPlus - completedPlus);
   const remainingMinus = Math.max(0, totalMinus - completedMinus);
   const remainingTotal = Math.max(0, overallTotal - completedTotal);
 
-  const workSelectionCount = isLV ? lvCompletedInvIds.size : (isMVF ? mvfSelectedTrenchIds.size : selectedPolygons.size);
-  const workAmount = isMVF ? mvfPendingTrenchMeters : completedTotal; // MVF: pending trench meters; LV: completed length; DC: completedPlus+completedMinus
+  const workSelectionCount = isLV ? lvCompletedInvIds.size : (isMVF ? (mvfSelectedTrenchParts?.length || 0) : selectedPolygons.size);
+  const workAmount = isMVF ? mvfSelectedCableMeters : completedTotal; // MVF: selected trench meters * 3 circuits
 
   const [dwgUrl, setDwgUrl] = useState('');
   useEffect(() => {
@@ -2749,7 +3027,7 @@ export default function BaseModule({
           <div className="fixed left-3 sm:left-5 top-[190px] z-[1190] w-[230px] border-2 border-slate-300 bg-white text-slate-900 shadow-[0_10px_26px_rgba(0,0,0,0.35)]">
             <div className="flex items-center gap-2 border-b border-slate-200 px-2 py-2">
               <span className="inline-block h-2 w-2 bg-pink-500" aria-hidden="true" />
-              <div className="text-[10px] font-extrabold uppercase tracking-wide">mv cable length for 3 circuits</div>
+              <div className="text-[10px] font-extrabold uppercase tracking-wide">mv cable length</div>
             </div>
             <div className="max-h-[260px] overflow-y-auto p-2">
               {mvfSegments.map((s) => {
@@ -2767,6 +3045,14 @@ export default function BaseModule({
                       type="button"
                       onClick={() =>
                         setMvfActiveSegmentKeys((prev) => {
+                          // If this segment route was already submitted (committed), don't allow recounting.
+                          try {
+                            const committed = mvfCommittedTrenchPartsRef.current || [];
+                            const sk = String(s.key || '');
+                            if (sk && committed.some((p) => p?.source === 'segment' && String(p?.segmentKey || '') === sk)) return prev;
+                          } catch (_e) {
+                            void _e;
+                          }
                           const next = new Set(prev);
                           if (next.has(s.key)) next.delete(s.key);
                           else next.add(s.key);
@@ -2784,7 +3070,7 @@ export default function BaseModule({
 
                     <div className="flex flex-shrink-0 items-center gap-2">
                       <span className={`text-[13px] font-bold tabular-nums ${active ? 'text-emerald-900' : 'text-slate-600'}`}>
-                        {Number(s.length || 0).toFixed(1)}m
+                        {`${Math.round(Number(s.length || 0) / 3)}*3`}
                       </span>
                     </div>
                   </div>
@@ -3000,30 +3286,60 @@ export default function BaseModule({
             const ymd = n.noteDate || (n.createdAt ? new Date(n.createdAt).toISOString().split('T')[0] : null);
             return ymd === recordDate;
           });
-          // MVF: once submitted, lock selected mv_trench features so they cannot be changed.
+          // MVF: once submitted, lock selected mv_trench parts + segment routes so they cannot be changed/recounted.
           if (isMVF) {
-            const toCommit = Array.from(mvfSelectedTrenchIdsRef.current || []);
-            if (toCommit.length > 0 && recordDate) {
-              const key = `cew:mvf:trench_committed:${recordDate}`;
+            const toCommitParts = mvfSelectedTrenchPartsRef.current || [];
+            if (toCommitParts.length > 0 && recordDate) {
+              const key = `cew:mvf:trench_parts_committed:${recordDate}`;
               try {
                 const raw = localStorage.getItem(key);
                 const arr = raw ? JSON.parse(raw) : [];
-                const merged = new Set(Array.isArray(arr) ? arr.map(String) : []);
-                toCommit.forEach((id) => merged.add(String(id)));
-                localStorage.setItem(key, JSON.stringify(Array.from(merged)));
+                const prev = Array.isArray(arr) ? arr : [];
+                const seen = new Set(prev.map((p) => String(p?.id || '')));
+                const merged = [...prev];
+                toCommitParts.forEach((p) => {
+                  const id = String(p?.id || '');
+                  if (!id || seen.has(id)) return;
+                  seen.add(id);
+                  // reduce payload size a bit (coords rounded)
+                  const coords = Array.isArray(p?.coords)
+                    ? p.coords.map((c) => [Number(c?.[0]).toFixed ? Number(c[0].toFixed(6)) : c[0], Number(c?.[1]).toFixed ? Number(c[1].toFixed(6)) : c[1]])
+                    : [];
+                  merged.push({
+                    id,
+                    fid: String(p?.fid || ''),
+                    lineIndex: Number.isFinite(Number(p?.lineIndex)) ? Number(p.lineIndex) : null,
+                    startM: Number.isFinite(Number(p?.startM)) ? Number(p.startM) : null,
+                    endM: Number.isFinite(Number(p?.endM)) ? Number(p.endM) : null,
+                    source: p?.source || null,
+                    segmentKey: p?.segmentKey ? String(p.segmentKey) : null,
+                    coords,
+                    meters: Number(p?.meters) || 0,
+                  });
+                });
+                localStorage.setItem(key, JSON.stringify(merged));
               } catch (_e) {
                 void _e;
               }
-              // Update in-memory "today" view if applicable
+
               if (recordDate === mvfTodayYmd) {
-                setMvfCommittedTrenchIds((prev) => {
-                  const next = new Set(prev);
-                  toCommit.forEach((id) => next.add(String(id)));
+                setMvfCommittedTrenchParts((prev) => {
+                  const base = prev || [];
+                  const seen = new Set(base.map((p) => String(p?.id || '')));
+                  const next = [...base];
+                  toCommitParts.forEach((p) => {
+                    const id = String(p?.id || '');
+                    if (!id || seen.has(id)) return;
+                    seen.add(id);
+                    next.push(p);
+                  });
                   return next;
                 });
               }
+
               // Clear current selection after submit (submit button disables until new selection)
-              setMvfSelectedTrenchIds(new Set());
+              setMvfSelectedTrenchParts([]);
+              setMvfActiveSegmentKeys(new Set());
             }
           }
           addRecord({ ...record, notes: notesOnDate });
