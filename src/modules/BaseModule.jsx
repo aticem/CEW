@@ -512,20 +512,15 @@ export default function BaseModule({
     TERMINATED: 'terminated',
   };
   // MC4 selection mode: 'mc4' or 'termination' - determines what type of work is being done
-  const [mc4SelectionMode, setMc4SelectionMode] = useState(null); // null | 'mc4' | 'termination'
+  // Default to 'mc4' (matches prior behavior), but allow user to uncheck back to null.
+  const [mc4SelectionMode, setMc4SelectionMode] = useState('mc4'); // null | 'mc4' | 'termination'
   const mc4SelectionModeRef = useRef(mc4SelectionMode);
   useEffect(() => {
     mc4SelectionModeRef.current = mc4SelectionMode;
   }, [mc4SelectionMode]);
 
-  // MC4: default to MC4 selection mode so selection always works (user can switch to termination)
-  useEffect(() => {
-    if (!isMC4) return;
-    if (!mc4SelectionModeRef.current) {
-      setMc4SelectionMode('mc4');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMC4]);
+  // NOTE: Do not auto-force a selection mode when entering MC4.
+  // Users can intentionally set it to null (no mode) and we must respect that.
   const mc4TodayYmd = getTodayYmd();
   const mc4PanelStatesStorageKey = `cew:mc4:panel_states:${mc4TodayYmd}`;
   const [mc4PanelStates, setMc4PanelStates] = useState(() => ({})); // { [panelId]: { left, right } }
@@ -2000,21 +1995,25 @@ export default function BaseModule({
                   safeStop(evt);
                   if (noteMode) return;
                   // Require selection mode to be set
-                  const currentMode = mc4SelectionModeRef.current || 'mc4';
+                  const currentMode = mc4SelectionModeRef.current; // null | 'mc4' | 'termination'
                   const side = sideFromClick(evt);
                   const prev = mc4GetPanelState(uniqueId);
                   // Calculate next state based on current mode (using ref to get latest value)
                   let nextState = prev[side];
                   if (currentMode === 'mc4') {
-                    // MC4 mode: toggle between NONE and MC4 (blue)
-                    if (nextState == null) nextState = 'mc4';
-                    else if (nextState === 'mc4') nextState = null;
-                    // If already terminated, don't change
+                    // MC4 mode: set to MC4 (blue), but never downgrade TERMINATED (green)
+                    if (nextState !== 'terminated') nextState = 'mc4';
                   } else if (currentMode === 'termination') {
-                    // Termination mode: MC4 -> TERMINATED, or toggle TERMINATED off
+                    // Termination mode: ONLY MC4 (blue) -> TERMINATED (green)
+                    // If not already MC4, do nothing (can't terminate without MC4).
                     if (nextState === 'mc4') nextState = 'terminated';
-                    else if (nextState === 'terminated') nextState = 'mc4'; // back to MC4
-                    // Can't terminate if not MC4 first
+                    else if (nextState === 'terminated') nextState = 'terminated';
+                    else return;
+                  } else {
+                    // No mode: forward-only cycle null -> mc4 -> terminated
+                    if (nextState == null) nextState = 'mc4';
+                    else if (nextState === 'mc4') nextState = 'terminated';
+                    else nextState = 'terminated';
                   }
                   const next = { ...prev, [side]: nextState };
                   setMc4PanelStates((s) => ({ ...(s || {}), [uniqueId]: next }));
@@ -3267,20 +3266,19 @@ export default function BaseModule({
             });
             if (ids.length > 0) {
               // Calculate next state based on current mode (using ref to get latest value)
-              const currentMode = mc4SelectionModeRef.current || 'mc4';
+              const currentMode = mc4SelectionModeRef.current; // null | 'mc4' | 'termination'
               const advanceState = (cur) => {
                 if (currentMode === 'mc4') {
-                  // MC4 mode: set to MC4 (blue) if not already
-                  if (cur == null) return 'mc4';
-                  return cur; // Don't change if already MC4 or TERMINATED
+                  // MC4 mode: set to MC4 (blue), but never downgrade TERMINATED (green)
+                  if (cur === 'terminated') return 'terminated';
+                  return 'mc4';
                 } else if (currentMode === 'termination') {
-                  // Termination mode: advance to TERMINATED if currently MC4
+                  // Termination mode: ONLY MC4 (blue) -> TERMINATED (green)
                   if (cur === 'mc4') return 'terminated';
                   if (cur === 'terminated') return 'terminated';
-                  // Can't terminate if not MC4 first - leave as is
                   return cur;
                 }
-                // No mode - default forward
+                // No mode - forward-only cycle: null -> mc4 -> terminated
                 if (cur == null) return 'mc4';
                 if (cur === 'mc4') return 'terminated';
                 return 'terminated';
@@ -3387,6 +3385,297 @@ export default function BaseModule({
         // NOTE MODE: Create note on simple click (unless a marker click just happened)
         if (!markerClickedRef.current) {
           createNote(clickLatLng);
+        }
+      } else if (!wasDrag && !isRightClick && !noteMode) {
+        // SINGLE CLICK SELECTION MODE: Select individual items by clicking
+        const clickPoint = map.latLngToLayerPoint(clickLatLng);
+        const clickTolerance = 10; // pixels
+
+        if (isMC4) {
+          // MC4: Single click to advance panel state
+          const panels = polygonById.current || {};
+          let clickedPanelId = null;
+
+          const isPointInPoly = (pt, poly) => {
+            let inside = false;
+            for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+              const xi = poly[i].x, yi = poly[i].y;
+              const xj = poly[j].x, yj = poly[j].y;
+              const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+                (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi + 1e-12) + xi);
+              if (intersect) inside = !inside;
+            }
+            return inside;
+          };
+
+          const latLngsToLayerPoints = (layer) => {
+            if (!map || !layer || typeof layer.getLatLngs !== 'function') return null;
+            let ll = layer.getLatLngs();
+            while (Array.isArray(ll) && ll.length && Array.isArray(ll[0])) ll = ll[0];
+            while (Array.isArray(ll) && ll.length && Array.isArray(ll[0])) ll = ll[0];
+            const ring = Array.isArray(ll) ? ll : null;
+            if (!ring || ring.length < 3) return null;
+            const pts = ring.map((p) => map.latLngToLayerPoint(p)).filter(Boolean);
+            if (pts.length < 3) return null;
+            const a = pts[0];
+            const z = pts[pts.length - 1];
+            if (a && z && a.x === z.x && a.y === z.y) pts.pop();
+            return pts;
+          };
+
+          Object.keys(panels).forEach((pid) => {
+            if (clickedPanelId) return;
+            const info = panels[pid];
+            const layer = info?.layer;
+            if (!layer) return;
+            const poly = latLngsToLayerPoints(layer);
+            if (poly && isPointInPoly(clickPoint, poly)) {
+              clickedPanelId = pid;
+            }
+          });
+
+          if (clickedPanelId) {
+            const currentMode = mc4SelectionModeRef.current; // null | 'mc4' | 'termination'
+            const advanceState = (cur) => {
+              if (currentMode === 'mc4') {
+                // MC4 mode: set to MC4 (blue), but never downgrade TERMINATED (green)
+                if (cur === 'terminated') return 'terminated';
+                return 'mc4';
+              } else if (currentMode === 'termination') {
+                // Termination mode: ONLY MC4 (blue) -> TERMINATED (green)
+                if (cur === 'mc4') return 'terminated';
+                if (cur === 'terminated') return 'terminated';
+                return cur;
+              }
+              // No mode - forward-only cycle: null -> mc4 -> terminated
+              if (cur == null) return 'mc4';
+              if (cur === 'mc4') return 'terminated';
+              return 'terminated';
+            };
+            const prev = mc4GetPanelState(clickedPanelId);
+            const next = { left: advanceState(prev.left), right: advanceState(prev.right) };
+            const changes = [{ id: clickedPanelId, prev, next }];
+            // In termination mode, if neither end changes, treat as no-op.
+            if (currentMode === 'termination' && next.left === prev.left && next.right === prev.right) {
+              draggingRef.current = null;
+              return;
+            }
+            setMc4PanelStates((s) => {
+              const out = { ...(s || {}) };
+              out[clickedPanelId] = { left: next.left ?? null, right: next.right ?? null };
+              return out;
+            });
+            mc4PushHistory(changes);
+          }
+        } else if (isLV) {
+          // LV: Single click to toggle inv_id completion
+          const labels = lvInvLabelByIdRef.current || {};
+          let clickedInvId = null;
+          let minDist = Infinity;
+
+          Object.keys(labels).forEach((invIdNorm) => {
+            const lbl = labels[invIdNorm];
+            if (!lbl || typeof lbl.getLatLng !== 'function') return;
+            const ll = lbl.getLatLng();
+            const pt = map.latLngToLayerPoint(ll);
+            const dist = Math.sqrt((pt.x - clickPoint.x) ** 2 + (pt.y - clickPoint.y) ** 2);
+            if (dist < clickTolerance && dist < minDist) {
+              minDist = dist;
+              clickedInvId = invIdNorm;
+            }
+          });
+
+          if (clickedInvId) {
+            setLvCompletedInvIds((prev) => {
+              const next = new Set(prev);
+              if (next.has(clickedInvId)) {
+                next.delete(clickedInvId);
+              } else {
+                next.add(clickedInvId);
+              }
+              return next;
+            });
+          }
+        } else if (isMVF) {
+          // MVF: Single click near a trench line to select a small segment around the click point
+          const byId = mvfTrenchByIdRef.current || {};
+          const isFibreMode = String(activeMode?.key || '').toUpperCase() === 'FIB';
+          const rawSegKey = String(mvfCurrentSegmentKeyRef.current || '');
+          const segKey = isFibreMode ? rawSegKey : (rawSegKey || '__FREE__');
+          const doneSet = mvfDoneSegmentKeysRef.current || new Set();
+
+          if (!isFibreMode || (isFibreMode && segKey && segKey !== '__FREE__')) {
+            if (!(segKey && segKey !== '__FREE__' && doneSet.has(segKey))) {
+              let bestMatch = null;
+              let bestDist = Infinity;
+              const clickMeters = 5; // Select 5 meters around click point
+
+              Object.keys(byId).forEach((fid) => {
+                const layer = byId[fid];
+                if (!layer || typeof layer.getLatLngs !== 'function') return;
+                const lines = asLineStrings(layer.getLatLngs());
+                lines.forEach((lineLL, lineIndex) => {
+                  if (!lineLL || lineLL.length < 2) return;
+                  for (let i = 0; i < lineLL.length - 1; i++) {
+                    const p1 = map.latLngToLayerPoint(lineLL[i]);
+                    const p2 = map.latLngToLayerPoint(lineLL[i + 1]);
+                    // Distance from point to line segment
+                    const dx = p2.x - p1.x;
+                    const dy = p2.y - p1.y;
+                    const len2 = dx * dx + dy * dy;
+                    let t = 0;
+                    if (len2 > 0) {
+                      t = Math.max(0, Math.min(1, ((clickPoint.x - p1.x) * dx + (clickPoint.y - p1.y) * dy) / len2));
+                    }
+                    const projX = p1.x + t * dx;
+                    const projY = p1.y + t * dy;
+                    const dist = Math.sqrt((clickPoint.x - projX) ** 2 + (clickPoint.y - projY) ** 2);
+                    if (dist < clickTolerance && dist < bestDist) {
+                      bestDist = dist;
+                      bestMatch = { fid, lineIndex, lineLL, segmentIndex: i, t };
+                    }
+                  }
+                });
+              });
+
+              if (bestMatch) {
+                const { fid, lineIndex, lineLL } = bestMatch;
+                const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+                const totalLen = cumData[cumData.length - 1] || 0;
+
+                // Find meter position of click
+                let clickM = 0;
+                for (let i = 0; i < lineLL.length - 1; i++) {
+                  const p1 = map.latLngToLayerPoint(lineLL[i]);
+                  const p2 = map.latLngToLayerPoint(lineLL[i + 1]);
+                  const dx = p2.x - p1.x;
+                  const dy = p2.y - p1.y;
+                  const len2 = dx * dx + dy * dy;
+                  let t = 0;
+                  if (len2 > 0) {
+                    t = Math.max(0, Math.min(1, ((clickPoint.x - p1.x) * dx + (clickPoint.y - p1.y) * dy) / len2));
+                  }
+                  const projX = p1.x + t * dx;
+                  const projY = p1.y + t * dy;
+                  const dist = Math.sqrt((clickPoint.x - projX) ** 2 + (clickPoint.y - projY) ** 2);
+                  if (dist < clickTolerance + 1) {
+                    clickM = cumData[i] + t * (cumData[i + 1] - cumData[i]);
+                    break;
+                  }
+                }
+
+                const startM = Math.max(0, clickM - clickMeters / 2);
+                const endM = Math.min(totalLen, clickM + clickMeters / 2);
+
+                if (endM > startM + 0.5) {
+                  const segScale =
+                    segKey && segKey !== '__FREE__' && typeof mvfSegmentScaleByKeyRef.current?.[segKey] === 'number'
+                      ? mvfSegmentScaleByKeyRef.current[segKey]
+                      : mvfCircuitsMultiplier;
+
+                  const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM, endM });
+                  if (coords && coords.length >= 2) {
+                    const id = `${fid}:${lineIndex}:${startM.toFixed(2)}-${endM.toFixed(2)}:seg:${segKey}`;
+                    const committedPartIds = new Set(
+                      (mvfCommittedTrenchPartsRef.current || [])
+                        .filter((p) => String(p?.segmentKey || '') === String(segKey))
+                        .map((p) => String(p?.id || ''))
+                    );
+
+                    if (!committedPartIds.has(id)) {
+                      setMvfSelectedTrenchParts((prev) => {
+                        // Check if already selected
+                        const existing = (prev || []).find((p) => p.id === id);
+                        if (existing) return prev;
+                        return [...(prev || []), {
+                          id,
+                          fid: String(fid),
+                          lineIndex,
+                          startM,
+                          endM,
+                          coords,
+                          meters: Math.max(0, endM - startM),
+                          metersMultiplier: segScale,
+                          segmentKey: segKey,
+                          source: 'click',
+                        }];
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          }
+        } else {
+          // DC: Single click to toggle polygon selection
+          const panels = polygonById.current || {};
+          let clickedPolygonId = null;
+
+          const isPointInPoly = (pt, poly) => {
+            let inside = false;
+            for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+              const xi = poly[i].x, yi = poly[i].y;
+              const xj = poly[j].x, yj = poly[j].y;
+              const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+                (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi + 1e-12) + xi);
+              if (intersect) inside = !inside;
+            }
+            return inside;
+          };
+
+          const latLngsToLayerPoints = (layer) => {
+            if (!map || !layer || typeof layer.getLatLngs !== 'function') return null;
+            let ll = layer.getLatLngs();
+            while (Array.isArray(ll) && ll.length && Array.isArray(ll[0])) ll = ll[0];
+            while (Array.isArray(ll) && ll.length && Array.isArray(ll[0])) ll = ll[0];
+            const ring = Array.isArray(ll) ? ll : null;
+            if (!ring || ring.length < 3) return null;
+            const pts = ring.map((p) => map.latLngToLayerPoint(p)).filter(Boolean);
+            if (pts.length < 3) return null;
+            const a = pts[0];
+            const z = pts[pts.length - 1];
+            if (a && z && a.x === z.x && a.y === z.y) pts.pop();
+            return pts;
+          };
+
+          Object.keys(panels).forEach((pid) => {
+            if (clickedPolygonId) return;
+            const info = panels[pid];
+            const layer = info?.layer;
+            if (!layer) return;
+            const poly = latLngsToLayerPoints(layer);
+            if (poly && isPointInPoly(clickPoint, poly)) {
+              clickedPolygonId = pid;
+            }
+          });
+
+          if (clickedPolygonId) {
+            const polygonInfo = polygonById.current[clickedPolygonId];
+            const finalSelectedIds = new Set();
+
+            if (polygonInfo && polygonInfo.isSmallTable && polygonInfo.stringId) {
+              Object.keys(polygonById.current).forEach(pid => {
+                const info = polygonById.current[pid];
+                if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
+                  finalSelectedIds.add(pid);
+                }
+              });
+            } else {
+              finalSelectedIds.add(clickedPolygonId);
+            }
+
+            setSelectedPolygons(prev => {
+              const next = new Set(prev);
+              // Toggle: if all are selected, deselect; otherwise select
+              const allSelected = Array.from(finalSelectedIds).every(id => next.has(id));
+              if (allSelected) {
+                finalSelectedIds.forEach(id => next.delete(id));
+              } else {
+                finalSelectedIds.forEach(id => next.add(id));
+              }
+              return next;
+            });
+          }
         }
       }
       
@@ -3801,6 +4090,7 @@ export default function BaseModule({
           const termPct = total > 0 ? ((termDone / total) * 100).toFixed(1) : '0.0';
           const isMc4Mode = mc4SelectionMode === 'mc4';
           const isTermMode = mc4SelectionMode === 'termination';
+          const canTerminate = mc4Done > 0;
           return (
             <div className="min-w-[800px] border-2 border-slate-700 bg-slate-900/40 py-3 px-3">
               <div className="flex flex-col gap-2">
@@ -3843,13 +4133,23 @@ export default function BaseModule({
                 <div className="grid grid-cols-[24px_170px_repeat(3,max-content)] items-center gap-x-3 gap-y-2">
                   <button
                     type="button"
-                    onClick={() => setMc4SelectionMode(isTermMode ? null : 'termination')}
+                    onClick={() => {
+                      if (!canTerminate) {
+                        // No MC4 (blue) ends yet; termination cannot be selected.
+                        if (mc4SelectionMode !== 'mc4') setMc4SelectionMode('mc4');
+                        return;
+                      }
+                      setMc4SelectionMode(isTermMode ? null : 'termination');
+                    }}
+                    disabled={!canTerminate}
                     className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
-                      isTermMode 
+                      (!canTerminate)
+                        ? 'border-slate-600 bg-slate-900/40 opacity-60 cursor-not-allowed'
+                        : isTermMode 
                         ? 'border-emerald-500 bg-emerald-500 text-white' 
                         : 'border-slate-500 bg-slate-800 hover:border-emerald-400'
                     }`}
-                    title="Select Cable Termination mode"
+                    title={canTerminate ? 'Select Cable Termination mode' : 'Select MC4 Install first (no blue ends yet)'}
                   >
                     {isTermMode && <span className="text-xs font-bold">✓</span>}
                   </button>
@@ -4035,9 +4335,11 @@ export default function BaseModule({
             <button
               onClick={() =>
                 exportToExcel(dailyLog, {
-                  moduleKey: activeMode?.key || '',
-                  moduleLabel: moduleName,
-                  unit: 'm',
+                  moduleKey: isMC4 ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST') : (activeMode?.key || ''),
+                  moduleLabel: isMC4 
+                    ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
+                    : moduleName,
+                  unit: isMC4 ? 'ends' : 'm',
                 })
               }
               disabled={dailyLog.length === 0}
