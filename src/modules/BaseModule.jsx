@@ -518,6 +518,18 @@ export default function BaseModule({
   useEffect(() => {
     mc4SelectionModeRef.current = mc4SelectionMode;
   }, [mc4SelectionMode]);
+  const [mc4Toast, setMc4Toast] = useState('');
+  const mc4ToastTimerRef = useRef(null);
+  const showMc4Toast = useCallback((msg) => {
+    if (!msg) return;
+    setMc4Toast(msg);
+    try {
+      if (mc4ToastTimerRef.current) clearTimeout(mc4ToastTimerRef.current);
+    } catch (_e) {
+      void _e;
+    }
+    mc4ToastTimerRef.current = setTimeout(() => setMc4Toast(''), 2200);
+  }, []);
 
   // NOTE: Do not auto-force a selection mode when entering MC4.
   // Users can intentionally set it to null (no mode) and we must respect that.
@@ -1996,6 +2008,10 @@ export default function BaseModule({
                   if (noteMode) return;
                   // Require selection mode to be set
                   const currentMode = mc4SelectionModeRef.current; // null | 'mc4' | 'termination'
+                  if (!currentMode) {
+                    showMc4Toast('Please select a mode above.');
+                    return;
+                  }
                   const side = sideFromClick(evt);
                   const prev = mc4GetPanelState(uniqueId);
                   // Calculate next state based on current mode (using ref to get latest value)
@@ -2008,12 +2024,14 @@ export default function BaseModule({
                     // If not already MC4, do nothing (can't terminate without MC4).
                     if (nextState === 'mc4') nextState = 'terminated';
                     else if (nextState === 'terminated') nextState = 'terminated';
-                    else return;
+                    else {
+                      showMc4Toast('You must complete MC4 installation first.');
+                      return;
+                    }
                   } else {
-                    // No mode: forward-only cycle null -> mc4 -> terminated
-                    if (nextState == null) nextState = 'mc4';
-                    else if (nextState === 'mc4') nextState = 'terminated';
-                    else nextState = 'terminated';
+                    // No mode: should not happen due to guard above
+                    showMc4Toast('Please select a mode above.');
+                    return;
                   }
                   const next = { ...prev, [side]: nextState };
                   setMc4PanelStates((s) => ({ ...(s || {}), [uniqueId]: next }));
@@ -3267,39 +3285,58 @@ export default function BaseModule({
             if (ids.length > 0) {
               // Calculate next state based on current mode (using ref to get latest value)
               const currentMode = mc4SelectionModeRef.current; // null | 'mc4' | 'termination'
-              const advanceState = (cur) => {
-                if (currentMode === 'mc4') {
-                  // MC4 mode: set to MC4 (blue), but never downgrade TERMINATED (green)
-                  if (cur === 'terminated') return 'terminated';
-                  return 'mc4';
-                } else if (currentMode === 'termination') {
-                  // Termination mode: ONLY MC4 (blue) -> TERMINATED (green)
-                  if (cur === 'mc4') return 'terminated';
-                  if (cur === 'terminated') return 'terminated';
+              if (!currentMode) {
+                // Show warning, but DO NOT return early; onMouseUp must continue so the selection box closes.
+                showMc4Toast('Please select a mode above.');
+              } else {
+                const advanceState = (cur) => {
+                  if (currentMode === 'mc4') {
+                    // MC4 mode: set to MC4 (blue), but never downgrade TERMINATED (green)
+                    if (cur === 'terminated') return 'terminated';
+                    return 'mc4';
+                  } else if (currentMode === 'termination') {
+                    // Termination mode: ONLY MC4 (blue) -> TERMINATED (green)
+                    if (cur === 'mc4') return 'terminated';
+                    if (cur === 'terminated') return 'terminated';
+                    return cur;
+                  }
                   return cur;
-                }
-                // No mode - forward-only cycle: null -> mc4 -> terminated
-                if (cur == null) return 'mc4';
-                if (cur === 'mc4') return 'terminated';
-                return 'terminated';
-              };
-              const changes = ids.map((pid) => {
-                const prev = mc4GetPanelState(pid);
-                const next = isRightClick
-                  ? { left: null, right: null }
-                  : { left: advanceState(prev.left), right: advanceState(prev.right) };
-                return { id: pid, prev, next };
-              });
-              setMc4PanelStates((s) => {
-                const out = { ...(s || {}) };
-                changes.forEach((c) => {
-                  if (!c?.id) return;
-                  if (isRightClick) delete out[c.id];
-                  else out[c.id] = { left: c.next.left ?? null, right: c.next.right ?? null };
+                };
+                const changes = ids.map((pid) => {
+                  const prev = mc4GetPanelState(pid);
+                  const next = isRightClick
+                    ? { left: null, right: null }
+                    : { left: advanceState(prev.left), right: advanceState(prev.right) };
+                  return { id: pid, prev, next };
                 });
-                return out;
-              });
-              mc4PushHistory(changes);
+
+                // Warn if user is trying to terminate panels that are not MC4-installed (not blue)
+                if (!isRightClick && currentMode === 'termination') {
+                  let advanced = 0;
+                  let blocked = 0;
+                  changes.forEach((c) => {
+                    const prev = c?.prev || { left: null, right: null };
+                    const next = c?.next || { left: null, right: null };
+                    if (prev.left === 'mc4' && next.left === 'terminated') advanced += 1;
+                    if (prev.right === 'mc4' && next.right === 'terminated') advanced += 1;
+                    if (prev.left == null && next.left == null) blocked += 1;
+                    if (prev.right == null && next.right == null) blocked += 1;
+                  });
+                  if (advanced === 0 && blocked > 0) showMc4Toast('You must complete MC4 installation first.');
+                  else if (blocked > 0) showMc4Toast('Some tables were not MC4-installed yet.');
+                }
+
+                setMc4PanelStates((s) => {
+                  const out = { ...(s || {}) };
+                  changes.forEach((c) => {
+                    if (!c?.id) return;
+                    if (isRightClick) delete out[c.id];
+                    else out[c.id] = { left: c.next.left ?? null, right: c.next.right ?? null };
+                  });
+                  return out;
+                });
+                mc4PushHistory(changes);
+              }
             }
           } else if (isLV) {
           // LV MODE: Box select inv_id labels (daily completion)
@@ -4517,6 +4554,11 @@ export default function BaseModule({
           >
             Original DWG
           </a>
+          {isMC4 && mc4Toast ? (
+            <div className="mt-1 max-w-[220px] border border-amber-500/70 bg-amber-950/30 px-2 py-1 text-[10px] font-bold text-amber-200">
+              {mc4Toast}
+            </div>
+          ) : null}
 
           {stringTextToggleEnabled && (
             <button
@@ -4767,7 +4809,11 @@ export default function BaseModule({
             ? (mc4Counts?.terminatedCompleted || 0) 
             : (mc4Counts?.mc4Completed || 0))
           : workAmount}
-        workUnit={isMC4 ? 'ends' : 'm'}
+        workUnit={
+          isMC4
+            ? (mc4SelectionMode === 'termination' ? 'cables terminated' : 'mc4')
+            : 'm'
+        }
       />
       
       {/* History Modal */}

@@ -162,16 +162,35 @@ export const MC4_MODULE_CONFIG = {
   invIdTextBgCornerRadius: 0,
   invIdTextMinTextZoom: 16,
   invIdTextMinBgZoom: 18,
-  // For MC4: do NOT render string_text at all.
-  stringTextVisibility: 'none',
+  // MC4: render ONLY subs_text labels (we map subs_text.geojson to the shared string_text renderer).
+  // We still do NOT include string_text.geojson in this mode.
+  stringTextVisibility: 'always',
   stringTextToggle: false,
   stringTextDefaultOn: false,
+  // subs_text styling
+  stringTextColor: 'rgba(250,204,21,0.98)',
+  stringTextBaseSize: 22,
+  stringTextStyle: '400',
+  stringTextStrokeColor: 'rgba(0,0,0,0.85)',
+  stringTextStrokeWidthFactor: 1.2,
+  stringTextMinZoom: 0,
+  stringTextMinFontSize: 14,
+  stringTextMaxFontSize: 26,
+  stringTextRefZoom: 20,
   geojsonFiles: [
     {
       url: '/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/full.geojson',
       name: 'full',
       color: '#2563eb',
       fillColor: '#3b82f6',
+    },
+    // Feed subs_text into the existing "string_text" rendering path.
+    { url: '/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/subs_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
+    {
+      url: '/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/subs.geojson',
+      name: 'subs',
+      color: '#94a3b8',
+      fillColor: '#94a3b8',
     },
     {
       url: '/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/inv_id.geojson',
