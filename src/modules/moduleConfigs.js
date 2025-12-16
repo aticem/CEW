@@ -209,4 +209,32 @@ export const MC4_MODULE_CONFIG = {
   ],
 };
 
-
+export const MV_TERMINATION_MODULE_CONFIG = {
+  key: 'MVT',
+  label: 'MV TERMINATION PROGRESS TRACKING',
+  // Files live in: public/MV_TERMINATION_PROGRESS_TRACKING/
+  csvFormat: null, // no CSV for now
+  csvPath: null,
+  linkPath: '/MV_TERMINATION_PROGRESS_TRACKING/link',
+  simpleCounters: true,
+  stringTextVisibility: 'always',
+  stringTextToggle: true,
+  stringTextDefaultOn: true,
+  stringTextColor: 'rgba(250,204,21,0.98)',
+  stringTextBaseSize: 22,
+  stringTextStyle: '400',
+  stringTextStrokeColor: 'rgba(0,0,0,0.85)',
+  stringTextStrokeWidthFactor: 1.2,
+  stringTextMinZoom: 0,
+  stringTextMinFontSize: 14,
+  stringTextMaxFontSize: 26,
+  stringTextRefZoom: 20,
+  geojsonFiles: [
+    { url: '/MV_TERMINATION_PROGRESS_TRACKING/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
+    { url: '/MV_TERMINATION_PROGRESS_TRACKING/mv_trench.geojson', name: 'mv_trench', color: '#eab308', fillColor: '#facc15' },
+    { url: '/MV_TERMINATION_PROGRESS_TRACKING/subs.geojson', name: 'subs', color: '#94a3b8', fillColor: '#94a3b8' },
+    { url: '/MV_TERMINATION_PROGRESS_TRACKING/subs_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
+    { url: '/MV_TERMINATION_PROGRESS_TRACKING/mv_text.geojson', name: 'mv_text', color: '#22c55e', fillColor: '#22c55e' },
+    { url: '/MV_TERMINATION_PROGRESS_TRACKING/arrow.geojson', name: 'arrow', color: '#f97316', fillColor: '#fb923c' },
+  ],
+};
