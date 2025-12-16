@@ -17,6 +17,12 @@ export function useChartExport() {
       const moduleKey = String(options.moduleKey || "MODULE").toUpperCase();
       const moduleLabel = String(options.moduleLabel || moduleKey);
       const unit = String(options.unit || "m");
+      const dataSheetName = String(options.dataSheetName || "Daily Progress");
+      const chartSheetNameRaw = String(options.chartSheetName || "Chart");
+      const chartSheetName =
+        chartSheetNameRaw === dataSheetName
+          ? `${chartSheetNameRaw} (Chart)`.slice(0, 31)
+          : chartSheetNameRaw.slice(0, 31);
 
       // 1. Aggregate data by date
       const aggregated = {};
@@ -141,7 +147,7 @@ export function useChartExport() {
       workbook.created = new Date();
 
       // Sheet 1: Data
-      const dataSheet = workbook.addWorksheet("Daily Progress");
+      const dataSheet = workbook.addWorksheet(dataSheetName.slice(0, 31));
 
       const hasDcBreakdown = sorted.some((r) => (r.plus_dc || 0) !== 0 || (r.minus_dc || 0) !== 0);
       dataSheet.columns = [
@@ -201,7 +207,7 @@ export function useChartExport() {
       };
 
       // Sheet 2: Chart
-      const chartSheet = workbook.addWorksheet("Chart");
+      const chartSheet = workbook.addWorksheet(chartSheetName);
 
       // Add chart image
       const imageId = workbook.addImage({

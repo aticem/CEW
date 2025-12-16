@@ -1253,6 +1253,8 @@ export default function BaseModule({
       }
 
       const runTotal = cursorCandidates ? cursorCandidates.length : total;
+      // MVT: slightly larger labels for SS / counter / TESTED only
+      const mvtBaseSizeLocal = isMVT ? (Number(stringTextBaseSizeCfg) * 1.25) : Number(stringTextBaseSizeCfg);
       for (let k = 0; k < runTotal; k++) {
         if (count >= maxCount) break;
         const idx = cursorCandidates ? cursorCandidates[k] : (iterateIndices ? iterateIndices[k] : k);
@@ -1268,7 +1270,8 @@ export default function BaseModule({
           const norm = normalizeId(raw);
           if (norm && /^ss\d{1,2}$/i.test(norm)) {
             const terminated = Math.max(0, Math.min(3, Number(mvtCountsByStation[norm] ?? 0)));
-            nextTextColor = terminated === 3 ? 'rgba(34,197,94,0.98)' : 'rgba(220,38,38,0.98)';
+            // MVT rule: 3/3 => GREEN, otherwise WHITE (not red)
+            nextTextColor = terminated === 3 ? 'rgba(34,197,94,0.98)' : 'rgba(255,255,255,0.98)';
           }
         }
 
@@ -1336,7 +1339,7 @@ export default function BaseModule({
           label.options.textColor = nextTextColor;
           needsRedraw = true;
         }
-        // Update per-draw MVT metadata for click handling on SS labels
+        // Update per-draw MVT metadata for click handling on SS labels (+ readability background in MVT)
         if (isMVT) {
           const raw = String(pt.text || '').trim();
           const norm = normalizeId(raw);
@@ -1347,12 +1350,24 @@ export default function BaseModule({
             label._mvtLocked = terminated === 3;
             if (label.options.radius !== 22) { label.options.radius = 22; needsRedraw = true; }
             if (label.options.interactive !== true) { label.options.interactive = true; needsRedraw = true; }
+            if (label.options.textBaseSize !== mvtBaseSizeLocal) { label.options.textBaseSize = mvtBaseSizeLocal; needsRedraw = true; }
+            // Background pill for visibility
+            if (label.options.bgColor !== 'rgba(10,15,25,0.75)') { label.options.bgColor = 'rgba(10,15,25,0.75)'; needsRedraw = true; }
+            if (label.options.bgPaddingX !== 4) { label.options.bgPaddingX = 4; needsRedraw = true; }
+            if (label.options.bgPaddingY !== 2) { label.options.bgPaddingY = 2; needsRedraw = true; }
+            if (label.options.bgCornerRadius !== 3) { label.options.bgCornerRadius = 3; needsRedraw = true; }
           } else {
             label._mvtStationNorm = '';
             label._mvtStationLabel = '';
             label._mvtLocked = false;
             if (label.options.radius !== 0) { label.options.radius = 0; needsRedraw = true; }
             if (label.options.interactive !== false) { label.options.interactive = false; needsRedraw = true; }
+            if (label.options.textBaseSize !== stringTextBaseSizeCfg) { label.options.textBaseSize = stringTextBaseSizeCfg; needsRedraw = true; }
+            // Clear background when pooled label is reused for non-SS text
+            if (label.options.bgColor != null) { label.options.bgColor = null; needsRedraw = true; }
+            if (label.options.bgPaddingX !== 0) { label.options.bgPaddingX = 0; needsRedraw = true; }
+            if (label.options.bgPaddingY !== 0) { label.options.bgPaddingY = 0; needsRedraw = true; }
+            if (label.options.bgCornerRadius !== 0) { label.options.bgCornerRadius = 0; needsRedraw = true; }
           }
         }
         const nextRot = pt.angle || 0;
@@ -1369,9 +1384,9 @@ export default function BaseModule({
 
       // MVT: draw clickable termination counters next to each substation label.
       // Helper: compute the effective font size in pixels (must match L.TextLabel._updatePath)
-      const computeFontSizePx = () => {
+      const computeFontSizePx = (baseSize) => {
         const scale = Math.pow(2, zoom - stringTextRefZoomCfg);
-        let fs = stringTextBaseSizeCfg * scale;
+        let fs = (typeof baseSize === 'number' ? baseSize : stringTextBaseSizeCfg) * scale;
         const minFs = typeof stringTextMinFontSizeCfg === 'number' ? stringTextMinFontSizeCfg : null;
         const maxFs = typeof stringTextMaxFontSizeCfg === 'number' ? stringTextMaxFontSizeCfg : null;
         if (minFs != null) fs = Math.max(minFs, fs);
@@ -1403,7 +1418,7 @@ export default function BaseModule({
           if (!(norm && /^ss\d{1,2}$/i.test(norm))) continue;
 
           // Place the label at the actual on-screen text location (important for click hit-testing).
-          const fs = computeFontSizePx();
+          const fs = computeFontSizePx(mvtBaseSizeLocal);
           const rot = (pt.angle || 0) * Math.PI / 180;
           const baseP = map.latLngToContainerPoint([pt.lat, pt.lng]);
           const offX = counterOffsetXFactorFor(rawStation) * fs;
@@ -1414,14 +1429,15 @@ export default function BaseModule({
           const terminated = Math.max(0, Math.min(3, Number(mvtCountsByStation[norm] ?? 0)));
           const locked = terminated === 3;
           const counterText = `${terminated}/3`;
-          const counterColor = locked ? 'rgba(34,197,94,0.98)' : 'rgba(220,38,38,0.98)';
+          // MVT rule: 3/3 => GREEN, otherwise WHITE (not red)
+          const counterColor = locked ? 'rgba(34,197,94,0.98)' : 'rgba(255,255,255,0.98)';
 
           let lbl = counterPool[counterCount];
           if (!lbl) {
             lbl = L.textLabel(ll, {
               text: counterText,
               renderer: canvasRenderer,
-              textBaseSize: stringTextBaseSizeCfg,
+              textBaseSize: mvtBaseSizeLocal,
               refZoom: stringTextRefZoomCfg,
               textStyle: stringTextStyleCfg,
               textColor: counterColor,
@@ -1430,6 +1446,12 @@ export default function BaseModule({
               minFontSize: stringTextMinFontSizeCfg,
               maxFontSize: stringTextMaxFontSizeCfg,
               rotation: pt.angle || 0,
+              underline: true,
+              underlineColor: counterColor,
+              bgColor: 'rgba(10,15,25,0.75)',
+              bgPaddingX: 4,
+              bgPaddingY: 2,
+              bgCornerRadius: 3,
               offsetXFactor: 0,
               offsetYFactor: 0,
               radius: 18, // hitbox for canvas event detection
@@ -1482,6 +1504,13 @@ export default function BaseModule({
           if (lbl.options.textColor !== counterColor) { lbl.options.textColor = counterColor; redraw = true; }
           if (lbl.options.rotation !== (pt.angle || 0)) { lbl.options.rotation = pt.angle || 0; redraw = true; }
           if (lbl.options.radius !== 18) { lbl.options.radius = 18; redraw = true; }
+          if (lbl.options.textBaseSize !== mvtBaseSizeLocal) { lbl.options.textBaseSize = mvtBaseSizeLocal; redraw = true; }
+          if (lbl.options.underline !== true) { lbl.options.underline = true; redraw = true; }
+          if (lbl.options.underlineColor !== counterColor) { lbl.options.underlineColor = counterColor; redraw = true; }
+          if (lbl.options.bgColor !== 'rgba(10,15,25,0.75)') { lbl.options.bgColor = 'rgba(10,15,25,0.75)'; redraw = true; }
+          if (lbl.options.bgPaddingX !== 4) { lbl.options.bgPaddingX = 4; redraw = true; }
+          if (lbl.options.bgPaddingY !== 2) { lbl.options.bgPaddingY = 2; redraw = true; }
+          if (lbl.options.bgCornerRadius !== 3) { lbl.options.bgCornerRadius = 3; redraw = true; }
 
           if (!counterLayer.hasLayer(lbl)) counterLayer.addLayer(lbl);
           if (redraw) lbl.redraw?.();
@@ -1516,7 +1545,7 @@ export default function BaseModule({
           if (!(normStation && (/^ss\d{1,2}$/i.test(normStation) || /^sub\d{1,2}$/i.test(normStation)))) continue;
 
           // Place the label at the actual on-screen "below" location.
-          const fs = computeFontSizePx();
+          const fs = computeFontSizePx(mvtBaseSizeLocal);
           const rot = (pt.angle || 0) * Math.PI / 180;
           const baseP = map.latLngToContainerPoint([pt.lat, pt.lng]);
           const offY = 1.25 * fs;
@@ -1532,7 +1561,7 @@ export default function BaseModule({
             lbl = L.textLabel(ll, {
               text: 'TESTED',
               renderer: canvasRenderer,
-              textBaseSize: stringTextBaseSizeCfg,
+              textBaseSize: mvtBaseSizeLocal,
               refZoom: stringTextRefZoomCfg,
               textStyle: stringTextStyleCfg,
               textColor: testedColor,
@@ -1541,6 +1570,10 @@ export default function BaseModule({
               minFontSize: stringTextMinFontSizeCfg,
               maxFontSize: stringTextMaxFontSizeCfg,
               rotation: pt.angle || 0,
+              bgColor: 'rgba(10,15,25,0.75)',
+              bgPaddingX: 4,
+              bgPaddingY: 2,
+              bgCornerRadius: 3,
               underline: true,
               underlineColor: testedColor,
               offsetYFactor: 0,
@@ -1618,6 +1651,11 @@ export default function BaseModule({
           if (lbl.options.textColor !== testedColor) { lbl.options.textColor = testedColor; redraw = true; }
           if (lbl.options.underlineColor !== testedColor) { lbl.options.underlineColor = testedColor; redraw = true; }
           if (lbl.options.radius !== 18) { lbl.options.radius = 18; redraw = true; }
+          if (lbl.options.textBaseSize !== mvtBaseSizeLocal) { lbl.options.textBaseSize = mvtBaseSizeLocal; redraw = true; }
+          if (lbl.options.bgColor !== 'rgba(10,15,25,0.75)') { lbl.options.bgColor = 'rgba(10,15,25,0.75)'; redraw = true; }
+          if (lbl.options.bgPaddingX !== 4) { lbl.options.bgPaddingX = 4; redraw = true; }
+          if (lbl.options.bgPaddingY !== 2) { lbl.options.bgPaddingY = 2; redraw = true; }
+          if (lbl.options.bgCornerRadius !== 3) { lbl.options.bgCornerRadius = 3; redraw = true; }
           if (!testedLayer.hasLayer(lbl)) testedLayer.addLayer(lbl);
           if (redraw) lbl.redraw?.();
 
@@ -2545,9 +2583,26 @@ export default function BaseModule({
 
     for (const file of activeMode.geojsonFiles) {
       try {
-        const response = await fetch(file.url);
-        if (!response.ok) continue;
-        const data = await response.json();
+        const response = await fetch(file.url, { cache: 'no-store' });
+        if (!response.ok) {
+          console.error('Error loading GeoJSON:', { url: file.url, name: file.name, status: response.status });
+          continue;
+        }
+        const contentType = response.headers?.get?.('content-type') || '';
+        const raw = await response.text();
+        let data = null;
+        try {
+          data = JSON.parse(raw);
+        } catch (e) {
+          console.error('Error loading GeoJSON:', {
+            url: file.url,
+            name: file.name,
+            status: response.status,
+            contentType,
+            preview: String(raw || '').slice(0, 120),
+          });
+          continue;
+        }
         totalFeatures += data.features?.length || 0;
 
         // MVF: build a graph from mv_trench for shortest-path highlighting
@@ -4983,6 +5038,9 @@ export default function BaseModule({
       : (isMC4 
         ? Object.keys(mc4PanelStates || {}).length 
         : selectedPolygons.size));
+  const mvtCompletedForSubmit = isMVT
+    ? Math.max(0, Object.values(mvtTerminationByStation || {}).reduce((s, v) => s + Math.max(0, Math.min(3, Number(v) || 0)), 0))
+    : 0;
   const workAmount = isMVF 
     ? mvfSelectedCableMeters 
     : (isMC4 
@@ -5271,7 +5329,7 @@ export default function BaseModule({
 
             <button
               onClick={() => setModalOpen(true)}
-              disabled={workSelectionCount === 0 || noteMode || (isMC4 && !mc4SelectionMode)}
+              disabled={(isMVT ? mvtCompletedForSubmit === 0 : workSelectionCount === 0) || noteMode || (isMC4 && !mc4SelectionMode)}
               className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
               title={isMC4 && !mc4SelectionMode ? "Select MC4 Install or Cable Termination first" : "Submit Work"}
               aria-label="Submit Work"
@@ -5292,11 +5350,14 @@ export default function BaseModule({
             <button
               onClick={() =>
                 exportToExcel(dailyLog, {
-                  moduleKey: isMC4 ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST') : (activeMode?.key || ''),
-                  moduleLabel: isMC4 
+                  moduleKey: isMC4
+                    ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST')
+                    : (isMVT ? 'MVT_TERM' : (activeMode?.key || '')),
+                  moduleLabel: isMC4
                     ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
-                    : moduleName,
-                  unit: isMC4 ? 'ends' : 'm',
+                    : (isMVT ? 'Cable Termination' : moduleName),
+                  unit: isMC4 ? 'ends' : (isMVT ? 'cables' : 'm'),
+                  chartSheetName: isMVT ? 'Cable Termination' : undefined,
                 })
               }
               disabled={dailyLog.length === 0}
@@ -5452,24 +5513,39 @@ export default function BaseModule({
                 </>
               ) : (
                 <>
-                  <div className="flex items-center gap-2">
-                    <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-white">Uncompleted</span>
-                  </div>
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Completed</span>
-                  </div>
+                  {isMVT ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-white">Unterminated</span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Terminated</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-white">Uncompleted</span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Completed</span>
+                      </div>
+                    </>
+                  )}
                   {isMVT ? (
                     <>
                       <div className="mt-3 border-t border-slate-700/70" />
                       <div className="mt-2 flex items-center gap-2">
-                        <span className="h-3 w-3 border-2 border-red-900 bg-red-500" aria-hidden="true" />
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">SSX – Red → Not Terminated</span>
+                        <span className="h-3 w-3 border-2 border-emerald-900 bg-emerald-500" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">TESTED – Passed</span>
                       </div>
                       <div className="mt-2 flex items-center gap-2">
-                        <span className="h-3 w-3 border-2 border-emerald-900 bg-emerald-500" aria-hidden="true" />
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">SSX – Green → Terminated</span>
+                        <span className="h-3 w-3 border-2 border-red-900 bg-red-500" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">TESTED – Failed</span>
                       </div>
                     </>
                   ) : null}
@@ -5599,22 +5675,7 @@ export default function BaseModule({
             })}
           </div>
 
-          {/* Debug (shows why N/A happens) */}
-          <div className="mt-3 border border-slate-800 bg-slate-950/40 px-2 py-2">
-            <div className="text-[10px] font-black uppercase tracking-wide text-slate-400">Debug</div>
-            <div className="mt-1 text-[10px] font-mono text-slate-300 break-all">
-              fromKey: {String(mvtTestPopup.fromKey || '(not found)')}
-            </div>
-            <div className="mt-1 text-[10px] font-mono text-slate-400">
-              csvTotals: {String(mvtCsvTotals?.fromRows ?? 0)} rows, total={String(mvtCsvTotals?.total ?? 0)}
-            </div>
-            <div className="mt-1 text-[10px] font-mono text-slate-500 break-all">
-              csvLoad: keys={String(mvtCsvDebug?.keys ?? 0)} rawLines={String(mvtCsvDebug?.rawLines ?? 0)} filtered={String(mvtCsvDebug?.filteredLines ?? 0)} len={String(mvtCsvDebug?.textLen ?? 0)}
-            </div>
-            {mvtCsvDebug?.url ? (
-              <div className="mt-1 text-[10px] font-mono text-slate-600 break-all">url: {String(mvtCsvDebug.url)}</div>
-            ) : null}
-          </div>
+          {/* Debug removed (requested) */}
         </div>
       ) : null}
 
@@ -5913,19 +5974,21 @@ export default function BaseModule({
           addRecord({ ...record, notes: notesOnDate });
           alert('Work submitted successfully!');
         }}
-        moduleKey={isMC4 ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST') : (activeMode?.key || '')}
-        moduleLabel={isMC4 
+        moduleKey={isMC4
+          ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST')
+          : (isMVT ? 'MVT_TERM' : (activeMode?.key || ''))}
+        moduleLabel={isMC4
           ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
-          : moduleName}
-        workAmount={isMC4 
-          ? (mc4SelectionMode === 'termination' 
-            ? (mc4Counts?.terminatedCompleted || 0) 
+          : (isMVT ? 'Cable Termination' : moduleName)}
+        workAmount={isMC4
+          ? (mc4SelectionMode === 'termination'
+            ? (mc4Counts?.terminatedCompleted || 0)
             : (mc4Counts?.mc4Completed || 0))
-          : workAmount}
+          : (isMVT ? mvtCompletedForSubmit : workAmount)}
         workUnit={
           isMC4
             ? (mc4SelectionMode === 'termination' ? 'cables terminated' : 'mc4')
-            : 'm'
+            : (isMVT ? 'cables terminated' : 'm')
         }
       />
       
