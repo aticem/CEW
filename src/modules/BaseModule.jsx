@@ -25,6 +25,12 @@ L.TextLabel = L.CircleMarker.extend({
     textColor: 'rgba(255,255,255,0.65)',
     textStrokeColor: 'rgba(0,0,0,0.6)',
     textStrokeWidthFactor: 1,
+    underline: false,
+    underlineColor: null, // defaults to textColor if null
+    underlineWidthFactor: 1,
+    offsetX: 0, // px (applied after rotation)
+    offsetXFactor: 0, // multiplied by computed fontSize (applied after rotation)
+    offsetYFactor: 0, // multiplied by computed fontSize (applied after rotation)
     minFontSize: null,
     maxFontSize: null,
     bgColor: null, // e.g. 'rgba(11,18,32,0.85)'
@@ -72,6 +78,11 @@ L.TextLabel = L.CircleMarker.extend({
     const rotationRad = (this.options.rotation || 0) * Math.PI / 180;
     ctx.translate(p.x, p.y);
     ctx.rotate(rotationRad);
+    // Apply optional offsets AFTER rotation so "below" stays aligned with rotated text.
+    const offX = Number(this.options.offsetX) || 0;
+    const offXf = (Number(this.options.offsetXFactor) || 0) * fontSize;
+    const offY = (Number(this.options.offsetYFactor) || 0) * fontSize;
+    if (offX || offXf || offY) ctx.translate(offX + offXf, offY);
 
     ctx.font = this.options.textStyle + ' ' + fontSize + 'px sans-serif';
     // If background is configured but hidden at this zoom, allow an alternate text color
@@ -140,6 +151,21 @@ L.TextLabel = L.CircleMarker.extend({
     }
     
     ctx.fillText(this.options.text, 0, 0);
+
+    // Optional underline (used for clickable "TESTED" label)
+    if (this.options.underline) {
+      const metrics = ctx.measureText(this.options.text || '');
+      const w = metrics.width || 0;
+      const y = (fontSize * 0.55); // slightly below baseline-middle
+      const uc = this.options.underlineColor || ctx.fillStyle;
+      const uf = typeof this.options.underlineWidthFactor === 'number' ? this.options.underlineWidthFactor : 1;
+      ctx.beginPath();
+      ctx.lineWidth = Math.max(1, fontSize * 0.08) * Math.max(0.6, uf);
+      ctx.strokeStyle = uc;
+      ctx.moveTo(-w / 2, y);
+      ctx.lineTo(w / 2, y);
+      ctx.stroke();
+    }
     
     ctx.restore();
   }
@@ -257,6 +283,7 @@ export default function BaseModule({
   // Treat any module with mvf-style CSV/logic as MVF-mode (e.g., MV + FIBRE modules).
   const isMVF = String(activeMode?.csvFormat || '').toLowerCase() === 'mvf';
   const isMC4 = String(activeMode?.key || '').toUpperCase() === 'MC4';
+  const isMVT = String(activeMode?.key || '').toUpperCase() === 'MVT';
   const mvfCircuitsMultiplier =
     typeof activeMode?.circuitsMultiplier === 'number' && Number.isFinite(activeMode.circuitsMultiplier)
       ? activeMode.circuitsMultiplier
@@ -358,11 +385,37 @@ export default function BaseModule({
   const rafRef = useRef(null);
   const stringTextPointsRef = useRef([]); // [{lat,lng,text,angle,stringId}]
   const stringTextLayerRef = useRef(null); // L.LayerGroup
+  // MVT: separate interactive layer for clickable "TESTED" labels (must not be in pointerEvents:none pane).
+  const mvtTestedLayerRef = useRef(null); // L.LayerGroup
+  const mvtTestedLabelPoolRef = useRef([]); // L.TextLabel[]
+  const mvtTestedLabelActiveCountRef = useRef(0);
+  // MVT: separate interactive layer for clickable termination counters (0/3..3/3).
+  const mvtCounterLayerRef = useRef(null); // L.LayerGroup
+  const mvtCounterLabelPoolRef = useRef([]); // L.TextLabel[]
+  const mvtCounterLabelActiveCountRef = useRef(0);
+  const mvtTestCsvByFromRef = useRef({}); // fromNorm -> { L1: 'PASS'|'FAIL'|..., L2, L3 }
+  const mvtTerminationByStationRef = useRef({}); // ssNorm -> 0..3
   
   const [_status, setStatus] = useState('Initializing map...');
   const [lengthData, setLengthData] = useState({}); // Length data from CSV
   const [stringPoints, setStringPoints] = useState([]); // String points (id, lat, lng)
   const [selectedPolygons, setSelectedPolygons] = useState(new Set()); // Selected polygon unique IDs
+  const selectedPolygonsRef = useRef(selectedPolygons);
+  useEffect(() => {
+    selectedPolygonsRef.current = selectedPolygons;
+  }, [selectedPolygons]);
+  // MVT: test panel state for "TESTED" click
+  const [mvtTestPanel, setMvtTestPanel] = useState(null); // { stationLabel, fromKey, phases: {L1,L2,L3} } | null
+  // MVT: manual termination counter state (persistent)
+  const [mvtTerminationByStation, setMvtTerminationByStation] = useState(() => ({})); // ssNorm -> 0..3
+  useEffect(() => {
+    mvtTerminationByStationRef.current = mvtTerminationByStation || {};
+  }, [mvtTerminationByStation]);
+  const [mvtTermPopup, setMvtTermPopup] = useState(null); // { stationLabel, stationNorm, draft, x, y } | null
+  const [mvtTestPopup, setMvtTestPopup] = useState(null); // { stationLabel, fromKey, phases, x, y } | null
+  const [mvtCsvTotals, setMvtCsvTotals] = useState(() => ({ total: 0, fromRows: 0, toRows: 0 })); // generic total
+  const [mvtCsvVersion, setMvtCsvVersion] = useState(0);
+  const [mvtCsvDebug, setMvtCsvDebug] = useState(() => ({ url: '', textLen: 0, rawLines: 0, filteredLines: 0, keys: 0 }));
   // When string_id ↔ polygon matching completes, bump this to recompute counters immediately (no extra click needed).
   const [stringMatchVersion, setStringMatchVersion] = useState(0);
   // MV+FIBER: segments list + completion + highlight
@@ -1014,6 +1067,9 @@ export default function BaseModule({
         }
         stringTextLabelActiveCountRef.current = 0;
         lastStringLabelKeyRef.current = '';
+        // Also clear MVT "TESTED" labels if present
+        clearMvtTestedLabelsNow();
+        clearMvtCounterLabelsNow();
         return;
       }
 
@@ -1039,6 +1095,8 @@ export default function BaseModule({
         }
         stringTextLabelActiveCountRef.current = 0;
         lastStringLabelKeyRef.current = '';
+        clearMvtTestedLabelsNow();
+        clearMvtCounterLabelsNow();
         return;
       }
 
@@ -1065,6 +1123,9 @@ export default function BaseModule({
         }
         stringTextLabelActiveCountRef.current = 0;
         lastStringLabelKeyRef.current = '';
+        // TESTED labels are not used in cursor mode; ensure they're hidden.
+        clearMvtTestedLabelsNow();
+        clearMvtCounterLabelsNow();
         return;
       }
 
@@ -1106,6 +1167,65 @@ export default function BaseModule({
       let count = 0;
       const maxCount = cursorBounds ? STRING_LABEL_CURSOR_MAX : STRING_LABEL_MAX;
 
+      // MV Termination Mode: manual termination counters (0/3..3/3), NOT derived from selection.
+      const mvtCountsByStation = isMVT ? (mvtTerminationByStationRef.current || {}) : null;
+
+      const mvtTestStatusByStation = (() => {
+        if (!isMVT) return null;
+        const csv = mvtTestCsvByFromRef.current || {};
+        const toCandidateFromKeys = (rawStationLabel) => {
+          const raw = String(rawStationLabel || '').trim();
+          const norm = normalizeId(raw);
+          if (!norm) return [];
+          const out = [norm];
+          const pad2 = (n) => String(n).padStart(2, '0');
+          const mSs = norm.match(/^ss(\d{1,2})$/i);
+          const mSub = norm.match(/^sub(\d{1,2})$/i);
+          // Support both padded and unpadded IDs, and both SSxx <-> SUBxx aliases
+          if (mSs) {
+            const nn = pad2(mSs[1]);
+            out.push(`ss${nn}`);
+            out.push(`sub${nn}`);
+          }
+          if (mSub) {
+            const nn = pad2(mSub[1]);
+            out.push(`sub${nn}`);
+            out.push(`ss${nn}`);
+          }
+          return Array.from(new Set(out));
+        };
+        const statusOf = (rawStationLabel) => {
+          const candidates = toCandidateFromKeys(rawStationLabel);
+          let fromKey = '';
+          let row = null;
+          for (const k of candidates) {
+            if (csv[k]) { fromKey = k; row = csv[k]; break; }
+          }
+          const phases = row && typeof row === 'object' ? row : {};
+          const normStatus = (s) => {
+            const u = String(s || '').trim().toUpperCase();
+            return u === 'PASS' ? 'PASS' : (u ? 'FAIL' : 'N/A');
+          };
+          const l1s = normStatus(phases?.L1?.status || phases?.L1);
+          const l2s = normStatus(phases?.L2?.status || phases?.L2);
+          const l3s = normStatus(phases?.L3?.status || phases?.L3);
+          const l1v = phases?.L1?.value != null ? String(phases.L1.value) : '';
+          const l2v = phases?.L2?.value != null ? String(phases.L2.value) : '';
+          const l3v = phases?.L3?.value != null ? String(phases.L3.value) : '';
+          const allPass = l1s === 'PASS' && l2s === 'PASS' && l3s === 'PASS';
+          return {
+            fromKey,
+            phases: {
+              L1: { value: l1v || '', status: l1s },
+              L2: { value: l2v || '', status: l2s },
+              L3: { value: l3v || '', status: l3s },
+            },
+            allPass,
+          };
+        };
+        return { statusOf };
+      })();
+
       const iterateIndices = candidates.length ? candidates : null;
       const total = iterateIndices ? iterateIndices.length : points.length;
 
@@ -1140,23 +1260,65 @@ export default function BaseModule({
         if (!pt) continue;
         if (!bounds.contains([pt.lat, pt.lng])) continue;
 
+        // MVT: SS label color depends on manual counter; the counter itself is a separate clickable label.
+        let nextText = pt.text;
+        let nextTextColor = stringTextColorCfg;
+        if (isMVT && mvtCountsByStation) {
+          const raw = String(pt.text || '').trim();
+          const norm = normalizeId(raw);
+          if (norm && /^ss\d{1,2}$/i.test(norm)) {
+            const terminated = Math.max(0, Math.min(3, Number(mvtCountsByStation[norm] ?? 0)));
+            nextTextColor = terminated === 3 ? 'rgba(34,197,94,0.98)' : 'rgba(220,38,38,0.98)';
+          }
+        }
+
         // Create once, then reuse
         let label = pool[count];
         if (!label) {
           label = L.textLabel([pt.lat, pt.lng], {
-            text: pt.text,
+            text: nextText,
             renderer: stringTextRendererRef.current || canvasRenderer,
             textBaseSize: stringTextBaseSizeCfg,
             refZoom: stringTextRefZoomCfg,
             textStyle: stringTextStyleCfg,
-            textColor: stringTextColorCfg,
+            textColor: nextTextColor,
             textStrokeColor: stringTextStrokeColorCfg,
             textStrokeWidthFactor: stringTextStrokeWidthFactorCfg,
             minFontSize: stringTextMinFontSizeCfg,
             maxFontSize: stringTextMaxFontSizeCfg,
-            rotation: pt.angle || 0
+            rotation: pt.angle || 0,
+            // MVT: make SS labels clickable too (same action as counter click)
+            interactive: isMVT,
+            radius: isMVT ? 22 : 0,
+            bubblingMouseEvents: false,
           });
           pool[count] = label;
+          // Attach click handler once; uses per-draw mutable fields.
+          if (isMVT) {
+            label.on('click', (evt) => {
+              try {
+                if (evt?.originalEvent) {
+                  evt.originalEvent.stopImmediatePropagation?.();
+                  L.DomEvent.stopPropagation(evt.originalEvent);
+                  L.DomEvent.preventDefault(evt.originalEvent);
+                }
+              } catch (_e) { void _e; }
+              const stationNorm = String(label._mvtStationNorm || '');
+              const lockedNow = Boolean(label._mvtLocked);
+              if (!stationNorm || lockedNow) return;
+              const oe = evt?.originalEvent;
+              const x = oe?.clientX ?? 0;
+              const y = oe?.clientY ?? 0;
+              const cur = Math.max(0, Math.min(3, Number(mvtTerminationByStationRef.current?.[stationNorm] ?? 0)));
+              setMvtTermPopup({
+                stationLabel: String(label._mvtStationLabel || '').trim() || stationNorm,
+                stationNorm,
+                draft: cur,
+                x,
+                y,
+              });
+            });
+          }
         }
 
         // Update position + text/rotation then ensure it's on the layer
@@ -1166,9 +1328,32 @@ export default function BaseModule({
         let needsRedraw =
           !!cursorBounds ||
           (prevLatLng && (prevLatLng.lat !== pt.lat || prevLatLng.lng !== pt.lng));
-        if (label.options.text !== pt.text) {
-          label.options.text = pt.text;
+        if (label.options.text !== nextText) {
+          label.options.text = nextText;
           needsRedraw = true;
+        }
+        if (label.options.textColor !== nextTextColor) {
+          label.options.textColor = nextTextColor;
+          needsRedraw = true;
+        }
+        // Update per-draw MVT metadata for click handling on SS labels
+        if (isMVT) {
+          const raw = String(pt.text || '').trim();
+          const norm = normalizeId(raw);
+          if (norm && /^ss\d{1,2}$/i.test(norm)) {
+            const terminated = Math.max(0, Math.min(3, Number(mvtTerminationByStationRef.current?.[norm] ?? 0)));
+            label._mvtStationNorm = norm;
+            label._mvtStationLabel = raw;
+            label._mvtLocked = terminated === 3;
+            if (label.options.radius !== 22) { label.options.radius = 22; needsRedraw = true; }
+            if (label.options.interactive !== true) { label.options.interactive = true; needsRedraw = true; }
+          } else {
+            label._mvtStationNorm = '';
+            label._mvtStationLabel = '';
+            label._mvtLocked = false;
+            if (label.options.radius !== 0) { label.options.radius = 0; needsRedraw = true; }
+            if (label.options.interactive !== false) { label.options.interactive = false; needsRedraw = true; }
+          }
         }
         const nextRot = pt.angle || 0;
         if (label.options.rotation !== nextRot) {
@@ -1182,6 +1367,273 @@ export default function BaseModule({
         count++;
       }
 
+      // MVT: draw clickable termination counters next to each substation label.
+      // Helper: compute the effective font size in pixels (must match L.TextLabel._updatePath)
+      const computeFontSizePx = () => {
+        const scale = Math.pow(2, zoom - stringTextRefZoomCfg);
+        let fs = stringTextBaseSizeCfg * scale;
+        const minFs = typeof stringTextMinFontSizeCfg === 'number' ? stringTextMinFontSizeCfg : null;
+        const maxFs = typeof stringTextMaxFontSizeCfg === 'number' ? stringTextMaxFontSizeCfg : null;
+        if (minFs != null) fs = Math.max(minFs, fs);
+        if (maxFs != null) fs = Math.min(maxFs, fs);
+        return fs;
+      };
+
+      // MVT: draw clickable termination counters next to each substation label.
+      if (isMVT && mvtCounterLayerRef.current && mvtCountsByStation && !cursorBounds) {
+        const counterLayer = mvtCounterLayerRef.current;
+        const counterPool = mvtCounterLabelPoolRef.current;
+        let counterCount = 0;
+
+        const counterOffsetXFactorFor = (rawStation) => {
+          const s = String(rawStation || '').trim();
+          const n = Math.max(2, Math.min(10, s.length));
+          // approx half text width in "em": n*0.6/2, plus gap ~1.1em
+          return (n * 0.6) / 2 + 1.1;
+        };
+
+        for (let k = 0; k < runTotal; k++) {
+          const idx = cursorCandidates ? cursorCandidates[k] : (iterateIndices ? iterateIndices[k] : k);
+          const pt = points[idx];
+          if (!pt) continue;
+          if (!bounds.contains([pt.lat, pt.lng])) continue;
+
+          const rawStation = String(pt.text || '').trim();
+          const norm = normalizeId(rawStation);
+          if (!(norm && /^ss\d{1,2}$/i.test(norm))) continue;
+
+          // Place the label at the actual on-screen text location (important for click hit-testing).
+          const fs = computeFontSizePx();
+          const rot = (pt.angle || 0) * Math.PI / 180;
+          const baseP = map.latLngToContainerPoint([pt.lat, pt.lng]);
+          const offX = counterOffsetXFactorFor(rawStation) * fs;
+          const dx = Math.cos(rot) * offX;
+          const dy = Math.sin(rot) * offX;
+          const ll = map.containerPointToLatLng([baseP.x + dx, baseP.y + dy]);
+
+          const terminated = Math.max(0, Math.min(3, Number(mvtCountsByStation[norm] ?? 0)));
+          const locked = terminated === 3;
+          const counterText = `${terminated}/3`;
+          const counterColor = locked ? 'rgba(34,197,94,0.98)' : 'rgba(220,38,38,0.98)';
+
+          let lbl = counterPool[counterCount];
+          if (!lbl) {
+            lbl = L.textLabel(ll, {
+              text: counterText,
+              renderer: canvasRenderer,
+              textBaseSize: stringTextBaseSizeCfg,
+              refZoom: stringTextRefZoomCfg,
+              textStyle: stringTextStyleCfg,
+              textColor: counterColor,
+              textStrokeColor: stringTextStrokeColorCfg,
+              textStrokeWidthFactor: stringTextStrokeWidthFactorCfg,
+              minFontSize: stringTextMinFontSizeCfg,
+              maxFontSize: stringTextMaxFontSizeCfg,
+              rotation: pt.angle || 0,
+              offsetXFactor: 0,
+              offsetYFactor: 0,
+              radius: 18, // hitbox for canvas event detection
+              interactive: true,
+              pane: 'overlayPane',
+              bubblingMouseEvents: false,
+            });
+
+            lbl.on('click', (evt) => {
+              try {
+                if (evt?.originalEvent) {
+                  evt.originalEvent.stopImmediatePropagation?.();
+                  L.DomEvent.stopPropagation(evt.originalEvent);
+                  L.DomEvent.preventDefault(evt.originalEvent);
+                }
+              } catch (_e) { void _e; }
+              const stationNorm = String(lbl._mvtStationNorm || '');
+              const lockedNow = Boolean(lbl._mvtLocked);
+              if (!stationNorm || lockedNow) return;
+              const oe = evt?.originalEvent;
+              const x = oe?.clientX ?? 0;
+              const y = oe?.clientY ?? 0;
+              const cur = Math.max(0, Math.min(3, Number(mvtTerminationByStationRef.current?.[stationNorm] ?? 0)));
+              setMvtTermPopup({
+                stationLabel: String(lbl._mvtStationLabel || '').trim() || stationNorm,
+                stationNorm,
+                draft: cur,
+                x,
+                y,
+              });
+            });
+
+            lbl.on('mouseover', () => {
+              try { if (!lbl._mvtLocked) map.getContainer().style.cursor = 'pointer'; } catch (_e) { void _e; }
+            });
+            lbl.on('mouseout', () => {
+              try { map.getContainer().style.cursor = ''; } catch (_e) { void _e; }
+            });
+
+            counterPool[counterCount] = lbl;
+          }
+
+          lbl._mvtStationNorm = norm;
+          lbl._mvtLocked = locked;
+          lbl._mvtStationLabel = rawStation;
+
+          lbl.setLatLng(ll);
+          let redraw = false;
+          if (lbl.options.text !== counterText) { lbl.options.text = counterText; redraw = true; }
+          if (lbl.options.textColor !== counterColor) { lbl.options.textColor = counterColor; redraw = true; }
+          if (lbl.options.rotation !== (pt.angle || 0)) { lbl.options.rotation = pt.angle || 0; redraw = true; }
+          if (lbl.options.radius !== 18) { lbl.options.radius = 18; redraw = true; }
+
+          if (!counterLayer.hasLayer(lbl)) counterLayer.addLayer(lbl);
+          if (redraw) lbl.redraw?.();
+          counterCount++;
+        }
+
+        const prevActive = mvtCounterLabelActiveCountRef.current;
+        for (let i = counterCount; i < prevActive; i++) {
+          const old = counterPool[i];
+          if (old && counterLayer.hasLayer(old)) counterLayer.removeLayer(old);
+        }
+        mvtCounterLabelActiveCountRef.current = counterCount;
+      } else {
+        clearMvtCounterLabelsNow();
+      }
+
+      // MVT: draw clickable "TESTED" labels under each substation label (always visible when text is visible).
+      if (isMVT && mvtTestedLayerRef.current && mvtTestStatusByStation && !cursorBounds) {
+        const testedLayer = mvtTestedLayerRef.current;
+        const testedPool = mvtTestedLabelPoolRef.current;
+        let testedCount = 0;
+
+        for (let k = 0; k < runTotal; k++) {
+          const idx = cursorCandidates ? cursorCandidates[k] : (iterateIndices ? iterateIndices[k] : k);
+          const pt = points[idx];
+          if (!pt) continue;
+          if (!bounds.contains([pt.lat, pt.lng])) continue;
+
+          const rawStation = String(pt.text || '').trim();
+          const normStation = normalizeId(rawStation);
+          // Only render under Substation IDs (SSxx or SUBxx)
+          if (!(normStation && (/^ss\d{1,2}$/i.test(normStation) || /^sub\d{1,2}$/i.test(normStation)))) continue;
+
+          // Place the label at the actual on-screen "below" location.
+          const fs = computeFontSizePx();
+          const rot = (pt.angle || 0) * Math.PI / 180;
+          const baseP = map.latLngToContainerPoint([pt.lat, pt.lng]);
+          const offY = 1.25 * fs;
+          const dx = -Math.sin(rot) * offY;
+          const dy = Math.cos(rot) * offY;
+          const ll = map.containerPointToLatLng([baseP.x + dx, baseP.y + dy]);
+
+          const st = mvtTestStatusByStation.statusOf(rawStation);
+          const testedColor = st.allPass ? 'rgba(34,197,94,0.98)' : 'rgba(220,38,38,0.98)';
+
+          let lbl = testedPool[testedCount];
+          if (!lbl) {
+            lbl = L.textLabel(ll, {
+              text: 'TESTED',
+              renderer: canvasRenderer,
+              textBaseSize: stringTextBaseSizeCfg,
+              refZoom: stringTextRefZoomCfg,
+              textStyle: stringTextStyleCfg,
+              textColor: testedColor,
+              textStrokeColor: stringTextStrokeColorCfg,
+              textStrokeWidthFactor: stringTextStrokeWidthFactorCfg,
+              minFontSize: stringTextMinFontSizeCfg,
+              maxFontSize: stringTextMaxFontSizeCfg,
+              rotation: pt.angle || 0,
+              underline: true,
+              underlineColor: testedColor,
+              offsetYFactor: 0,
+              offsetXFactor: 0,
+              radius: 18, // hitbox for canvas event detection
+              interactive: true,
+              pane: 'overlayPane',
+              bubblingMouseEvents: false,
+            });
+            // Attach click handlers once; use mutable fields on the label for latest station key.
+            // IMPORTANT: Read phases directly from CSV ref at click time to avoid stale cache.
+            lbl.on('click', (evt) => {
+              try {
+                if (evt?.originalEvent) {
+                  evt.originalEvent.stopImmediatePropagation?.();
+                  L.DomEvent.stopPropagation(evt.originalEvent);
+                  L.DomEvent.preventDefault(evt.originalEvent);
+                }
+              } catch (_e) { void _e; }
+              const stationLabel = String(lbl._mvtStationLabel || '').trim();
+              // Directly lookup from CSV ref to get fresh data
+              const csv = mvtTestCsvByFromRef.current || {};
+              const normSt = normalizeId(stationLabel);
+              // Generate candidate keys (ss05 -> sub05, sub05 -> ss05)
+              const candKeys = [normSt];
+              const pad2 = (n) => String(n).padStart(2, '0');
+              const mSs = normSt.match(/^ss(\d{1,2})$/i);
+              const mSub = normSt.match(/^sub(\d{1,2})$/i);
+              if (mSs) {
+                const nn = pad2(mSs[1]);
+                candKeys.push(`ss${nn}`);
+                candKeys.push(`sub${nn}`);
+              }
+              if (mSub) {
+                const nn = pad2(mSub[1]);
+                candKeys.push(`sub${nn}`);
+                candKeys.push(`ss${nn}`);
+              }
+              let fromKey = '';
+              let row = null;
+              for (const k of candKeys) {
+                if (csv[k]) { fromKey = k; row = csv[k]; break; }
+              }
+              const phases = row ? {
+                L1: row.L1 || { value: '', status: 'N/A' },
+                L2: row.L2 || { value: '', status: 'N/A' },
+                L3: row.L3 || { value: '', status: 'N/A' },
+              } : { L1: { value: '', status: 'N/A' }, L2: { value: '', status: 'N/A' }, L3: { value: '', status: 'N/A' } };
+              // Debug log
+              // eslint-disable-next-line no-console
+              console.log('[TESTED click]', { stationLabel, normSt, candKeys, fromKey, row, phases, csvKeys: Object.keys(csv) });
+              const oe = evt?.originalEvent;
+              const x = oe?.clientX ?? 0;
+              const y = oe?.clientY ?? 0;
+              setMvtTestPopup({ stationLabel, fromKey, phases, x, y });
+            });
+            lbl.on('mouseover', () => {
+              try { map.getContainer().style.cursor = 'pointer'; } catch (_e) { void _e; }
+            });
+            lbl.on('mouseout', () => {
+              try { map.getContainer().style.cursor = ''; } catch (_e) { void _e; }
+            });
+            testedPool[testedCount] = lbl;
+          }
+
+          // Update mutable per-station fields for click
+          lbl._mvtStationLabel = rawStation;
+          lbl._mvtFromKey = st.fromKey;
+          lbl._mvtPhases = st.phases;
+
+          // Update position + style
+          lbl.setLatLng(ll);
+          let redraw = false;
+          if (lbl.options.rotation !== (pt.angle || 0)) { lbl.options.rotation = pt.angle || 0; redraw = true; }
+          if (lbl.options.textColor !== testedColor) { lbl.options.textColor = testedColor; redraw = true; }
+          if (lbl.options.underlineColor !== testedColor) { lbl.options.underlineColor = testedColor; redraw = true; }
+          if (lbl.options.radius !== 18) { lbl.options.radius = 18; redraw = true; }
+          if (!testedLayer.hasLayer(lbl)) testedLayer.addLayer(lbl);
+          if (redraw) lbl.redraw?.();
+
+          testedCount++;
+        }
+
+        const prevActive = mvtTestedLabelActiveCountRef.current;
+        for (let i = testedCount; i < prevActive; i++) {
+          const old = testedPool[i];
+          if (old && testedLayer.hasLayer(old)) testedLayer.removeLayer(old);
+        }
+        mvtTestedLabelActiveCountRef.current = testedCount;
+      } else {
+        clearMvtTestedLabelsNow();
+      }
+
       // Remove unused pooled labels from the layer (but keep them for reuse)
       const prevActive = stringTextLabelActiveCountRef.current;
       for (let i = count; i < prevActive; i++) {
@@ -1191,6 +1643,7 @@ export default function BaseModule({
       stringTextLabelActiveCountRef.current = count;
     });
   }, [
+    isMVT,
     stringTextBaseSizeCfg,
     stringTextColorCfg,
     stringTextStyleCfg,
@@ -1201,6 +1654,36 @@ export default function BaseModule({
     stringTextMaxFontSizeCfg,
     stringTextRefZoomCfg,
   ]);
+
+  // MVT: when selection changes (especially box selection with no click event), refresh SS label counters/colors.
+  useEffect(() => {
+    if (!isMVT) return;
+    lastStringLabelKeyRef.current = '';
+    scheduleStringTextLabelUpdate();
+  }, [isMVT, selectedPolygons, scheduleStringTextLabelUpdate]);
+
+  // MVT: when counters change, refresh labels immediately.
+  useEffect(() => {
+    if (!isMVT) return;
+    lastStringLabelKeyRef.current = '';
+    scheduleStringTextLabelUpdate();
+  }, [isMVT, mvtTerminationByStation, scheduleStringTextLabelUpdate]);
+
+  // MVT: when CSV loads/changes, force label recompute so TESTED uses latest L1/L2/L3 values.
+  useEffect(() => {
+    if (!isMVT) return;
+    // Wait until map + string layer exist
+    if (!mapRef.current || !stringTextLayerRef.current) return;
+    lastStringLabelKeyRef.current = '';
+    scheduleStringTextLabelUpdate();
+  }, [isMVT, mvtCsvVersion, scheduleStringTextLabelUpdate]);
+
+  // MVT: close popups when leaving the mode.
+  useEffect(() => {
+    if (isMVT) return;
+    setMvtTermPopup(null);
+    setMvtTestPopup(null);
+  }, [isMVT]);
 
   // Instant clear (no RAF delay) for cursor-leave / polygon-gate disable.
   const clearStringTextLabelsNow = useCallback(() => {
@@ -1222,6 +1705,266 @@ export default function BaseModule({
     stringTextLabelActiveCountRef.current = 0;
     lastStringLabelKeyRef.current = '';
   }, []);
+
+  const clearMvtTestedLabelsNow = useCallback(() => {
+    const layer = mvtTestedLayerRef.current;
+    if (!layer) return;
+    const pool = mvtTestedLabelPoolRef.current;
+    const prevActive = mvtTestedLabelActiveCountRef.current;
+    for (let i = 0; i < prevActive; i++) {
+      const lbl = pool[i];
+      if (lbl && layer.hasLayer(lbl)) layer.removeLayer(lbl);
+    }
+    mvtTestedLabelActiveCountRef.current = 0;
+  }, []);
+
+  const clearMvtCounterLabelsNow = useCallback(() => {
+    const layer = mvtCounterLayerRef.current;
+    if (!layer) return;
+    const pool = mvtCounterLabelPoolRef.current;
+    const prevActive = mvtCounterLabelActiveCountRef.current;
+    for (let i = 0; i < prevActive; i++) {
+      const lbl = pool[i];
+      if (lbl && layer.hasLayer(lbl)) layer.removeLayer(lbl);
+    }
+    mvtCounterLabelActiveCountRef.current = 0;
+  }, []);
+
+  // MVT: load/save manual termination counters (independent from TESTED).
+  useEffect(() => {
+    if (!isMVT) {
+      setMvtTerminationByStation({});
+      return;
+    }
+    try {
+      const raw = localStorage.getItem('cew:mvt:termination_counts');
+      const obj = raw ? JSON.parse(raw) : {};
+      if (obj && typeof obj === 'object') setMvtTerminationByStation(obj);
+      else setMvtTerminationByStation({});
+    } catch (_e) {
+      void _e;
+      setMvtTerminationByStation({});
+    }
+  }, [isMVT]);
+
+  useEffect(() => {
+    if (!isMVT) return;
+    try {
+      localStorage.setItem('cew:mvt:termination_counts', JSON.stringify(mvtTerminationByStation || {}));
+    } catch (_e) {
+      void _e;
+    }
+  }, [isMVT, mvtTerminationByStation]);
+
+  // MVT: load circuit test status CSV (grouped by `from`, phase L1/L2/L3 taken ONLY from that row group).
+  useEffect(() => {
+    if (!isMVT) {
+      mvtTestCsvByFromRef.current = {};
+      setMvtTestPanel(null);
+      setMvtTestPopup(null);
+      setMvtCsvTotals({ total: 0, fromRows: 0, toRows: 0 });
+      clearMvtTestedLabelsNow();
+      return;
+    }
+
+    let cancelled = false;
+    const paths = [
+      '/MV_TERMINATION_PROGRESS_TRACKING/mv_circuits_test.csv',
+      '/MV_TERMINATION_PROGRESS_TRACKING/mv_circuit_test.csv',
+      '/MV_TERMINATION_PROGRESS_TRACKING/mv_circuit_tests.csv',
+    ];
+
+      const parse = (text) => {
+      const rawText = String(text || '');
+      const rawLinesArr = rawText.split(/\r?\n/);
+      const lines = rawLinesArr.map((l) => l.trim()).filter(Boolean);
+      if (lines.length <= 1) return { byFrom: {}, fromRows: 0, toRows: 0 };
+      const first = String(lines[0] || '');
+      const sep = (first.includes(';') && first.split(';').length > first.split(',').length) ? ';' : ',';
+      const headerRaw = first
+        .split(sep)
+        .map((h) => h.replace(/^\uFEFF/, '').trim());
+      const header = headerRaw.map((h) => h.toLowerCase());
+      const fromIdx = header.findIndex((h) => h === 'from');
+      const phaseIdx = header.findIndex((h) => h === 'phase');
+      const remarksIdx = header.findIndex((h) => h === 'remarks' || h === 'result' || h === 'status');
+      // value column (e.g. "L1 (GΩ)" or "value")
+      const valueIdx =
+        header.findIndex((h) => h.includes('gω') || h.includes('gohm') || h.includes('value') || h === 'l1' || h === 'l2' || h === 'l3');
+      const toIdx = header.findIndex((h) => h === 'to');
+
+      const out = {};
+      let fromRows = 0;
+      let toRows = 0;
+      // Case A: row-per-phase format (has "phase" column)
+      if (phaseIdx >= 0) {
+        const normStatus = (s) => {
+          const raw = String(s || '').trim();
+          const u = raw.toUpperCase();
+          if (!u) return 'N/A';
+          if (u === 'PASS') return 'PASS';
+          // Preserve user expectation: show "failed" when not PASS
+          if (u.startsWith('FAIL')) return 'failed';
+          return 'failed';
+        };
+        for (let i = 1; i < lines.length; i++) {
+          const parts = lines[i].split(sep).map((p) => p.trim());
+          const rawFrom = fromIdx >= 0 ? parts[fromIdx] : parts[0];
+          const rawTo = toIdx >= 0 ? parts[toIdx] : parts[1];
+          const rawPhase = phaseIdx >= 0 ? parts[phaseIdx] : parts[2];
+          const rawRemarks = remarksIdx >= 0 ? parts[remarksIdx] : (parts.length ? parts[parts.length - 1] : '');
+          const rawVal = valueIdx >= 0 ? parts[valueIdx] : '';
+
+          const fromKey = normalizeId(rawFrom);
+          const toKey = normalizeId(rawTo);
+          const phaseKey = String(rawPhase || '').trim().toUpperCase();
+          const status = normStatus(rawRemarks);
+          if (!fromKey) continue;
+          if (phaseKey !== 'L1' && phaseKey !== 'L2' && phaseKey !== 'L3') continue;
+          fromRows += 1;
+          if (toKey) toRows += 1;
+          if (!out[fromKey]) out[fromKey] = {};
+          out[fromKey][phaseKey] = {
+            // Show only the numeric test value (no unit like GΩ / G?)
+            value: rawVal ? `${rawVal}` : '',
+            status,
+          };
+        }
+        return { byFrom: out, fromRows, toRows };
+      }
+
+      // Case B: wide format: from, L1, L2, L3 values on the same row
+      // Support headers like "L1 (GΩ)" / "L1 (G?)" etc.
+      const l1Idx = header.findIndex((h) => h === 'l1' || h.startsWith('l1'));
+      const l2Idx = header.findIndex((h) => h === 'l2' || h.startsWith('l2'));
+      const l3Idx = header.findIndex((h) => h === 'l3' || h.startsWith('l3'));
+      const normStatus = (s) => {
+        const raw = String(s || '').trim();
+        const u = raw.toUpperCase();
+        if (!u) return 'N/A';
+        if (u === 'PASS') return 'PASS';
+        if (u.startsWith('FAIL')) return 'failed';
+        return 'failed';
+      };
+      const findPhaseStatusIdx = (phase) => {
+        // Try columns like "L1 remarks", "L1 status", "L1 result"
+        const p = phase.toLowerCase();
+        return header.findIndex((h) =>
+          (h.startsWith(p) && (h.includes('remark') || h.includes('status') || h.includes('result')))
+        );
+      };
+      const l1StatusIdx = findPhaseStatusIdx('L1');
+      const l2StatusIdx = findPhaseStatusIdx('L2');
+      const l3StatusIdx = findPhaseStatusIdx('L3');
+
+      const extractStatusesFromRemarks = (remarks) => {
+        const r = String(remarks || '').trim();
+        if (!r) return { L1: 'N/A', L2: 'N/A', L3: 'N/A' };
+        // Pattern A: "L1 PASS, L2 FAILED, L3 PASS"
+        const byLabel = {};
+        const re = /(L[123])\s*[:=\-]?\s*(PASS|FAIL(?:ED)?|FAILED)/gi;
+        let m;
+        while ((m = re.exec(r)) != null) {
+          byLabel[m[1].toUpperCase()] = normStatus(m[2]);
+        }
+        if (byLabel.L1 || byLabel.L2 || byLabel.L3) {
+          return { L1: byLabel.L1 || 'N/A', L2: byLabel.L2 || 'N/A', L3: byLabel.L3 || 'N/A' };
+        }
+        // Pattern B: three tokens "PASS, FAILED, PASS" (assume order L1,L2,L3)
+        const toks = r
+          .split(/[\s,;/|]+/)
+          .map((t) => t.trim())
+          .filter(Boolean)
+          .map((t) => t.toUpperCase())
+          .filter((t) => t === 'PASS' || t === 'FAIL' || t === 'FAILED' || t === 'FAILURE');
+        if (toks.length >= 3) {
+          return { L1: normStatus(toks[0]), L2: normStatus(toks[1]), L3: normStatus(toks[2]) };
+        }
+        // Fallback: single overall remark
+        const overall = normStatus(r);
+        return { L1: overall, L2: overall, L3: overall };
+      };
+      for (let i = 1; i < lines.length; i++) {
+        const parts = lines[i].split(sep).map((p) => p.trim());
+        const rawFrom = fromIdx >= 0 ? parts[fromIdx] : parts[0];
+        const rawTo = toIdx >= 0 ? parts[toIdx] : parts[1];
+        const fromKey = normalizeId(rawFrom);
+        const toKey = normalizeId(rawTo);
+        if (!fromKey) continue;
+        fromRows += 1;
+        if (toKey) toRows += 1;
+        if (!out[fromKey]) out[fromKey] = {};
+        const overallRaw = remarksIdx >= 0 ? parts[remarksIdx] : '';
+        const fromRemarks = extractStatusesFromRemarks(overallRaw);
+
+        const mkVal = (idx) => {
+          const v = idx >= 0 ? parts[idx] : '';
+          const s = String(v || '').trim();
+          // Show only the numeric test value (no unit like GΩ / G?)
+          return s ? `${s}` : '';
+        };
+        const s1 = l1StatusIdx >= 0 ? normStatus(parts[l1StatusIdx]) : fromRemarks.L1;
+        const s2 = l2StatusIdx >= 0 ? normStatus(parts[l2StatusIdx]) : fromRemarks.L2;
+        const s3 = l3StatusIdx >= 0 ? normStatus(parts[l3StatusIdx]) : fromRemarks.L3;
+        out[fromKey].L1 = { value: mkVal(l1Idx), status: s1 };
+        out[fromKey].L2 = { value: mkVal(l2Idx), status: s2 };
+        out[fromKey].L3 = { value: mkVal(l3Idx), status: s3 };
+      }
+      return { byFrom: out, fromRows, toRows, _meta: { textLen: rawText.length, rawLines: rawLinesArr.length, filteredLines: lines.length, keys: Object.keys(out).length } };
+    };
+
+    (async () => {
+      let text = '';
+      let usedUrl = '';
+      for (const p of paths) {
+        try {
+          // Cache-bust to avoid stale/truncated CSV from browser cache
+          const url = `${p}?v=${Date.now()}`;
+          const r = await fetch(url, { cache: 'no-store' });
+          if (r && r.ok) {
+            text = await r.text();
+            usedUrl = url;
+            break;
+          }
+        } catch (_e) {
+          void _e;
+        }
+      }
+      if (cancelled) return;
+      const parsed = parse(text);
+      mvtTestCsvByFromRef.current = parsed.byFrom || {};
+      try {
+        const m = parsed?._meta || {};
+        setMvtCsvDebug({
+          url: usedUrl || '',
+          textLen: Number(m.textLen || 0),
+          rawLines: Number(m.rawLines || 0),
+          filteredLines: Number(m.filteredLines || 0),
+          keys: Number(m.keys || 0),
+        });
+      } catch (_e) { void _e; }
+      const total = (Number(parsed.fromRows) + Number(parsed.toRows)) * 3;
+      setMvtCsvTotals({ total: Number.isFinite(total) ? total : 0, fromRows: parsed.fromRows || 0, toRows: parsed.toRows || 0 });
+      setMvtCsvVersion((v) => v + 1);
+      // Debug: verify that key rows exist (helps diagnose mapping issues quickly)
+      try {
+        const keys = Object.keys(mvtTestCsvByFromRef.current || {});
+        // eslint-disable-next-line no-console
+        console.log('[MVT CSV] loaded', { rows: keys.length, hasSub05: Boolean(mvtTestCsvByFromRef.current?.sub05), fromRows: parsed.fromRows || 0, toRows: parsed.toRows || 0 });
+        // eslint-disable-next-line no-console
+        if (mvtTestCsvByFromRef.current?.sub05) console.log('[MVT CSV] sub05', mvtTestCsvByFromRef.current.sub05);
+      } catch (_e) {
+        void _e;
+      }
+      // Force a redraw so TESTED colors reflect the loaded CSV immediately.
+      lastStringLabelKeyRef.current = '';
+      scheduleStringTextLabelUpdate();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isMVT, scheduleStringTextLabelUpdate, clearMvtTestedLabelsNow]);
 
   // When the effective visibility changes (TEXT ON/OFF or module config), immediately refresh labels.
   useEffect(() => {
@@ -1764,6 +2507,18 @@ export default function BaseModule({
       try { stringTextLayerRef.current.remove(); } catch (_e) { void _e; }
       stringTextLayerRef.current = null;
     }
+    if (mvtTestedLayerRef.current) {
+      try { mvtTestedLayerRef.current.remove(); } catch (_e) { void _e; }
+      mvtTestedLayerRef.current = null;
+    }
+    if (mvtCounterLayerRef.current) {
+      try { mvtCounterLayerRef.current.remove(); } catch (_e) { void _e; }
+      mvtCounterLayerRef.current = null;
+    }
+    mvtTestedLabelPoolRef.current = [];
+    mvtTestedLabelActiveCountRef.current = 0;
+    mvtCounterLabelPoolRef.current = [];
+    mvtCounterLabelActiveCountRef.current = 0;
     // MVF: clear highlight + trench graph on reload
     try {
       mvfHighlightLayerRef.current?.clearLayers?.();
@@ -1885,6 +2640,22 @@ export default function BaseModule({
           
           stringLayer.addTo(mapRef.current);
           layersRef.current.push(stringLayer);
+
+          // MVT: create a separate interactive layer for "TESTED" labels (clickable).
+          if (isMVT) {
+            const testedLayer = L.layerGroup();
+            mvtTestedLayerRef.current = testedLayer;
+            testedLayer.addTo(mapRef.current);
+            layersRef.current.push(testedLayer);
+
+            const counterLayer = L.layerGroup();
+            mvtCounterLayerRef.current = counterLayer;
+            counterLayer.addTo(mapRef.current);
+            layersRef.current.push(counterLayer);
+          } else {
+            mvtTestedLayerRef.current = null;
+            mvtCounterLayerRef.current = null;
+          }
           continue;
         }
         
@@ -2150,9 +2921,11 @@ export default function BaseModule({
         const invLabelMode = file.name === 'inv_id' && (isLV || activeMode?.invIdLabelMode);
         const invInteractive = isLV && file.name === 'inv_id';
         const mvfTrenchInteractive = isMVF && file.name === 'mv_trench';
+        // MVT: we don't want table selection interactions in this mode.
+        const disableInteractions = isMVT && (file.name === 'full' || file.name === 'subs');
         const layer = L.geoJSON(data, {
           renderer: canvasRenderer,
-          interactive: invInteractive || mvfTrenchInteractive,
+          interactive: !disableInteractions && (invInteractive || mvfTrenchInteractive),
           
           style: () => {
             // Restore the "dim white" look for all layers, with a stronger LV box outline.
@@ -2813,6 +3586,8 @@ export default function BaseModule({
   // Box Selection event handlers - left click to select, right click to unselect
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
+    // MVT: no table work in this mode; disable box selection / global mouse capture so labels are clickable.
+    if (isMVT) return;
     
     const map = mapRef.current;
     const container = map.getContainer();
@@ -3428,6 +4203,117 @@ export default function BaseModule({
         const clickPoint = map.latLngToLayerPoint(clickLatLng);
         const clickTolerance = 10; // pixels
 
+        // MVT: intercept clicks on our custom labels (counter + TESTED) before any other selection logic.
+        if (isMVT) {
+          const distToLabelPx = (lbl) => {
+            try {
+              if (!lbl || typeof lbl.getLatLng !== 'function') return Infinity;
+              const ll = lbl.getLatLng();
+              const pt = map.latLngToLayerPoint(ll);
+              return Math.sqrt((pt.x - clickPoint.x) ** 2 + (pt.y - clickPoint.y) ** 2);
+            } catch (_e) {
+              void _e;
+              return Infinity;
+            }
+          };
+
+          const hitRadius = 22; // px
+
+          // 1) TESTED click (always clickable)
+          try {
+            const pool = mvtTestedLabelPoolRef.current || [];
+            const active = mvtTestedLabelActiveCountRef.current || 0;
+            let best = null;
+            let bestD = Infinity;
+            for (let i = 0; i < active; i++) {
+              const lbl = pool[i];
+              const d = distToLabelPx(lbl);
+              if (d < hitRadius && d < bestD) { bestD = d; best = lbl; }
+            }
+            if (best) {
+              const stationLabel = String(best._mvtStationLabel || '').trim();
+              // IMPORTANT: read directly from latest CSV ref to avoid stale pooled label fields
+              const csv = mvtTestCsvByFromRef.current || {};
+              const normSt = normalizeId(stationLabel);
+              const candKeys = [normSt];
+              const pad2 = (n) => String(n).padStart(2, '0');
+              const mSs = normSt.match(/^ss(\d{1,2})$/i);
+              const mSub = normSt.match(/^sub(\d{1,2})$/i);
+              if (mSs) {
+                const nn = pad2(mSs[1]);
+                candKeys.push(`ss${nn}`);
+                candKeys.push(`sub${nn}`);
+              }
+              if (mSub) {
+                const nn = pad2(mSub[1]);
+                candKeys.push(`sub${nn}`);
+                candKeys.push(`ss${nn}`);
+              }
+              let fromKey = '';
+              let row = null;
+              for (const k of candKeys) {
+                if (csv[k]) { fromKey = k; row = csv[k]; break; }
+              }
+              const phases = row ? {
+                L1: row.L1 || { value: '', status: 'N/A' },
+                L2: row.L2 || { value: '', status: 'N/A' },
+                L3: row.L3 || { value: '', status: 'N/A' },
+              } : { L1: { value: '', status: 'N/A' }, L2: { value: '', status: 'N/A' }, L3: { value: '', status: 'N/A' } };
+              const x = draggingRef.current?.startPoint?.x ?? 0;
+              const y = draggingRef.current?.startPoint?.y ?? 0;
+              // Prefer the click-location popup (panel may stay unused in MVT)
+              setMvtTestPanel(null);
+              setMvtTestPopup({ stationLabel, fromKey, phases, x, y });
+              // Don't allow this click to act as selection elsewhere
+              draggingRef.current = null;
+              return;
+            }
+          } catch (_e) {
+            void _e;
+          }
+
+          // 2) Counter click (editable unless locked)
+          try {
+            const pool = mvtCounterLabelPoolRef.current || [];
+            const active = mvtCounterLabelActiveCountRef.current || 0;
+            let best = null;
+            let bestD = Infinity;
+            for (let i = 0; i < active; i++) {
+              const lbl = pool[i];
+              const d = distToLabelPx(lbl);
+              if (d < hitRadius && d < bestD) { bestD = d; best = lbl; }
+            }
+            if (best) {
+              const stationNorm = String(best._mvtStationNorm || '');
+              const lockedNow = Boolean(best._mvtLocked);
+              if (stationNorm && !lockedNow) {
+                setMvtTerminationByStation((prev) => {
+                  const base = prev && typeof prev === 'object' ? { ...prev } : {};
+                  const cur = Math.max(0, Math.min(3, Number(base[stationNorm] ?? 0)));
+                  const next = Math.min(3, cur + 1);
+                  base[stationNorm] = next;
+                  return base;
+                });
+                setMvtTermPanel({
+                  stationLabel: String(best._mvtStationLabel || '').trim() || stationNorm,
+                  stationNorm,
+                  value: Math.max(0, Math.min(3, Number(mvtTerminationByStationRef.current?.[stationNorm] ?? 0))) + 1,
+                });
+              } else if (stationNorm && lockedNow) {
+                setMvtTermPanel({
+                  stationLabel: String(best._mvtStationLabel || '').trim() || stationNorm,
+                  stationNorm,
+                  value: 3,
+                });
+              }
+              draggingRef.current = null;
+              return;
+            }
+          } catch (_e) {
+            void _e;
+          }
+        }
+
         if (isMC4) {
           // MC4: Single click to advance panel state
           const panels = polygonById.current || {};
@@ -3730,7 +4616,7 @@ export default function BaseModule({
       container.removeEventListener('mouseup', onMouseUp);
     };
   // IMPORTANT: include isMC4 (and module key) so drag-selection behavior updates when switching modes.
-  }, [mapReady, activeMode?.key, isLV, isMVF, isMC4, stringPoints, noteMode, notes]);
+  }, [mapReady, activeMode?.key, isLV, isMVF, isMC4, isMVT, stringPoints, noteMode, notes]);
 
   useEffect(() => {
     mapRef.current = L.map('map', {
@@ -4215,6 +5101,40 @@ export default function BaseModule({
           );
         })()}
       </div>
+    ) : null) ||
+    (isMVT ? (
+      <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start">
+        {(() => {
+          const total = Number(mvtCsvTotals?.total) || 0;
+          const completed = Math.max(
+            0,
+            Object.values(mvtTerminationByStation || {}).reduce((s, v) => s + Math.max(0, Math.min(3, Number(v) || 0)), 0)
+          );
+          const remaining = Math.max(0, total - completed);
+          return (
+            <>
+              <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                  <span className="text-xs font-bold text-slate-200">TOTAL</span>
+                  <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{total}</span>
+                </div>
+              </div>
+              <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                  <span className="text-xs font-bold text-emerald-400">COMPLETED</span>
+                  <span className="text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap">{completed}</span>
+                </div>
+              </div>
+              <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                  <span className="text-xs font-bold text-slate-200">REMAINING</span>
+                  <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remaining}</span>
+                </div>
+              </div>
+            </>
+          );
+        })()}
+      </div>
     ) : null);
 
   return (
@@ -4540,10 +5460,25 @@ export default function BaseModule({
                     <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
                     <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Completed</span>
                   </div>
+                  {isMVT ? (
+                    <>
+                      <div className="mt-3 border-t border-slate-700/70" />
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-red-900 bg-red-500" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">SSX – Red → Not Terminated</span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-emerald-900 bg-emerald-500" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">SSX – Green → Terminated</span>
+                      </div>
+                    </>
+                  ) : null}
                 </>
               )}
             </div>
           </div>
+
+          {/* MVT popups are rendered near click position (not in the fixed right panel). */}
 
           <a
              href={dwgUrl || activeMode.linkPath}
@@ -4610,6 +5545,184 @@ export default function BaseModule({
       <div className="map-wrapper">
         <div id="map" />
       </div>
+
+      {/* MVT: click-position popups */}
+      {isMVT && mvtTestPopup ? (
+        <div
+          style={{
+            position: 'fixed',
+            left: Math.min(window.innerWidth - 280, Math.max(8, (mvtTestPopup.x || 0) + 10)),
+            top: Math.min(window.innerHeight - 220, Math.max(8, (mvtTestPopup.y || 0) + 10)),
+            zIndex: 1400,
+          }}
+          className="w-[260px] border-2 border-slate-700 bg-slate-900 px-3 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.55)]"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] font-black uppercase tracking-wide text-white">Test Details</div>
+              <div className="mt-1 text-sm font-extrabold text-slate-100 truncate">
+                {mvtTestPopup.stationLabel || mvtTestPopup.fromKey || 'Substation'}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMvtTestPopup(null)}
+              className="inline-flex h-6 w-6 items-center justify-center border-2 border-slate-700 bg-slate-800 text-xs font-black text-white hover:bg-slate-700"
+              title="Close"
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            {(['L1', 'L2', 'L3']).map((ph) => {
+              const obj = mvtTestPopup?.phases?.[ph] || { value: '', status: 'N/A' };
+              const statusRaw = String(obj?.status || 'N/A').trim();
+              const statusU = statusRaw.toUpperCase();
+              const val = String(obj?.value || '').trim();
+              const pass = statusU === 'PASS';
+              const status = pass ? 'PASS' : (statusRaw || 'N/A');
+              return (
+                <div key={ph} className="flex items-center justify-between border border-slate-700 bg-slate-800 px-2 py-1">
+                  <span className="text-[11px] font-black uppercase tracking-wide text-slate-200">{ph}</span>
+                  <span className="ml-2 flex items-center gap-2">
+                    {val ? (
+                      <span className={`text-[11px] font-extrabold tabular-nums ${pass ? 'text-emerald-200' : 'text-red-200'}`}>{val}</span>
+                    ) : null}
+                    <span className={`text-[11px] font-black uppercase tracking-wide ${pass ? 'text-emerald-300' : 'text-red-300'}`}>
+                      {status}
+                    </span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Debug (shows why N/A happens) */}
+          <div className="mt-3 border border-slate-800 bg-slate-950/40 px-2 py-2">
+            <div className="text-[10px] font-black uppercase tracking-wide text-slate-400">Debug</div>
+            <div className="mt-1 text-[10px] font-mono text-slate-300 break-all">
+              fromKey: {String(mvtTestPopup.fromKey || '(not found)')}
+            </div>
+            <div className="mt-1 text-[10px] font-mono text-slate-400">
+              csvTotals: {String(mvtCsvTotals?.fromRows ?? 0)} rows, total={String(mvtCsvTotals?.total ?? 0)}
+            </div>
+            <div className="mt-1 text-[10px] font-mono text-slate-500 break-all">
+              csvLoad: keys={String(mvtCsvDebug?.keys ?? 0)} rawLines={String(mvtCsvDebug?.rawLines ?? 0)} filtered={String(mvtCsvDebug?.filteredLines ?? 0)} len={String(mvtCsvDebug?.textLen ?? 0)}
+            </div>
+            {mvtCsvDebug?.url ? (
+              <div className="mt-1 text-[10px] font-mono text-slate-600 break-all">url: {String(mvtCsvDebug.url)}</div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {isMVT && mvtTermPopup ? (
+        <div
+          style={{
+            position: 'fixed',
+            left: Math.min(window.innerWidth - 300, Math.max(8, (mvtTermPopup.x || 0) + 10)),
+            top: Math.min(window.innerHeight - 220, Math.max(8, (mvtTermPopup.y || 0) + 10)),
+            zIndex: 1400,
+          }}
+          className="w-[280px] border-2 border-slate-700 bg-slate-900 px-3 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.55)]"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] font-black uppercase tracking-wide text-white">Termination</div>
+              <div className="mt-1 text-sm font-extrabold text-slate-100 truncate">{mvtTermPopup.stationLabel}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMvtTermPopup(null)}
+              className="inline-flex h-6 w-6 items-center justify-center border-2 border-slate-700 bg-slate-800 text-xs font-black text-white hover:bg-slate-700"
+              title="Close"
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+
+          {(() => {
+            const stationNorm = String(mvtTermPopup.stationNorm || '');
+            const stored = Math.max(0, Math.min(3, Number(mvtTerminationByStation?.[stationNorm] ?? 0)));
+            const draft = Math.max(0, Math.min(3, Number(mvtTermPopup.draft ?? stored)));
+            const locked = stored === 3;
+            const setDraft = (v) => setMvtTermPopup((p) => (p ? { ...p, draft: Math.max(0, Math.min(3, v)) } : p));
+            return (
+              <div className="mt-3">
+                <div className="border border-slate-700 bg-slate-800 px-2 py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black uppercase tracking-wide text-slate-200">Value</span>
+                    <span className={`text-[11px] font-black uppercase tracking-wide ${locked ? 'text-emerald-300' : 'text-red-300'}`}>
+                      {locked ? 'LOCKED' : 'EDITABLE'}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="text-[12px] font-black tabular-nums text-slate-200">0/3 → 3/3</span>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={0}
+                        max={3}
+                        step={1}
+                        value={draft}
+                        disabled={locked}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === '') return;
+                          const n = Math.max(0, Math.min(3, parseInt(v, 10)));
+                          if (Number.isFinite(n)) setDraft(n);
+                        }}
+                        className={`w-14 h-8 border-2 bg-slate-900 px-2 text-center text-[13px] font-black tabular-nums outline-none ${
+                          locked ? 'border-slate-700 text-slate-500 cursor-not-allowed' : (draft === 3 ? 'border-emerald-700 text-emerald-200' : 'border-red-700 text-red-200')
+                        }`}
+                        title="Enter 0..3"
+                      />
+                      <span className={`text-[13px] font-black tabular-nums ${draft === 3 ? 'text-emerald-300' : 'text-red-300'}`}>/3</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={locked}
+                    onClick={() => setDraft((draft + 1) % 4)}
+                    className={`flex-1 h-8 border-2 text-[11px] font-extrabold uppercase tracking-wide ${
+                      locked ? 'border-slate-700 bg-slate-900/40 text-slate-500 cursor-not-allowed' : 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
+                    }`}
+                    title={locked ? 'Locked at 3/3' : '0/3 → 1/3 → 2/3 → 3/3'}
+                  >
+                    Next
+                  </button>
+                  <button
+                    type="button"
+                    disabled={locked}
+                    onClick={() => {
+                      if (!stationNorm) return;
+                      setMvtTerminationByStation((prev) => {
+                        const base = prev && typeof prev === 'object' ? { ...prev } : {};
+                        base[stationNorm] = draft;
+                        return base;
+                      });
+                      setMvtTermPopup(null);
+                    }}
+                    className={`flex-1 h-8 border-2 text-[11px] font-extrabold uppercase tracking-wide ${
+                      locked ? 'border-slate-700 bg-slate-900/40 text-slate-500 cursor-not-allowed' : 'border-emerald-700 bg-emerald-950/30 text-emerald-200 hover:bg-emerald-950/40'
+                    }`}
+                    title="Apply"
+                  >
+                    OK
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      ) : null}
 
       {_customFooter}
       
