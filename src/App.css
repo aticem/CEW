@@ -976,3 +976,45 @@ body {
   font-size: 12px;
   color: #94a3b8;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   DCCT TEST RESULT POPUP STYLES
+   ═══════════════════════════════════════════════════════════════ */
+.dcct-test-popup {
+  z-index: 2000 !important;
+}
+
+.dcct-test-popup .leaflet-popup-content-wrapper {
+  background: rgba(15, 23, 42, 0.95) !important;
+  border: 1px solid rgba(71, 85, 105, 0.6) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5) !important;
+  padding: 0 !important;
+}
+
+.dcct-test-popup .leaflet-popup-content {
+  margin: 12px 14px !important;
+  min-width: 160px !important;
+}
+
+.dcct-test-popup .leaflet-popup-tip {
+  background: rgba(15, 23, 42, 0.95) !important;
+  border: 1px solid rgba(71, 85, 105, 0.6) !important;
+  border-top: none !important;
+  border-left: none !important;
+}
+
+.dcct-test-popup .leaflet-popup-close-button {
+  color: #94a3b8 !important;
+  font-size: 20px !important;
+  font-weight: 400 !important;
+  top: 4px !important;
+  right: 6px !important;
+  width: 24px !important;
+  height: 24px !important;
+  line-height: 24px !important;
+}
+
+.dcct-test-popup .leaflet-popup-close-button:hover {
+  color: #f87171 !important;
+}

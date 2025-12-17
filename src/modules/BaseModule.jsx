@@ -8,7 +8,6 @@ import { useChartExport } from '../hooks/useChartExport';
 import {
   asLineStrings,
   mergeIntervals,
-  computeNewPartsForBox,
   computeIntervalsInBox,
   buildCumulativeMeters,
   sliceLineByMeters,
@@ -247,6 +246,8 @@ function calculateLineAngle(coords) {
 // ID NORMALİZASYONU
 // ═══════════════════════════════════════════════════════════════
 const normalizeId = (id) => (id ? id.toString().replace(/\s+/g, '').toLowerCase().trim() : '');
+
+// (DCCT overlay ordering helper lives in utils so it's testable.)
 
 // Selection tolerances (in meters)
 const NEAR_DISTANCE_METERS = 15; // Tight match for nearby labels
@@ -507,108 +508,141 @@ export default function BaseModule({
     dcctOverlayLabelsByIdRef.current = {};
   }, []);
 
+  // DCCT: Track open popups by idNorm
+  const dcctOpenPopupsRef = useRef({}); // idNorm -> L.Popup
+
   const dcctToggleTestOverlay = useCallback((idNorm, latlng) => {
     const map = mapRef.current;
     if (!map || !idNorm || !latlng) return;
 
-    try {
-      if (!dcctOverlayLayerRef.current) {
-        dcctOverlayLayerRef.current = L.layerGroup().addTo(map);
-      }
-    } catch (_e) {
-      void _e;
-      return;
-    }
+    const openPopups = dcctOpenPopupsRef.current || {};
+    const existingPopup = openPopups[idNorm];
 
-    const layer = dcctOverlayLayerRef.current;
-    const labelsById = dcctOverlayLabelsByIdRef.current || {};
-    const existing = labelsById[idNorm];
-    if (existing && layer && typeof layer.removeLayer === 'function') {
+    // If popup exists and is open, close it (toggle off)
+    if (existingPopup) {
       try {
-        layer.removeLayer(existing);
+        map.closePopup(existingPopup);
       } catch (_e) {
         void _e;
       }
-      const next = { ...(labelsById || {}) };
-      delete next[idNorm];
-      dcctOverlayLabelsByIdRef.current = next;
+      delete openPopups[idNorm];
+      dcctOpenPopupsRef.current = openPopups;
       return;
     }
 
+    // Get test data from CSV
     const rec = dcctRisoByIdRef.current?.[idNorm] || null;
     const plus = rec?.plus != null ? String(rec.plus).trim() : '';
     const minus = rec?.minus != null ? String(rec.minus).trim() : '';
-    const status = rec?.status || null;
+    const status = rec?.status || 'not_tested'; // 'passed', 'failed', 'not_tested'
 
-    const passColor = 'rgba(5,150,105,0.96)';
-    const failColor = 'rgba(239,68,68,0.98)';
-    const naColor = 'rgba(148,163,184,0.98)';
-    const textColor = status === 'passed' ? passColor : status === 'failed' ? failColor : naColor;
-    const txtPlus = plus ? plus : 'N/A';
-    const txtMinus = minus ? minus : 'N/A';
-    const text = `Ins. Res (+): ${txtPlus}\nIns. Res (-): ${txtMinus}`;
+    const plusVal = plus || '999';
+    const minusVal = minus || '999';
 
-    // Collision avoidance: if nearby overlays exist, stack this one upward.
-    // This avoids "ic ice geciyor" for close tables.
-    let offsetY = 0;
-    try {
-      const p = map.latLngToLayerPoint(latlng);
-      const existingEntries = Object.entries(labelsById || {});
-      const step = 44; // px per stacked label
-      const maxTries = 10;
-      for (let attempt = 0; attempt < maxTries; attempt++) {
-        const yTry = offsetY;
-        const collides = existingEntries.some(([, lbl]) => {
-          if (!lbl) return false;
-          const a = lbl._dcctAnchorLatLng;
-          if (!a) return false;
-          const pp = map.latLngToLayerPoint(a);
-          const dx = Math.abs(pp.x - p.x);
-          const dy = Math.abs((pp.y + (Number(lbl?.options?.offsetY) || 0)) - (p.y + yTry));
-          return dx < 160 && dy < 52;
-        });
-        if (!collides) break;
-        offsetY -= step;
-      }
-    } catch (_e) {
-      void _e;
+    // Status colors
+    const passColor = '#059669';
+    const failColor = '#dc2626';
+    const naColor = '#64748b';
+    const statusColor = status === 'passed' ? passColor : status === 'failed' ? failColor : naColor;
+
+    // Create editable HTML content
+    const popupContent = document.createElement('div');
+    popupContent.style.cssText = `
+      font-family: sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      color: #10b981;
+      min-width: 160px;
+      user-select: none;
+    `;
+    popupContent.innerHTML = `
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <span style="color: #10b981;">Ins. Res (+):</span>
+          <input type="text" value="${plusVal}" 
+            style="width: 50px; background: #1e293b; border: 1px solid #334155; border-radius: 4px; 
+                   color: #10b981; font-weight: 600; font-size: 13px; padding: 2px 6px; text-align: right;"
+            data-field="plus" />
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <span style="color: #10b981;">Ins. Res (-):</span>
+          <input type="text" value="${minusVal}"
+            style="width: 50px; background: #1e293b; border: 1px solid #334155; border-radius: 4px;
+                   color: #10b981; font-weight: 600; font-size: 13px; padding: 2px 6px; text-align: right;"
+            data-field="minus" />
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; padding-top: 6px; border-top: 1px solid #334155;">
+          <span style="color: ${statusColor};">Status:</span>
+          <select data-field="status"
+            style="background: #1e293b; border: 1px solid #334155; border-radius: 4px;
+                   color: ${statusColor}; font-weight: 600; font-size: 12px; padding: 2px 6px; cursor: pointer;">
+            <option value="passed" ${status === 'passed' ? 'selected' : ''} style="color: ${passColor};">PASSED</option>
+            <option value="failed" ${status === 'failed' ? 'selected' : ''} style="color: ${failColor};">FAILED</option>
+            <option value="not_tested" ${status === 'not_tested' || !status ? 'selected' : ''} style="color: ${naColor};">N/A</option>
+          </select>
+        </div>
+      </div>
+    `;
+
+    // Add event listeners for changes
+    const selectEl = popupContent.querySelector('select[data-field="status"]');
+    if (selectEl) {
+      selectEl.addEventListener('change', (e) => {
+        const newStatus = e.target.value;
+        const newColor = newStatus === 'passed' ? passColor : newStatus === 'failed' ? failColor : naColor;
+        e.target.style.color = newColor;
+        // Update the label span color too
+        const labelSpan = e.target.parentElement?.querySelector('span');
+        if (labelSpan) labelSpan.style.color = newColor;
+      });
     }
 
-    const label = L.textLabel(latlng, {
-      text,
-      renderer: canvasRenderer,
-      textBaseSize: 13,
-      refZoom: 20,
-      textStyle: '600',
-      textColor,
-      textStrokeColor: 'rgba(0,0,0,0.75)',
-      textStrokeWidthFactor: 1.15,
-      bgColor: 'rgba(11,18,32,0.86)',
-      bgPaddingX: 8,
-      bgPaddingY: 6,
-      bgStrokeColor: 'rgba(255,255,255,0.18)',
-      bgStrokeWidth: 1,
-      bgCornerRadius: 6,
-      offsetYFactor: -1.45,
-      offsetY,
-      interactive: false,
-      radius: 0,
+    // Create popup
+    const popup = L.popup({
+      closeButton: true,
+      autoClose: false,
+      closeOnEscapeKey: true,
+      closeOnClick: false,
+      className: 'dcct-test-popup',
+      maxWidth: 250,
+      minWidth: 160,
+    })
+      .setLatLng(latlng)
+      .setContent(popupContent);
+
+    // Track popup close event
+    popup.on('remove', () => {
+      const pops = dcctOpenPopupsRef.current || {};
+      delete pops[idNorm];
+      dcctOpenPopupsRef.current = pops;
     });
 
-    label._dcctAnchorLatLng = latlng;
+    // Open popup and track it
+    popup.openOn(map);
+    openPopups[idNorm] = popup;
+    dcctOpenPopupsRef.current = openPopups;
 
-    try {
-      label.addTo(layer);
-      dcctOverlayLabelsByIdRef.current = { ...(labelsById || {}), [idNorm]: label };
-    } catch (_e) {
-      void _e;
-    }
+  }, []);
+
+  // Clear DCCT popups when switching modules
+  const dcctClearAllPopups = useCallback(() => {
+    const map = mapRef.current;
+    const openPopups = dcctOpenPopupsRef.current || {};
+    Object.values(openPopups).forEach((popup) => {
+      try {
+        if (map) map.closePopup(popup);
+      } catch (_e) {
+        void _e;
+      }
+    });
+    dcctOpenPopupsRef.current = {};
   }, []);
 
   // Clear DCCT overlays when switching modules
   useEffect(() => {
     dcctClearTestOverlays();
-  }, [activeMode?.key, dcctClearTestOverlays]);
+    dcctClearAllPopups();
+  }, [activeMode?.key, dcctClearTestOverlays, dcctClearAllPopups]);
   
   const [_status, setStatus] = useState('Initializing map...');
   const [lengthData, setLengthData] = useState({}); // Length data from CSV
@@ -4056,10 +4090,13 @@ export default function BaseModule({
               // DC/LV DEFAULT: Add click events - left click to select
               if (isDCCT && isPoly) {
                 featureLayer.on('click', (e) => {
+                  // Stop all propagation to prevent double-firing
+                  L.DomEvent.stop(e);
                   try {
                     if (e?.originalEvent) {
-                      L.DomEvent.stopPropagation(e.originalEvent);
-                      L.DomEvent.preventDefault(e.originalEvent);
+                      e.originalEvent.stopPropagation();
+                      e.originalEvent.stopImmediatePropagation();
+                      e.originalEvent.preventDefault();
                     }
                   } catch (_e) {
                     void _e;
