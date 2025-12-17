@@ -289,33 +289,27 @@ export const LV_TERMINATION_AND_TESTING_MODULE_CONFIG = {
 export const DC_CABLE_TESTING_PROGRESS_MODULE_CONFIG = {
   key: 'DCCT',
   label: 'DC_CABLE_TESTING_PROGRESS',
-  csvFormat: null,
-  csvPath: null,
+  // DCCT uses dc_riso.csv for passed/failed testing data
+  csvFormat: 'dcct_riso',
+  csvPath: '/DC_CABLE_TESTING_PROGRESS/dc_riso.csv',
   linkPath: '/DC_CABLE_TESTING_PROGRESS/link',
-  simpleCounters: true,
+  simpleCounters: false, // DCCT uses custom testing counters
+  dcctMode: true, // Enable DC Cable Testing mode
+  // string_text styling - same as DC Cable Pulling module
   stringTextVisibility: 'always',
-  stringTextToggle: true,
+  stringTextToggle: false,
   stringTextDefaultOn: true,
-  // text styling similar to MVT (readable, neutral)
-  stringTextColor: 'rgba(255,255,255,0.98)',
-  stringTextBaseSize: 22,
-  stringTextStyle: '400',
-  stringTextStrokeColor: 'rgba(0,0,0,0.85)',
-  stringTextStrokeWidthFactor: 1.2,
-  stringTextMinZoom: 0,
-  stringTextMinFontSize: 14,
-  stringTextMaxFontSize: 26,
+  stringTextColor: 'rgba(255,255,255,0.92)',
+  stringTextBaseSize: 11,
+  stringTextStyle: '300',
+  stringTextStrokeColor: 'rgba(0,0,0,0.6)',
+  stringTextStrokeWidthFactor: 1,
+  stringTextMinZoom: 18,
+  stringTextMinFontSize: null,
+  stringTextMaxFontSize: null,
   stringTextRefZoom: 20,
-  // Enable inv_id labels in label mode (if provided)
-  invIdLabelMode: true,
-  invIdTextScale: 1,
-  invIdTextBaseSize: 18,
-  invIdTextRefZoom: 20,
-  invIdTextStyle: '600',
-  invIdTextMinFontSize: 10,
-  invIdTextMaxFontSize: 24,
-  invIdTextStrokeColor: 'rgba(0,0,0,0.88)',
-  invIdTextStrokeWidthFactor: 1.45,
+  // No inv_id label mode for DCCT - we color strings based on test results
+  invIdLabelMode: false,
   geojsonFiles: [
     { url: '/DC_CABLE_TESTING_PROGRESS/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
     { url: '/DC_CABLE_TESTING_PROGRESS/string_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },

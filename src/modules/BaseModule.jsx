@@ -29,6 +29,7 @@ L.TextLabel = L.CircleMarker.extend({
     underlineColor: null, // defaults to textColor if null
     underlineWidthFactor: 1,
     offsetX: 0, // px (applied after rotation)
+    offsetY: 0, // px (applied after rotation)
     offsetXFactor: 0, // multiplied by computed fontSize (applied after rotation)
     offsetYFactor: 0, // multiplied by computed fontSize (applied after rotation)
     minFontSize: null,
@@ -80,9 +81,10 @@ L.TextLabel = L.CircleMarker.extend({
     ctx.rotate(rotationRad);
     // Apply optional offsets AFTER rotation so "below" stays aligned with rotated text.
     const offX = Number(this.options.offsetX) || 0;
+    const offYpx = Number(this.options.offsetY) || 0;
     const offXf = (Number(this.options.offsetXFactor) || 0) * fontSize;
     const offY = (Number(this.options.offsetYFactor) || 0) * fontSize;
-    if (offX || offXf || offY) ctx.translate(offX + offXf, offY);
+    if (offX || offYpx || offXf || offY) ctx.translate(offX + offXf, offYpx + offY);
 
     ctx.font = this.options.textStyle + ' ' + fontSize + 'px sans-serif';
     // If background is configured but hidden at this zoom, allow an alternate text color
@@ -94,15 +96,24 @@ L.TextLabel = L.CircleMarker.extend({
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
+    const rawText = String(this.options.text || '');
+    const lines = rawText.includes('\n') ? rawText.split(/\n+/).filter(Boolean) : [rawText];
+    const lineGap = fontSize * 0.2;
+    const lineH = fontSize + lineGap;
+
     // Optional background box behind text (square by default)
     if (bgVisible) {
-      const metrics = ctx.measureText(this.options.text || '');
-      const ascent =
-        typeof metrics.actualBoundingBoxAscent === 'number' ? metrics.actualBoundingBoxAscent : fontSize * 0.8;
-      const descent =
-        typeof metrics.actualBoundingBoxDescent === 'number' ? metrics.actualBoundingBoxDescent : fontSize * 0.25;
-      const textW = metrics.width || 0;
-      const textH = ascent + descent;
+      let maxW = 0;
+      let ascent = fontSize * 0.8;
+      let descent = fontSize * 0.25;
+      for (const ln of lines) {
+        const m = ctx.measureText(ln || '');
+        maxW = Math.max(maxW, m.width || 0);
+        if (typeof m.actualBoundingBoxAscent === 'number') ascent = Math.max(ascent, m.actualBoundingBoxAscent);
+        if (typeof m.actualBoundingBoxDescent === 'number') descent = Math.max(descent, m.actualBoundingBoxDescent);
+      }
+      const textW = maxW;
+      const textH = (lines.length * lineH) - lineGap; // no gap after last line
       const padX = Number(this.options.bgPaddingX) || 0;
       const padY = Number(this.options.bgPaddingY) || 0;
       const w = textW + padX * 2;
@@ -147,14 +158,34 @@ L.TextLabel = L.CircleMarker.extend({
       const factor = typeof this.options.textStrokeWidthFactor === 'number' ? this.options.textStrokeWidthFactor : 1;
       ctx.lineWidth = Math.max(0.55, fontSize / 18) * Math.max(0.5, factor);
       ctx.strokeStyle = this.options.textStrokeColor || 'rgba(0,0,0,0.6)';
-      ctx.strokeText(this.options.text, 0, 0);
+      if (lines.length === 1) {
+        ctx.strokeText(rawText, 0, 0);
+      } else {
+        const totalH = (lines.length * lineH) - lineGap;
+        const startY = -totalH / 2 + (fontSize / 2);
+        for (let i = 0; i < lines.length; i++) {
+          const ln = lines[i] || '';
+          const y = startY + i * lineH;
+          ctx.strokeText(ln, 0, y);
+        }
+      }
     }
-    
-    ctx.fillText(this.options.text, 0, 0);
+
+    if (lines.length === 1) {
+      ctx.fillText(rawText, 0, 0);
+    } else {
+      const totalH = (lines.length * lineH) - lineGap;
+      const startY = -totalH / 2 + (fontSize / 2);
+      for (let i = 0; i < lines.length; i++) {
+        const ln = lines[i] || '';
+        const y = startY + i * lineH;
+        ctx.fillText(ln, 0, y);
+      }
+    }
 
     // Optional underline (used for clickable "TESTED" label)
     if (this.options.underline) {
-      const metrics = ctx.measureText(this.options.text || '');
+      const metrics = ctx.measureText(lines[lines.length - 1] || '');
       const w = metrics.width || 0;
       const y = (fontSize * 0.55); // slightly below baseline-middle
       const uc = this.options.underlineColor || ctx.fillStyle;
@@ -285,6 +316,12 @@ export default function BaseModule({
   const isMC4 = String(activeMode?.key || '').toUpperCase() === 'MC4';
   const isMVT = String(activeMode?.key || '').toUpperCase() === 'MVT';
   const isLVTT = String(activeMode?.key || '').toUpperCase() === 'LVTT';
+  // DC Cable Testing Progress mode
+  const isDCCT = String(activeMode?.key || '').toUpperCase() === 'DCCT' || Boolean(activeMode?.dcctMode);
+  const isDCCTRef = useRef(isDCCT);
+  useEffect(() => {
+    isDCCTRef.current = isDCCT;
+  }, [isDCCT]);
   const mvfCircuitsMultiplier =
     typeof activeMode?.circuitsMultiplier === 'number' && Number.isFinite(activeMode.circuitsMultiplier)
       ? activeMode.circuitsMultiplier
@@ -431,6 +468,147 @@ export default function BaseModule({
   useEffect(() => {
     lvttTerminationByInvRef.current = lvttTerminationByInv || {};
   }, [lvttTerminationByInv]);
+
+  // DCCT: DC Cable Testing Progress state
+  // dcctTestData: { [normalizedId]: 'passed' | 'failed' }
+  const [dcctTestData, setDcctTestData] = useState(() => ({}));
+  const dcctTestDataRef = useRef(dcctTestData);
+  useEffect(() => {
+    dcctTestDataRef.current = dcctTestData || {};
+  }, [dcctTestData]);
+  // DCCT: Full CSV values per ID (for click-to-show overlays)
+  // { [normalizedId]: { plus: string, minus: string, status: 'passed'|'failed'|null, remarkRaw: string } }
+  const dcctRisoByIdRef = useRef({});
+  // DCCT: overlay labels for clicked tables
+  const dcctOverlayLayerRef = useRef(null); // L.LayerGroup
+  const dcctOverlayLabelsByIdRef = useRef({}); // normalizedId -> L.TextLabel
+  // DCCT: Map IDs from string_text.geojson
+  const [dcctMapIds, setDcctMapIds] = useState(() => new Set());
+  const dcctMapIdsRef = useRef(dcctMapIds);
+  useEffect(() => {
+    dcctMapIdsRef.current = dcctMapIds || new Set();
+  }, [dcctMapIds]);
+  // DCCT: Active filter ('passed' | 'failed' | 'not_tested' | null)
+  const [dcctFilter, setDcctFilter] = useState(null);
+  const dcctFilterRef = useRef(dcctFilter);
+  useEffect(() => {
+    dcctFilterRef.current = dcctFilter;
+  }, [dcctFilter]);
+  // DCCT: CSV totals
+  const [dcctCsvTotals, setDcctCsvTotals] = useState(() => ({ total: 0, passed: 0, failed: 0 }));
+
+  const dcctClearTestOverlays = useCallback(() => {
+    try {
+      const layer = dcctOverlayLayerRef.current;
+      if (layer) layer.clearLayers();
+    } catch (_e) {
+      void _e;
+    }
+    dcctOverlayLabelsByIdRef.current = {};
+  }, []);
+
+  const dcctToggleTestOverlay = useCallback((idNorm, latlng) => {
+    const map = mapRef.current;
+    if (!map || !idNorm || !latlng) return;
+
+    try {
+      if (!dcctOverlayLayerRef.current) {
+        dcctOverlayLayerRef.current = L.layerGroup().addTo(map);
+      }
+    } catch (_e) {
+      void _e;
+      return;
+    }
+
+    const layer = dcctOverlayLayerRef.current;
+    const labelsById = dcctOverlayLabelsByIdRef.current || {};
+    const existing = labelsById[idNorm];
+    if (existing && layer && typeof layer.removeLayer === 'function') {
+      try {
+        layer.removeLayer(existing);
+      } catch (_e) {
+        void _e;
+      }
+      const next = { ...(labelsById || {}) };
+      delete next[idNorm];
+      dcctOverlayLabelsByIdRef.current = next;
+      return;
+    }
+
+    const rec = dcctRisoByIdRef.current?.[idNorm] || null;
+    const plus = rec?.plus != null ? String(rec.plus).trim() : '';
+    const minus = rec?.minus != null ? String(rec.minus).trim() : '';
+    const status = rec?.status || null;
+
+    const passColor = 'rgba(5,150,105,0.96)';
+    const failColor = 'rgba(239,68,68,0.98)';
+    const naColor = 'rgba(148,163,184,0.98)';
+    const textColor = status === 'passed' ? passColor : status === 'failed' ? failColor : naColor;
+    const txtPlus = plus ? plus : 'N/A';
+    const txtMinus = minus ? minus : 'N/A';
+    const text = `Ins. Res (+): ${txtPlus}\nIns. Res (-): ${txtMinus}`;
+
+    // Collision avoidance: if nearby overlays exist, stack this one upward.
+    // This avoids "ic ice geciyor" for close tables.
+    let offsetY = 0;
+    try {
+      const p = map.latLngToLayerPoint(latlng);
+      const existingEntries = Object.entries(labelsById || {});
+      const step = 44; // px per stacked label
+      const maxTries = 10;
+      for (let attempt = 0; attempt < maxTries; attempt++) {
+        const yTry = offsetY;
+        const collides = existingEntries.some(([, lbl]) => {
+          if (!lbl) return false;
+          const a = lbl._dcctAnchorLatLng;
+          if (!a) return false;
+          const pp = map.latLngToLayerPoint(a);
+          const dx = Math.abs(pp.x - p.x);
+          const dy = Math.abs((pp.y + (Number(lbl?.options?.offsetY) || 0)) - (p.y + yTry));
+          return dx < 160 && dy < 52;
+        });
+        if (!collides) break;
+        offsetY -= step;
+      }
+    } catch (_e) {
+      void _e;
+    }
+
+    const label = L.textLabel(latlng, {
+      text,
+      renderer: canvasRenderer,
+      textBaseSize: 13,
+      refZoom: 20,
+      textStyle: '600',
+      textColor,
+      textStrokeColor: 'rgba(0,0,0,0.75)',
+      textStrokeWidthFactor: 1.15,
+      bgColor: 'rgba(11,18,32,0.86)',
+      bgPaddingX: 8,
+      bgPaddingY: 6,
+      bgStrokeColor: 'rgba(255,255,255,0.18)',
+      bgStrokeWidth: 1,
+      bgCornerRadius: 6,
+      offsetYFactor: -1.45,
+      offsetY,
+      interactive: false,
+      radius: 0,
+    });
+
+    label._dcctAnchorLatLng = latlng;
+
+    try {
+      label.addTo(layer);
+      dcctOverlayLabelsByIdRef.current = { ...(labelsById || {}), [idNorm]: label };
+    } catch (_e) {
+      void _e;
+    }
+  }, []);
+
+  // Clear DCCT overlays when switching modules
+  useEffect(() => {
+    dcctClearTestOverlays();
+  }, [activeMode?.key, dcctClearTestOverlays]);
   
   const [_status, setStatus] = useState('Initializing map...');
   const [lengthData, setLengthData] = useState({}); // Length data from CSV
@@ -1623,6 +1801,12 @@ export default function BaseModule({
       const runTotal = cursorCandidates ? cursorCandidates.length : total;
       // MVT: slightly larger labels for SS / counter / TESTED only
       const mvtBaseSizeLocal = isMVT ? (Number(stringTextBaseSizeCfg) * 1.25) : Number(stringTextBaseSizeCfg);
+
+      // DCCT: Get test data and filter state for coloring
+      const dcctTestResults = isDCCT ? (dcctTestDataRef.current || {}) : null;
+      const dcctActiveFilter = isDCCT ? dcctFilterRef.current : null;
+      const dcctMapIdsSet = isDCCT ? (dcctMapIdsRef.current || new Set()) : null;
+
       for (let k = 0; k < runTotal; k++) {
         if (count >= maxCount) break;
         const idx = cursorCandidates ? cursorCandidates[k] : (iterateIndices ? iterateIndices[k] : k);
@@ -1633,6 +1817,8 @@ export default function BaseModule({
         // MVT: SS label color depends on manual counter; the counter itself is a separate clickable label.
         let nextText = pt.text;
         let nextTextColor = stringTextColorCfg;
+        let nextOpacity = 1.0;
+
         if (isMVT && mvtCountsByStation) {
           const raw = String(pt.text || '').trim();
           const norm = normalizeId(raw);
@@ -1641,6 +1827,28 @@ export default function BaseModule({
             // MVT rule: 3/3 => GREEN, otherwise WHITE (not red)
             nextTextColor = terminated === 3 ? 'rgba(34,197,94,0.98)' : 'rgba(255,255,255,0.98)';
           }
+        }
+
+        // DCCT: Color labels based on test results (passed=green, failed=red, not_tested=gray)
+        if (isDCCT && dcctTestResults) {
+          const norm = pt.stringId || normalizeId(pt.text);
+          const testResult = dcctTestResults[norm];
+
+          // Determine status: passed, failed, or not_tested
+          // NOTE: If there's no CSV row for this ID, testResult is undefined => not_tested.
+          const status = testResult === 'passed' ? 'passed' : testResult === 'failed' ? 'failed' : 'not_tested';
+          
+          // Color based on status
+          if (status === 'passed') {
+            nextTextColor = 'rgba(5,150,105,0.96)'; // Softer green
+          } else if (status === 'failed') {
+            nextTextColor = 'rgba(239,68,68,0.98)'; // Red
+          } else {
+            nextTextColor = 'rgba(148,163,184,0.98)'; // Gray (not tested)
+          }
+          
+          // Apply filter: dim labels that don't match the active filter
+          // NOTE: In DCCT we keep other labels stable; counter click only highlights the counter itself.
         }
 
         // Create once, then reuse
@@ -2095,6 +2303,14 @@ export default function BaseModule({
     lastStringLabelKeyRef.current = '';
     scheduleStringTextLabelUpdate();
   }, [isMVT, mvtCsvVersion, scheduleStringTextLabelUpdate]);
+
+  // DCCT: refresh labels when filter or test data changes
+  useEffect(() => {
+    if (!isDCCT) return;
+    if (!mapRef.current || !stringTextLayerRef.current) return;
+    lastStringLabelKeyRef.current = '';
+    scheduleStringTextLabelUpdate();
+  }, [isDCCT, dcctFilter, dcctTestData, dcctMapIds, scheduleStringTextLabelUpdate]);
 
   // MVT: close popups when leaving the mode.
   useEffect(() => {
@@ -3159,6 +3375,87 @@ export default function BaseModule({
           });
           setMvfSegments(list);
           mvfSegmentLenByKeyRef.current = lenByKey;
+        } else if (csvFormat === 'dcct_riso') {
+          // DCCT: DC Cable Testing Progress CSV format
+          // Columns: ID, Insulation Resistance (-), Insulation Resistance (+), remark
+          // remark can be PASSED or FAILED
+          const lines = text.split(/\r?\n/).filter((l) => l && l.trim());
+          if (lines.length <= 1) {
+            setDcctTestData({});
+            setDcctCsvTotals({ total: 0, passed: 0, failed: 0 });
+            dcctRisoByIdRef.current = {};
+            return;
+          }
+
+          const header = (lines[0] || '').split(',').map((h) => h.trim().toLowerCase());
+          const idIdx = header.findIndex((h) => h === 'id');
+          const remarkIdx = header.findIndex((h) => h === 'remark');
+          const minusIdx = header.findIndex((h) => h.includes('insulation') && h.includes('(-'));
+          const plusIdx = header.findIndex((h) => h.includes('insulation') && h.includes('(+)'));
+
+          const testResults = {}; // normalizedId -> 'passed' | 'failed'
+          const risoById = {}; // normalizedId -> { plus, minus, status, remarkRaw }
+          let passedCount = 0;
+          let failedCount = 0;
+          const uniqueIds = new Set();
+
+          for (let i = 1; i < lines.length; i++) {
+            const line = lines[i];
+            if (!line || !line.trim()) continue;
+            const parts = line.split(',');
+            const rawId = idIdx >= 0 ? parts[idIdx] : parts[0];
+            const rawRemark = remarkIdx >= 0 ? parts[remarkIdx] : parts[parts.length - 1];
+            const rawMinus = minusIdx >= 0 ? parts[minusIdx] : (parts.length >= 2 ? parts[1] : '');
+            const rawPlus = plusIdx >= 0 ? parts[plusIdx] : (parts.length >= 3 ? parts[2] : '');
+
+            const id = normalizeId(rawId);
+            const remarkRaw = String(rawRemark || '').trim();
+            const remark = remarkRaw.toLowerCase();
+
+            if (!id) continue;
+
+            // Only count unique IDs for totals
+            if (!uniqueIds.has(id)) {
+              uniqueIds.add(id);
+              // Determine test result (use first occurrence if duplicate rows exist)
+              let status = null;
+              if (remark === 'passed' || remark === 'pass') {
+                status = 'passed';
+                testResults[id] = 'passed';
+                passedCount++;
+              } else if (remark === 'failed' || remark === 'fail') {
+                status = 'failed';
+                testResults[id] = 'failed';
+                failedCount++;
+              }
+
+              risoById[id] = {
+                plus: String(rawPlus ?? '').trim(),
+                minus: String(rawMinus ?? '').trim(),
+                status,
+                remarkRaw,
+              };
+            }
+          }
+
+          setDcctTestData(testResults);
+          dcctRisoByIdRef.current = risoById;
+          setDcctCsvTotals({
+            total: uniqueIds.size,
+            passed: passedCount,
+            failed: failedCount,
+          });
+
+          // DCCT doesn't use lengthData
+          setLengthData({});
+          setTotalPlus(0);
+          setTotalMinus(0);
+          setMvfSegments([]);
+          mvfSegmentLenByKeyRef.current = {};
+          setSelectedPolygons(new Set());
+          setCompletedPlus(0);
+          setCompletedMinus(0);
+          return;
         } else {
           // Unknown format; keep empty
         }
@@ -3225,6 +3522,8 @@ export default function BaseModule({
 
   // Update ONLY changed polygon colors (performance optimization)
   useEffect(() => {
+    // DCCT: polygon colors are controlled by pass/fail status, not selection.
+    if (isDCCT) return;
     const prevSelected = prevSelectedRef.current;
     const currentSelected = selectedPolygons;
     
@@ -3268,7 +3567,80 @@ export default function BaseModule({
     
     // Save current selection for next comparison
     prevSelectedRef.current = new Set(currentSelected);
-  }, [selectedPolygons]);
+  }, [isDCCT, selectedPolygons]);
+
+  // DCCT: color full-table polygon outlines based on CSV test result (same tone as ID labels).
+  useEffect(() => {
+    if (!isDCCT) return;
+
+    const results = dcctTestDataRef.current || {};
+    const panels = polygonById.current || {};
+
+    // DCCT stroke tuning: keep outlines readable but not overly thick.
+    const DCCT_STROKE = {
+      baseWeight: 0.75,
+      statusWeight: 1.25,
+      highlightWeight: 1.85,
+      dimWeight: 0.5,
+    };
+
+    const defaultStyle = {
+      color: 'rgba(255,255,255,0.35)',
+      weight: DCCT_STROKE.baseWeight,
+      fill: false,
+      fillOpacity: 0,
+    };
+
+    const activeFilter = dcctFilterRef.current;
+
+    try {
+      Object.keys(panels).forEach((pid) => {
+        const info = panels[pid];
+        const layer = info?.layer;
+        if (!layer || typeof layer.setStyle !== 'function') return;
+        const sid = normalizeId(info?.stringId);
+        const r = sid ? results[sid] : null;
+
+        // Determine status
+        const status = r === 'passed' ? 'passed' : r === 'failed' ? 'failed' : 'not_tested';
+
+        // Base colors
+        let color = defaultStyle.color;
+        let weight = defaultStyle.weight;
+        if (status === 'passed') {
+          color = 'rgba(5,150,105,0.96)';
+          weight = DCCT_STROKE.statusWeight;
+        } else if (status === 'failed') {
+          color = 'rgba(239,68,68,0.98)';
+          weight = DCCT_STROKE.statusWeight;
+        }
+
+        // Apply filter highlight/dim
+        let opacity = 1.0;
+        if (activeFilter) {
+          const matches = activeFilter === status;
+          if (matches) {
+            // Highlight matching tables
+            weight = DCCT_STROKE.highlightWeight;
+            opacity = 1.0;
+          } else {
+            // Dim non-matching tables
+            opacity = 0.12;
+            weight = DCCT_STROKE.dimWeight;
+          }
+        }
+
+        layer.setStyle({
+          ...defaultStyle,
+          color,
+          weight,
+          opacity,
+        });
+      });
+    } catch (_e) {
+      void _e;
+    }
+  }, [isDCCT, dcctTestData, dcctFilter, stringMatchVersion]);
 
   const fetchAllGeoJson = async () => {
     if (!mapRef.current) return;
@@ -3444,6 +3816,15 @@ export default function BaseModule({
               allBounds.extend([lat, lng]);
             }
           });
+
+          // DCCT: Collect all map IDs from string_text for Not Tested calculation
+          if (isDCCT) {
+            const mapIds = new Set();
+            stringTextPointsRef.current.forEach((pt) => {
+              if (pt.stringId) mapIds.add(pt.stringId);
+            });
+            setDcctMapIds(mapIds);
+          }
           
           stringLayer.addTo(mapRef.current);
           layersRef.current.push(stringLayer);
@@ -3673,6 +4054,37 @@ export default function BaseModule({
               }
 
               // DC/LV DEFAULT: Add click events - left click to select
+              if (isDCCT && isPoly) {
+                featureLayer.on('click', (e) => {
+                  try {
+                    if (e?.originalEvent) {
+                      L.DomEvent.stopPropagation(e.originalEvent);
+                      L.DomEvent.preventDefault(e.originalEvent);
+                    }
+                  } catch (_e) {
+                    void _e;
+                  }
+                  if (noteMode) return;
+
+                  const polygonId = featureLayer._uniquePolygonId;
+                  const polygonInfo = polygonId ? polygonById.current?.[polygonId] : null;
+                  const sidRaw = polygonInfo?.stringId || '';
+                  const sid = normalizeId(sidRaw);
+                  if (!sid) return;
+                  let center = null;
+                  try {
+                    if (typeof featureLayer.getBounds === 'function') center = featureLayer.getBounds().getCenter();
+                  } catch (_e) {
+                    void _e;
+                    center = null;
+                  }
+                  const pos = center || e?.latlng;
+                  if (!pos) return;
+                  dcctToggleTestOverlay(sid, pos);
+                });
+                return;
+              }
+
               featureLayer.on('click', (e) => {
                 L.DomEvent.stopPropagation(e);
                 if (noteMode) return;
@@ -4165,7 +4577,10 @@ export default function BaseModule({
       const grid = new Map(); // key -> [{stringId, latLng}]
       const seen = new Set();
       for (const p of stringTextPointsRef.current) {
-        if (!p?.stringId || seen.has(p.stringId)) continue;
+        if (!p?.stringId) continue;
+        // In DCCT, keep duplicate points (same stringId can appear twice in source)
+        // so each overlapping/compound table polygon can still find a good candidate.
+        if (!isDCCT && seen.has(p.stringId)) continue;
         seen.add(p.stringId);
         const iLat = Math.floor(p.lat / GRID_CELL_DEG);
         const iLng = Math.floor(p.lng / GRID_CELL_DEG);
@@ -4233,6 +4648,12 @@ export default function BaseModule({
           layer.eachLayer(featureLayer => {
             if (featureLayer.feature && featureLayer.getBounds) {
               try {
+                // IMPORTANT: only match string IDs to selectable table polygons from full.geojson.
+                // Other layers (lv_box, subs, etc.) can be huge and would steal assignments,
+                // leaving tables unmatched (and thus different stroke tones in DCCT).
+                const uid = featureLayer._uniquePolygonId;
+                if (!uid || !polygonById.current?.[uid]) return;
+
                 const bounds = featureLayer.getBounds();
                 const center = bounds.getCenter();
                 const geometry = featureLayer.feature?.geometry;
@@ -4271,7 +4692,10 @@ export default function BaseModule({
 
           const candidates = queryStringCandidates(bounds, center, isSmallTable);
           for (const c of candidates) {
-            if (!isSmallTable && assignedToLargeTable.has(c.stringId)) continue;
+            // Only enforce unique assignment in non-DCCT modes.
+            // In DCCT we want all overlapping table outlines to share the same status color
+            // (otherwise you see a lighter mixed tone from green+default overlays).
+            if (!isDCCT && !isSmallTable && assignedToLargeTable.has(c.stringId)) continue;
             const distToCenter = center.distanceTo(c.latLng);
             const insideBounds = bounds.contains(c.latLng);
             if (insideBounds) {
@@ -4311,7 +4735,7 @@ export default function BaseModule({
               polygonById.current[uniqueId].stringId = finalId;
               polygonById.current[uniqueId].isSmallTable = isSmallTable;
             }
-            if (!isSmallTable) {
+            if (!isDCCT && !isSmallTable) {
               assignedToLargeTable.add(finalId);
             }
           }
@@ -5516,31 +5940,40 @@ export default function BaseModule({
           });
 
           if (clickedPolygonId) {
-            const polygonInfo = polygonById.current[clickedPolygonId];
-            const finalSelectedIds = new Set();
-
-            if (polygonInfo && polygonInfo.isSmallTable && polygonInfo.stringId) {
-              Object.keys(polygonById.current).forEach(pid => {
-                const info = polygonById.current[pid];
-                if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
-                  finalSelectedIds.add(pid);
-                }
-              });
+            // DCCT: polygon clicks are handled by Leaflet per-polygon handler (toggle overlays).
+            if (isDCCT) {
+              // do nothing here
             } else {
-              finalSelectedIds.add(clickedPolygonId);
-            }
+              const polygonInfo = polygonById.current[clickedPolygonId];
+              const finalSelectedIds = new Set();
 
-            setSelectedPolygons(prev => {
-              const next = new Set(prev);
-              // Toggle: if all are selected, deselect; otherwise select
-              const allSelected = Array.from(finalSelectedIds).every(id => next.has(id));
-              if (allSelected) {
-                finalSelectedIds.forEach(id => next.delete(id));
+              if (polygonInfo && polygonInfo.isSmallTable && polygonInfo.stringId) {
+                Object.keys(polygonById.current).forEach(pid => {
+                  const info = polygonById.current[pid];
+                  if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
+                    finalSelectedIds.add(pid);
+                  }
+                });
               } else {
-                finalSelectedIds.forEach(id => next.add(id));
+                finalSelectedIds.add(clickedPolygonId);
               }
-              return next;
-            });
+
+              setSelectedPolygons(prev => {
+                const next = new Set(prev);
+                // Toggle: if all are selected, deselect; otherwise select
+                const allSelected = Array.from(finalSelectedIds).every(id => next.has(id));
+                if (allSelected) {
+                  finalSelectedIds.forEach(id => next.delete(id));
+                } else {
+                  finalSelectedIds.forEach(id => next.add(id));
+                }
+                return next;
+              });
+            }
+          } else if (isDCCT) {
+            // DCCT: Clicking on empty area clears filter + all test overlays
+            setDcctFilter(null);
+            dcctClearTestOverlays();
           }
         }
       }
@@ -5559,7 +5992,7 @@ export default function BaseModule({
       container.removeEventListener('mouseup', onMouseUp);
     };
   // IMPORTANT: include isMC4 (and module key) so drag-selection behavior updates when switching modes.
-  }, [mapReady, activeMode?.key, isLV, isMVF, isMC4, isMVT, isLVTT, stringPoints, noteMode, notes]);
+  }, [mapReady, activeMode?.key, isLV, isMVF, isMC4, isMVT, isLVTT, isDCCT, stringPoints, noteMode, notes]);
 
   useEffect(() => {
     mapRef.current = L.map('map', {
@@ -5626,10 +6059,24 @@ export default function BaseModule({
 
     fetchAllGeoJson();
 
+    // DCCT: Clear test overlays immediately when clicking empty map.
+    // Table clicks stop propagation/prevent default, so this typically only triggers for empty clicks.
+    const onMapClick = () => {
+      if (!isDCCTRef.current) return;
+      setDcctFilter(null);
+      dcctClearTestOverlays();
+    };
+    try {
+      mapRef.current.on('click', onMapClick);
+    } catch (_e) {
+      void _e;
+    }
+
     return () => {
       try {
         if (rafRef.current) cancelAnimationFrame(rafRef.current);
         mapRef.current?.off('zoomend moveend', scheduleStringTextLabelUpdate);
+        mapRef.current?.off('click', onMapClick);
       } catch (_e) { void _e; }
       mapRef.current?.remove();
       mapRef.current = null;
@@ -6247,6 +6694,117 @@ export default function BaseModule({
           );
         })()}
       </div>
+    ) : isDCCT ? (
+      <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start">
+        {(() => {
+          // DCCT Counters: Total, Passed, Failed, Not Tested
+          const csvTestData = dcctTestData || {};
+          const csvIds = new Set(Object.keys(csvTestData));
+          const mapIds = dcctMapIds || new Set();
+          
+          // Calculate counts
+          const csvTotal = csvIds.size;
+          let passedCount = 0;
+          let failedCount = 0;
+          
+          csvIds.forEach((id) => {
+            const result = csvTestData[id];
+            if (result === 'passed') passedCount++;
+            else if (result === 'failed') failedCount++;
+          });
+          
+          // Not tested: IDs in map but not in CSV, plus IDs in CSV but not in map
+          let notTestedCount = 0;
+          mapIds.forEach((id) => {
+            if (!csvIds.has(id)) notTestedCount++;
+          });
+          // Spec: Not Tested should be ONLY IDs that are on the map (string_text) but missing in CSV.
+          
+          const activeFilter = dcctFilter;
+          
+          // Styling for clickable filter links
+          const filterLinkBase = 'cursor-pointer underline decoration-1 underline-offset-2 hover:opacity-80 transition-opacity';
+          const filterActiveRing = 'ring-2 ring-offset-1 ring-offset-slate-900';
+          
+          return (
+            <div className="flex items-center gap-3">
+              {/* Total Counter */}
+              <div className="min-w-[120px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
+                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                  <span className="text-xs font-bold text-slate-200">Total</span>
+                  <span className="text-xs font-bold text-slate-200 tabular-nums">{csvTotal}</span>
+                </div>
+              </div>
+              
+              {/* Passed Counter - Clickable */}
+              <div 
+                className={`min-w-[120px] border-2 py-3 px-3 transition-all ${
+                  activeFilter === 'passed' 
+                    ? 'border-emerald-500 bg-emerald-950/40 ' + filterActiveRing + ' ring-emerald-500' 
+                    : 'border-slate-700 bg-slate-800 hover:border-emerald-600'
+                }`}
+              >
+                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                  <span 
+                    className={`text-xs font-bold text-emerald-400 ${filterLinkBase}`}
+                    onClick={() => setDcctFilter(activeFilter === 'passed' ? null : 'passed')}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => e.key === 'Enter' && setDcctFilter(activeFilter === 'passed' ? null : 'passed')}
+                  >
+                    Passed
+                  </span>
+                  <span className="text-xs font-bold text-emerald-400 tabular-nums">{passedCount}</span>
+                </div>
+              </div>
+              
+              {/* Failed Counter - Clickable */}
+              <div 
+                className={`min-w-[120px] border-2 py-3 px-3 transition-all ${
+                  activeFilter === 'failed' 
+                    ? 'border-red-500 bg-red-950/40 ' + filterActiveRing + ' ring-red-500' 
+                    : 'border-slate-700 bg-slate-800 hover:border-red-600'
+                }`}
+              >
+                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                  <span 
+                    className={`text-xs font-bold text-red-400 ${filterLinkBase}`}
+                    onClick={() => setDcctFilter(activeFilter === 'failed' ? null : 'failed')}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => e.key === 'Enter' && setDcctFilter(activeFilter === 'failed' ? null : 'failed')}
+                  >
+                    Failed
+                  </span>
+                  <span className="text-xs font-bold text-red-400 tabular-nums">{failedCount}</span>
+                </div>
+              </div>
+              
+              {/* Not Tested Counter - Clickable */}
+              <div 
+                className={`min-w-[140px] border-2 py-3 px-3 transition-all ${
+                  activeFilter === 'not_tested' 
+                    ? 'border-slate-400 bg-slate-700/40 ' + filterActiveRing + ' ring-slate-400' 
+                    : 'border-slate-700 bg-slate-800 hover:border-slate-500'
+                }`}
+              >
+                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                  <span 
+                    className={`text-xs font-bold text-slate-400 ${filterLinkBase}`}
+                    onClick={() => setDcctFilter(activeFilter === 'not_tested' ? null : 'not_tested')}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => e.key === 'Enter' && setDcctFilter(activeFilter === 'not_tested' ? null : 'not_tested')}
+                  >
+                    Not Tested
+                  </span>
+                  <span className="text-xs font-bold text-slate-400 tabular-nums">{notTestedCount}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
     ) : null);
 
   return (
@@ -6379,67 +6937,71 @@ export default function BaseModule({
               </svg>
             </button>
 
-            <button
-              onClick={() => setModalOpen(true)}
-              disabled={
-                noteMode ||
-                (isMC4 && !mc4SelectionMode) ||
-                (isLVTT
-                  ? (String(lvttSubMode || 'termination') === 'testing' || lvttCompletedForSubmit === 0)
-                  : (isMVT ? mvtCompletedForSubmit === 0 : workSelectionCount === 0))
-              }
-              className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-              title={isMC4 && !mc4SelectionMode ? "Select MC4 Install or Cable Termination first" : "Submit Work"}
-              aria-label="Submit Work"
-            >
-              Submit
-            </button>
+            {!isDCCT && (
+              <>
+                <button
+                  onClick={() => setModalOpen(true)}
+                  disabled={
+                    noteMode ||
+                    (isMC4 && !mc4SelectionMode) ||
+                    (isLVTT
+                      ? (String(lvttSubMode || 'termination') === 'testing' || lvttCompletedForSubmit === 0)
+                      : (isMVT ? mvtCompletedForSubmit === 0 : workSelectionCount === 0))
+                  }
+                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                  title={isMC4 && !mc4SelectionMode ? "Select MC4 Install or Cable Termination first" : "Submit Work"}
+                  aria-label="Submit Work"
+                >
+                  Submit
+                </button>
 
-            <button
-              onClick={() => setHistoryOpen(true)}
-              disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || (dailyLog.length === 0 && notes.length === 0)}
-              className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-              title={isLVTT && String(lvttSubMode || 'termination') === 'testing' ? 'History disabled in LV_TESTING' : 'History'}
-              aria-label="History"
-            >
-              History
-            </button>
+                <button
+                  onClick={() => setHistoryOpen(true)}
+                  disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || (dailyLog.length === 0 && notes.length === 0)}
+                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                  title={isLVTT && String(lvttSubMode || 'termination') === 'testing' ? 'History disabled in LV_TESTING' : 'History'}
+                  aria-label="History"
+                >
+                  History
+                </button>
 
-            <button
-              onClick={() =>
-                exportToExcel(dailyLog, {
-                  moduleKey: isMC4
-                    ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST')
-                    : (isMVT
-                      ? 'MVT_TERM'
-                      : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-                        ? 'LVTT_TERM'
-                        : (activeMode?.key || '')),
-                  moduleLabel: isMC4
-                    ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
-                    : (isMVT
-                      ? 'Cable Termination'
-                      : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                <button
+                  onClick={() =>
+                    exportToExcel(dailyLog, {
+                      moduleKey: isMC4
+                        ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST')
+                        : (isMVT
+                          ? 'MVT_TERM'
+                          : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                            ? 'LVTT_TERM'
+                            : (activeMode?.key || '')),
+                      moduleLabel: isMC4
+                        ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
+                        : (isMVT
+                          ? 'Cable Termination'
+                          : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                            ? 'Cable Termination'
+                            : moduleName),
+                      unit: isMC4
+                        ? 'ends'
+                        : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination')) ? 'cables' : 'm'),
+                      chartSheetName: (isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
                         ? 'Cable Termination'
-                        : moduleName),
-                  unit: isMC4
-                    ? 'ends'
-                    : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination')) ? 'cables' : 'm'),
-                  chartSheetName: (isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
-                    ? 'Cable Termination'
-                    : undefined,
-                  chartTitle: (isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
-                    ? 'Cable Termination'
-                    : undefined,
-                })
-              }
-              disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || dailyLog.length === 0}
-              className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-              title={isLVTT && String(lvttSubMode || 'termination') === 'testing' ? 'Export disabled in LV_TESTING' : 'Export Excel'}
-              aria-label="Export Excel"
-            >
-              Export
-            </button>
+                        : undefined,
+                      chartTitle: (isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
+                        ? 'Cable Termination'
+                        : undefined,
+                    })
+                  }
+                  disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || dailyLog.length === 0}
+                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                  title={isLVTT && String(lvttSubMode || 'termination') === 'testing' ? 'Export disabled in LV_TESTING' : 'Export Excel'}
+                  aria-label="Export Excel"
+                >
+                  Export
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -6582,6 +7144,21 @@ export default function BaseModule({
                   <div className="mt-2 flex items-center gap-2">
                     <span className="h-3 w-3 rounded-full border-2 border-emerald-700 bg-emerald-500" aria-hidden="true" />
                     <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-400">Completed Termination</span>
+                  </div>
+                </>
+              ) : isDCCT ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 border-2 border-emerald-900 bg-emerald-500" aria-hidden="true" />
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">PASSED</span>
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="h-3 w-3 border-2 border-red-900 bg-red-500" aria-hidden="true" />
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">FAILED</span>
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="h-3 w-3 border-2 border-slate-600 bg-slate-500" aria-hidden="true" />
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-slate-300">NOT TESTED</span>
                   </div>
                 </>
               ) : (
