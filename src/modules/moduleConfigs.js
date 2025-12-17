@@ -285,3 +285,48 @@ export const LV_TERMINATION_AND_TESTING_MODULE_CONFIG = {
     },
   ],
 };
+
+export const DC_CABLE_TESTING_PROGRESS_MODULE_CONFIG = {
+  key: 'DCCT',
+  label: 'DC_CABLE_TESTING_PROGRESS',
+  csvFormat: null,
+  csvPath: null,
+  linkPath: '/DC_CABLE_TESTING_PROGRESS/link',
+  simpleCounters: true,
+  stringTextVisibility: 'always',
+  stringTextToggle: true,
+  stringTextDefaultOn: true,
+  // text styling similar to MVT (readable, neutral)
+  stringTextColor: 'rgba(255,255,255,0.98)',
+  stringTextBaseSize: 22,
+  stringTextStyle: '400',
+  stringTextStrokeColor: 'rgba(0,0,0,0.85)',
+  stringTextStrokeWidthFactor: 1.2,
+  stringTextMinZoom: 0,
+  stringTextMinFontSize: 14,
+  stringTextMaxFontSize: 26,
+  stringTextRefZoom: 20,
+  // Enable inv_id labels in label mode (if provided)
+  invIdLabelMode: true,
+  invIdTextScale: 1,
+  invIdTextBaseSize: 18,
+  invIdTextRefZoom: 20,
+  invIdTextStyle: '600',
+  invIdTextMinFontSize: 10,
+  invIdTextMaxFontSize: 24,
+  invIdTextStrokeColor: 'rgba(0,0,0,0.88)',
+  invIdTextStrokeWidthFactor: 1.45,
+  geojsonFiles: [
+    { url: '/DC_CABLE_TESTING_PROGRESS/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
+    { url: '/DC_CABLE_TESTING_PROGRESS/string_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
+    { url: '/DC_CABLE_TESTING_PROGRESS/inv_id.geojson', name: 'inv_id', color: '#16a34a', fillColor: '#22c55e' },
+    {
+      url: '/DC_CABLE_TESTING_PROGRESS/lv_box.geojson',
+      name: 'lv_box',
+      color: '#eab308',
+      fillColor: '#facc15',
+      weight: 3,
+      fillOpacity: 0.6,
+    },
+  ],
+};
