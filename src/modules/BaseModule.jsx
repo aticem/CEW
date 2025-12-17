@@ -510,6 +510,49 @@ export default function BaseModule({
 
   // DCCT: Track open popups by idNorm
   const dcctOpenPopupsRef = useRef({}); // idNorm -> L.Popup
+  // DCCT: Hidden file input ref for CSV import
+  const dcctFileInputRef = useRef(null);
+
+  // DCCT: Save popup changes to state (called when popup is closed)
+  const dcctSavePopupChanges = useCallback((idNorm, popupContent) => {
+    if (!idNorm || !popupContent) return;
+    
+    const plusInput = popupContent.querySelector('input[data-field="plus"]');
+    const minusInput = popupContent.querySelector('input[data-field="minus"]');
+    const statusSelect = popupContent.querySelector('select[data-field="status"]');
+    
+    const newPlus = plusInput?.value?.trim() || '0';
+    const newMinus = minusInput?.value?.trim() || '0';
+    const newStatus = statusSelect?.value || 'not_tested';
+    
+    // Update dcctRisoByIdRef - preserve originalId if it exists
+    const risoData = dcctRisoByIdRef.current || {};
+    const existingRec = risoData[idNorm] || {};
+    risoData[idNorm] = {
+      plus: newPlus,
+      minus: newMinus,
+      status: newStatus === 'not_tested' ? null : newStatus,
+      remarkRaw: newStatus === 'passed' ? 'PASSED' : newStatus === 'failed' ? 'FAILED' : '',
+      originalId: existingRec.originalId || idNorm.toUpperCase().replace(/TX(\d+)INV(\d+)STR(\d+)/i, 'TX$1-INV$2-STR$3'),
+    };
+    dcctRisoByIdRef.current = risoData;
+    
+    // Update dcctTestData state to trigger re-render and color update
+    setDcctTestData((prev) => {
+      const next = { ...prev };
+      if (newStatus === 'passed') {
+        next[idNorm] = 'passed';
+      } else if (newStatus === 'failed') {
+        next[idNorm] = 'failed';
+      } else {
+        delete next[idNorm];
+      }
+      return next;
+    });
+    
+    // Trigger map update for table colors
+    setStringMatchVersion((v) => v + 1);
+  }, []);
 
   const dcctToggleTestOverlay = useCallback((idNorm, latlng) => {
     const map = mapRef.current;
@@ -521,6 +564,11 @@ export default function BaseModule({
     // If popup exists and is open, close it (toggle off)
     if (existingPopup) {
       try {
+        // Save changes before closing
+        const content = existingPopup.getContent();
+        if (content instanceof HTMLElement) {
+          dcctSavePopupChanges(idNorm, content);
+        }
         map.closePopup(existingPopup);
       } catch (_e) {
         void _e;
@@ -530,14 +578,17 @@ export default function BaseModule({
       return;
     }
 
-    // Get test data from CSV
+    // Get test data from CSV or state
     const rec = dcctRisoByIdRef.current?.[idNorm] || null;
+    // Check if ID is in map but not in CSV (not_tested) - use 0 as default
+    const isInCsv = rec !== null;
     const plus = rec?.plus != null ? String(rec.plus).trim() : '';
     const minus = rec?.minus != null ? String(rec.minus).trim() : '';
     const status = rec?.status || 'not_tested'; // 'passed', 'failed', 'not_tested'
 
-    const plusVal = plus || '999';
-    const minusVal = minus || '999';
+    // For items not in CSV, default to 0; for items in CSV with no value, use 999
+    const plusVal = plus || (isInCsv ? '999' : '0');
+    const minusVal = minus || (isInCsv ? '999' : '0');
 
     // Status colors
     const passColor = '#059669';
@@ -610,8 +661,13 @@ export default function BaseModule({
       .setLatLng(latlng)
       .setContent(popupContent);
 
-    // Track popup close event
+    // Track popup close event - save changes when popup is removed
     popup.on('remove', () => {
+      // Save changes before removing from tracking
+      const content = popup.getContent();
+      if (content instanceof HTMLElement) {
+        dcctSavePopupChanges(idNorm, content);
+      }
       const pops = dcctOpenPopupsRef.current || {};
       delete pops[idNorm];
       dcctOpenPopupsRef.current = pops;
@@ -622,7 +678,7 @@ export default function BaseModule({
     openPopups[idNorm] = popup;
     dcctOpenPopupsRef.current = openPopups;
 
-  }, []);
+  }, [dcctSavePopupChanges]);
 
   // Clear DCCT popups when switching modules
   const dcctClearAllPopups = useCallback(() => {
@@ -636,6 +692,155 @@ export default function BaseModule({
       }
     });
     dcctOpenPopupsRef.current = {};
+  }, []);
+
+  // DCCT: Import CSV file
+  const dcctImportCsv = useCallback((file) => {
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result;
+        if (typeof text !== 'string') return;
+        
+        const lines = text.split(/\r?\n/).filter((l) => l && l.trim());
+        if (lines.length <= 1) {
+          setDcctTestData({});
+          setDcctCsvTotals({ total: 0, passed: 0, failed: 0 });
+          dcctRisoByIdRef.current = {};
+          setStringMatchVersion((v) => v + 1);
+          return;
+        }
+
+        const header = (lines[0] || '').split(',').map((h) => h.trim().toLowerCase());
+        const idIdx = header.findIndex((h) => h === 'id');
+        const remarkIdx = header.findIndex((h) => h === 'remark');
+        const minusIdx = header.findIndex((h) => h.includes('insulation') && h.includes('(-'));
+        const plusIdx = header.findIndex((h) => h.includes('insulation') && h.includes('(+)'));
+
+        const testResults = {}; // normalizedId -> 'passed' | 'failed'
+        const risoById = {}; // normalizedId -> { plus, minus, status, remarkRaw, originalId }
+        let passedCount = 0;
+        let failedCount = 0;
+        const uniqueIds = new Set();
+
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i];
+          if (!line || !line.trim()) continue;
+          const parts = line.split(',');
+          const rawId = idIdx >= 0 ? parts[idIdx] : parts[0];
+          const rawRemark = remarkIdx >= 0 ? parts[remarkIdx] : parts[parts.length - 1];
+          const rawMinus = minusIdx >= 0 ? parts[minusIdx] : (parts.length >= 2 ? parts[1] : '');
+          const rawPlus = plusIdx >= 0 ? parts[plusIdx] : (parts.length >= 3 ? parts[2] : '');
+
+          const id = normalizeId(rawId);
+          const originalId = String(rawId || '').trim(); // Preserve original format
+          const remarkRaw = String(rawRemark || '').trim();
+          const remark = remarkRaw.toLowerCase();
+
+          if (!id) continue;
+
+          // Only count unique IDs for totals
+          if (!uniqueIds.has(id)) {
+            uniqueIds.add(id);
+            // Determine test result (use first occurrence if duplicate rows exist)
+            let status = null;
+            if (remark === 'passed' || remark === 'pass') {
+              status = 'passed';
+              testResults[id] = 'passed';
+              passedCount++;
+            } else if (remark === 'failed' || remark === 'fail') {
+              status = 'failed';
+              testResults[id] = 'failed';
+              failedCount++;
+            }
+
+            risoById[id] = {
+              plus: String(rawPlus ?? '').trim(),
+              minus: String(rawMinus ?? '').trim(),
+              status,
+              remarkRaw,
+              originalId,
+            };
+          }
+        }
+
+        setDcctTestData(testResults);
+        dcctRisoByIdRef.current = risoById;
+        setDcctCsvTotals({
+          total: uniqueIds.size,
+          passed: passedCount,
+          failed: failedCount,
+        });
+        
+        // Trigger map update for table colors
+        setStringMatchVersion((v) => v + 1);
+        
+      } catch (err) {
+        console.error('Error parsing imported CSV:', err);
+      }
+    };
+    reader.readAsText(file);
+  }, []);
+
+  // DCCT: Export CSV file with current state
+  const dcctExportCsv = useCallback(() => {
+    try {
+      const risoData = dcctRisoByIdRef.current || {};
+      const mapIds = dcctMapIdsRef.current || new Set();
+      
+      // Collect all IDs: from CSV data + from map
+      const allIds = new Set([...Object.keys(risoData), ...mapIds]);
+      
+      // Build CSV content
+      const header = 'ID,Insulation Resistance (-),Insulation Resistance (+),remark';
+      const rows = [header];
+      
+      // Sort IDs for consistent output
+      const sortedIds = Array.from(allIds).sort((a, b) => {
+        // Try to parse TX-INV-STR format for better sorting
+        const parseId = (id) => {
+          const match = String(id).match(/tx(\d+)-inv(\d+)-str(\d+)/i);
+          if (match) {
+            return [parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3], 10)];
+          }
+          return [0, 0, 0];
+        };
+        const [aTx, aInv, aStr] = parseId(a);
+        const [bTx, bInv, bStr] = parseId(b);
+        if (aTx !== bTx) return aTx - bTx;
+        if (aInv !== bInv) return aInv - bInv;
+        return aStr - bStr;
+      });
+      
+      for (const idNorm of sortedIds) {
+        const rec = risoData[idNorm] || {};
+        // Use original ID format if available, otherwise use normalized
+        const displayId = rec.originalId || idNorm.toUpperCase().replace(/TX(\d+)INV(\d+)STR(\d+)/i, 'TX$1-INV$2-STR$3');
+        const minus = rec.minus || '0';
+        const plus = rec.plus || '0';
+        const remark = rec.status === 'passed' ? 'PASSED' : rec.status === 'failed' ? 'FAILED' : '';
+        
+        rows.push(`${displayId},${minus},${plus},${remark}`);
+      }
+      
+      const csvContent = rows.join('\n');
+      
+      // Create and download file
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `dc_riso_export_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+    } catch (err) {
+      console.error('Error exporting CSV:', err);
+    }
   }, []);
 
   // Clear DCCT overlays when switching modules
@@ -3428,7 +3633,7 @@ export default function BaseModule({
           const plusIdx = header.findIndex((h) => h.includes('insulation') && h.includes('(+)'));
 
           const testResults = {}; // normalizedId -> 'passed' | 'failed'
-          const risoById = {}; // normalizedId -> { plus, minus, status, remarkRaw }
+          const risoById = {}; // normalizedId -> { plus, minus, status, remarkRaw, originalId }
           let passedCount = 0;
           let failedCount = 0;
           const uniqueIds = new Set();
@@ -3443,6 +3648,7 @@ export default function BaseModule({
             const rawPlus = plusIdx >= 0 ? parts[plusIdx] : (parts.length >= 3 ? parts[2] : '');
 
             const id = normalizeId(rawId);
+            const originalId = String(rawId || '').trim(); // Preserve original format
             const remarkRaw = String(rawRemark || '').trim();
             const remark = remarkRaw.toLowerCase();
 
@@ -3468,6 +3674,7 @@ export default function BaseModule({
                 minus: String(rawMinus ?? '').trim(),
                 status,
                 remarkRaw,
+                originalId,
               };
             }
           }
@@ -7034,6 +7241,42 @@ export default function BaseModule({
                   className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
                   title={isLVTT && String(lvttSubMode || 'termination') === 'testing' ? 'Export disabled in LV_TESTING' : 'Export Excel'}
                   aria-label="Export Excel"
+                >
+                  Export
+                </button>
+              </>
+            )}
+
+            {/* DCCT: Import/Export buttons */}
+            {isDCCT && (
+              <>
+                <input
+                  ref={dcctFileInputRef}
+                  type="file"
+                  accept=".csv"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target?.files?.[0];
+                    if (file) {
+                      dcctImportCsv(file);
+                    }
+                    // Reset input so same file can be re-selected
+                    if (e.target) e.target.value = '';
+                  }}
+                />
+                <button
+                  onClick={() => dcctFileInputRef.current?.click()}
+                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                  title="Import CSV file with test results"
+                  aria-label="Import CSV"
+                >
+                  Import
+                </button>
+                <button
+                  onClick={dcctExportCsv}
+                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                  title="Export current test results to CSV"
+                  aria-label="Export CSV"
                 >
                   Export
                 </button>
