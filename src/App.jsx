@@ -5,6 +5,7 @@ import MVFiberModule from './modules/MVFiberModule.jsx';
 import FibreModule from './modules/FibreModule.jsx';
 import MC4Module from './modules/MC4Module.jsx';
 import MVTerminationModule from './modules/MVTerminationModule.jsx';
+import LVTerminationTestingModule from './modules/LVTerminationTestingModule.jsx';
 
 const MODULES = {
   DC: { key: 'DC', label: 'DC CABLE PULLING PROGRESS', Component: DCModule },
@@ -13,6 +14,7 @@ const MODULES = {
   FIB: { key: 'FIB', label: 'FIBRE PULLING PROGRESS', Component: FibreModule },
   MC4: { key: 'MC4', label: 'MC4 INSTALLATION', Component: MC4Module },
   MVT: { key: 'MVT', label: 'MV TERMINATION PROGRESS', Component: MVTerminationModule },
+  LVTT: { key: 'LVTT', label: 'LV_TERMINATION_and_TESTING PROGRESS', Component: LVTerminationTestingModule },
 };
 
 export default function App() {

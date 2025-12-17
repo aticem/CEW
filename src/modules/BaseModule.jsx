@@ -284,6 +284,7 @@ export default function BaseModule({
   const isMVF = String(activeMode?.csvFormat || '').toLowerCase() === 'mvf';
   const isMC4 = String(activeMode?.key || '').toUpperCase() === 'MC4';
   const isMVT = String(activeMode?.key || '').toUpperCase() === 'MVT';
+  const isLVTT = String(activeMode?.key || '').toUpperCase() === 'LVTT';
   const mvfCircuitsMultiplier =
     typeof activeMode?.circuitsMultiplier === 'number' && Number.isFinite(activeMode.circuitsMultiplier)
       ? activeMode.circuitsMultiplier
@@ -377,6 +378,8 @@ export default function BaseModule({
   const mapRef = useRef(null);
   const [mapReady, setMapReady] = useState(false);
   const stringTextRendererRef = useRef(null); // dedicated canvas renderer for string_text to avoid ghosting
+  const lvttInvIdRendererRef = useRef(null); // dedicated canvas renderer for LVTT inv_id labels to avoid overlap when switching modes
+  const lvttTermCounterRendererRef = useRef(null); // dedicated canvas renderer for LVTT termination counters
   const layersRef = useRef([]);
   const polygonIdCounter = useRef(0); // Counter for unique polygon IDs
   const polygonById = useRef({}); // uniqueId -> {layer, stringId}
@@ -395,6 +398,39 @@ export default function BaseModule({
   const mvtCounterLabelActiveCountRef = useRef(0);
   const mvtTestCsvByFromRef = useRef({}); // fromNorm -> { L1: 'PASS'|'FAIL'|..., L2, L3 }
   const mvtTerminationByStationRef = useRef({}); // ssNorm -> 0..3
+  // LVTT: LV Termination & Testing mode - CSV data by inverter ID
+  const lvttTestCsvByInvRef = useRef({}); // invNorm -> { L1: {value, status}, L2: {value, status}, L3: {value, status} }
+  const lvttInvMetaByNormRef = useRef({}); // invNorm -> { lat, lng, angle, raw, displayId }
+  // LVTT: separate clickable termination counter labels under inv_id
+  const lvttTermCounterLayerRef = useRef(null); // L.LayerGroup
+  const lvttTermCounterLabelPoolRef = useRef([]); // L.TextLabel[]
+  const lvttTermCounterLabelActiveCountRef = useRef(0);
+  // LVTT: sub-mode selector (single module with two internal modes)
+  const [lvttSubMode, setLvttSubMode] = useState(() => {
+    try {
+      const raw = localStorage.getItem('cew:lvtt:submode');
+      const v = String(raw || '').toLowerCase();
+      return v === 'testing' ? 'testing' : 'termination';
+    } catch (_e) {
+      void _e;
+      return 'termination';
+    }
+  }); // 'termination' | 'testing'
+  const lvttSubModeRef = useRef(lvttSubMode);
+  useEffect(() => {
+    lvttSubModeRef.current = lvttSubMode;
+    try {
+      localStorage.setItem('cew:lvtt:submode', String(lvttSubMode || 'termination'));
+    } catch (_e) {
+      void _e;
+    }
+  }, [lvttSubMode]);
+  // LVTT: manual termination counts per inverter (persistent)
+  const [lvttTerminationByInv, setLvttTerminationByInv] = useState(() => ({})); // invNorm -> 0..3
+  const lvttTerminationByInvRef = useRef(lvttTerminationByInv);
+  useEffect(() => {
+    lvttTerminationByInvRef.current = lvttTerminationByInv || {};
+  }, [lvttTerminationByInv]);
   
   const [_status, setStatus] = useState('Initializing map...');
   const [lengthData, setLengthData] = useState({}); // Length data from CSV
@@ -414,6 +450,9 @@ export default function BaseModule({
   const [mvtTermPopup, setMvtTermPopup] = useState(null); // { stationLabel, stationNorm, draft, x, y } | null
   const [mvtTestPopup, setMvtTestPopup] = useState(null); // { stationLabel, fromKey, phases, x, y } | null
   const [mvtCsvTotals, setMvtCsvTotals] = useState(() => ({ total: 0, fromRows: 0, toRows: 0 })); // generic total
+  // LVTT: popup state (content depends on sub-mode)
+  const [lvttPopup, setLvttPopup] = useState(null);
+  const [lvttCsvTotals, setLvttCsvTotals] = useState(() => ({ total: 0, passed: 0, failed: 0 }));
   const [mvtCsvVersion, setMvtCsvVersion] = useState(0);
   const [mvtCsvDebug, setMvtCsvDebug] = useState(() => ({ url: '', textLen: 0, rawLines: 0, filteredLines: 0, keys: 0 }));
   // When string_id ↔ polygon matching completes, bump this to recompute counters immediately (no extra click needed).
@@ -479,6 +518,60 @@ export default function BaseModule({
   const canRedoNotes = notesState.future.length > 0;
   const NOTES_HISTORY_LIMIT = 50;
 
+  // ─────────────────────────────────────────────────────────────
+  // GLOBAL UNDO/REDO (modules + sub-modes)
+  // ─────────────────────────────────────────────────────────────
+  const HISTORY_LIMIT = 60;
+
+  // Generic selection history (selectedPolygons)
+  const selectionHistoryRef = useRef({ past: [], future: [] }); // arrays of polygon ids
+  const selectionHistorySuspendRef = useRef(false);
+  const selectionPrevSnapshotRef = useRef([]);
+  const [selectionHistoryTick, setSelectionHistoryTick] = useState(0);
+
+  // LV inverter completion history (lvCompletedInvIds)
+  const lvInvHistoryRef = useRef({ past: [], future: [] }); // arrays of invNorm
+  const lvInvHistorySuspendRef = useRef(false);
+  const lvInvPrevSnapshotRef = useRef([]);
+  const [lvInvHistoryTick, setLvInvHistoryTick] = useState(0);
+
+  // MVF selection history (mvfSelectedTrenchParts)
+  const mvfPartsHistoryRef = useRef({ past: [], future: [] }); // arrays of trench-part objects
+  const mvfPartsHistorySuspendRef = useRef(false);
+  const mvfPartsPrevSnapshotRef = useRef([]);
+  const [mvfPartsHistoryTick, setMvfPartsHistoryTick] = useState(0);
+
+  // LVTT termination history (invNorm changes)
+  const lvttTermHistoryRef = useRef({ actions: [], index: -1 });
+  const [lvttTermHistoryTick, setLvttTermHistoryTick] = useState(0);
+
+  // MVT termination history (stationNorm changes)
+  const mvtTermHistoryRef = useRef({ actions: [], index: -1 });
+  const [mvtTermHistoryTick, setMvtTermHistoryTick] = useState(0);
+
+  const arraysEqualShallow = (a, b) => {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  };
+
+  const cloneMvfParts = (parts) => {
+    const arr = Array.isArray(parts) ? parts : [];
+    return arr.map((p) => ({
+      ...p,
+      coords: Array.isArray(p?.coords) ? p.coords.map((c) => (Array.isArray(c) ? [...c] : c)) : p?.coords,
+    }));
+  };
+
+  const pushSnapshotHistory = (ref, prevSnap, tickFn) => {
+    const h = ref.current;
+    h.past = [...h.past, prevSnap].slice(-HISTORY_LIMIT);
+    h.future = [];
+    tickFn((t) => t + 1);
+  };
+
   const setNotes = (updater) => {
     setNotesState((s) => {
       const next = typeof updater === 'function' ? updater(s.present) : updater;
@@ -511,6 +604,26 @@ export default function BaseModule({
       };
     });
   };
+
+  const lvttTermPushHistory = useCallback((invNorm, prev, next) => {
+    if (!invNorm) return;
+    const h = lvttTermHistoryRef.current;
+    h.actions = h.actions.slice(0, h.index + 1);
+    h.actions.push({ invNorm, prev, next });
+    if (h.actions.length > HISTORY_LIMIT) h.actions = h.actions.slice(-HISTORY_LIMIT);
+    h.index = h.actions.length - 1;
+    setLvttTermHistoryTick((t) => t + 1);
+  }, []);
+
+  const mvtTermPushHistory = useCallback((stationNorm, prev, next) => {
+    if (!stationNorm) return;
+    const h = mvtTermHistoryRef.current;
+    h.actions = h.actions.slice(0, h.index + 1);
+    h.actions.push({ stationNorm, prev, next });
+    if (h.actions.length > HISTORY_LIMIT) h.actions = h.actions.slice(-HISTORY_LIMIT);
+    h.index = h.actions.length - 1;
+    setMvtTermHistoryTick((t) => t + 1);
+  }, []);
 
   const [selectedNotes, setSelectedNotes] = useState(new Set());
   const [editingNote, setEditingNote] = useState(null); // { id, lat, lng, text }
@@ -687,6 +800,256 @@ export default function BaseModule({
     h.index += 1;
     setMc4HistoryTick((t) => t + 1);
   }, [mc4ApplyAction]);
+
+  // Reset histories on module switch
+  useEffect(() => {
+    selectionHistoryRef.current = { past: [], future: [] };
+    selectionPrevSnapshotRef.current = Array.from(selectedPolygons || []).sort();
+    setSelectionHistoryTick((t) => t + 1);
+
+    lvInvHistoryRef.current = { past: [], future: [] };
+    lvInvPrevSnapshotRef.current = Array.from(lvCompletedInvIds || []).sort();
+    setLvInvHistoryTick((t) => t + 1);
+
+    mvfPartsHistoryRef.current = { past: [], future: [] };
+    mvfPartsPrevSnapshotRef.current = cloneMvfParts(mvfSelectedTrenchParts || []);
+    setMvfPartsHistoryTick((t) => t + 1);
+
+    lvttTermHistoryRef.current = { actions: [], index: -1 };
+    setLvttTermHistoryTick((t) => t + 1);
+
+    mvtTermHistoryRef.current = { actions: [], index: -1 };
+    setMvtTermHistoryTick((t) => t + 1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMode?.key]);
+
+  // Track selectedPolygons changes for undo/redo
+  useEffect(() => {
+    if (selectionHistorySuspendRef.current) return;
+    const next = Array.from(selectedPolygons || []).sort();
+    const prev = selectionPrevSnapshotRef.current || [];
+    if (!arraysEqualShallow(prev, next)) {
+      pushSnapshotHistory(selectionHistoryRef, prev, setSelectionHistoryTick);
+      selectionPrevSnapshotRef.current = next;
+    }
+  }, [selectedPolygons]);
+
+  // Track LV inverter completion changes for undo/redo
+  useEffect(() => {
+    if (!isLV) return;
+    if (lvInvHistorySuspendRef.current) return;
+    const next = Array.from(lvCompletedInvIds || []).sort();
+    const prev = lvInvPrevSnapshotRef.current || [];
+    if (!arraysEqualShallow(prev, next)) {
+      pushSnapshotHistory(lvInvHistoryRef, prev, setLvInvHistoryTick);
+      lvInvPrevSnapshotRef.current = next;
+    }
+  }, [isLV, lvCompletedInvIds]);
+
+  // Track MVF selected trench parts changes for undo/redo
+  useEffect(() => {
+    if (!isMVF) return;
+    if (mvfPartsHistorySuspendRef.current) return;
+    const nextIds = (mvfSelectedTrenchParts || []).map((p) => String(p?.id || '')).filter(Boolean);
+    const prevIds = (mvfPartsPrevSnapshotRef.current || []).map((p) => String(p?.id || '')).filter(Boolean);
+    if (!arraysEqualShallow(prevIds, nextIds)) {
+      pushSnapshotHistory(mvfPartsHistoryRef, cloneMvfParts(mvfPartsPrevSnapshotRef.current || []), setMvfPartsHistoryTick);
+      mvfPartsPrevSnapshotRef.current = cloneMvfParts(mvfSelectedTrenchParts || []);
+    }
+  }, [isMVF, mvfSelectedTrenchParts]);
+
+  const resumeAsync = (ref) => {
+    try {
+      queueMicrotask(() => { ref.current = false; });
+    } catch (_e) {
+      void _e;
+      setTimeout(() => { ref.current = false; }, 0);
+    }
+  };
+
+  const selectionCanUndo = selectionHistoryTick >= 0 && selectionHistoryRef.current.past.length > 0;
+  const selectionCanRedo = selectionHistoryTick >= 0 && selectionHistoryRef.current.future.length > 0;
+  const selectionUndo = useCallback(() => {
+    const h = selectionHistoryRef.current;
+    if (!h.past.length) return;
+    const current = Array.from(selectedPolygonsRef.current || []).sort();
+    const previous = h.past[h.past.length - 1] || [];
+    h.past = h.past.slice(0, -1);
+    h.future = [current, ...h.future].slice(0, HISTORY_LIMIT);
+    selectionHistorySuspendRef.current = true;
+    selectionPrevSnapshotRef.current = previous;
+    setSelectedPolygons(new Set(previous));
+    setSelectionHistoryTick((t) => t + 1);
+    resumeAsync(selectionHistorySuspendRef);
+  }, [setSelectedPolygons]);
+
+  const selectionRedo = useCallback(() => {
+    const h = selectionHistoryRef.current;
+    if (!h.future.length) return;
+    const current = Array.from(selectedPolygonsRef.current || []).sort();
+    const next = h.future[0] || [];
+    h.future = h.future.slice(1);
+    h.past = [...h.past, current].slice(-HISTORY_LIMIT);
+    selectionHistorySuspendRef.current = true;
+    selectionPrevSnapshotRef.current = next;
+    setSelectedPolygons(new Set(next));
+    setSelectionHistoryTick((t) => t + 1);
+    resumeAsync(selectionHistorySuspendRef);
+  }, [setSelectedPolygons]);
+
+  const lvInvCanUndo = lvInvHistoryTick >= 0 && lvInvHistoryRef.current.past.length > 0;
+  const lvInvCanRedo = lvInvHistoryTick >= 0 && lvInvHistoryRef.current.future.length > 0;
+  const lvInvUndo = useCallback(() => {
+    const h = lvInvHistoryRef.current;
+    if (!h.past.length) return;
+    const current = Array.from(lvCompletedInvIdsRef.current || []).sort();
+    const previous = h.past[h.past.length - 1] || [];
+    h.past = h.past.slice(0, -1);
+    h.future = [current, ...h.future].slice(0, HISTORY_LIMIT);
+    lvInvHistorySuspendRef.current = true;
+    lvInvPrevSnapshotRef.current = previous;
+    setLvCompletedInvIds(new Set(previous));
+    setLvInvHistoryTick((t) => t + 1);
+    resumeAsync(lvInvHistorySuspendRef);
+  }, [setLvCompletedInvIds]);
+
+  const lvInvRedo = useCallback(() => {
+    const h = lvInvHistoryRef.current;
+    if (!h.future.length) return;
+    const current = Array.from(lvCompletedInvIdsRef.current || []).sort();
+    const next = h.future[0] || [];
+    h.future = h.future.slice(1);
+    h.past = [...h.past, current].slice(-HISTORY_LIMIT);
+    lvInvHistorySuspendRef.current = true;
+    lvInvPrevSnapshotRef.current = next;
+    setLvCompletedInvIds(new Set(next));
+    setLvInvHistoryTick((t) => t + 1);
+    resumeAsync(lvInvHistorySuspendRef);
+  }, [setLvCompletedInvIds]);
+
+  const mvfPartsCanUndo = mvfPartsHistoryTick >= 0 && mvfPartsHistoryRef.current.past.length > 0;
+  const mvfPartsCanRedo = mvfPartsHistoryTick >= 0 && mvfPartsHistoryRef.current.future.length > 0;
+  const mvfPartsUndo = useCallback(() => {
+    const h = mvfPartsHistoryRef.current;
+    if (!h.past.length) return;
+    const current = cloneMvfParts(mvfSelectedTrenchPartsRef.current || []);
+    const previous = h.past[h.past.length - 1] || [];
+    h.past = h.past.slice(0, -1);
+    h.future = [current, ...h.future].slice(0, HISTORY_LIMIT);
+    mvfPartsHistorySuspendRef.current = true;
+    mvfPartsPrevSnapshotRef.current = cloneMvfParts(previous);
+    setMvfSelectedTrenchParts(cloneMvfParts(previous));
+    setMvfPartsHistoryTick((t) => t + 1);
+    resumeAsync(mvfPartsHistorySuspendRef);
+  }, [setMvfSelectedTrenchParts]);
+
+  const mvfPartsRedo = useCallback(() => {
+    const h = mvfPartsHistoryRef.current;
+    if (!h.future.length) return;
+    const current = cloneMvfParts(mvfSelectedTrenchPartsRef.current || []);
+    const next = h.future[0] || [];
+    h.future = h.future.slice(1);
+    h.past = [...h.past, current].slice(-HISTORY_LIMIT);
+    mvfPartsHistorySuspendRef.current = true;
+    mvfPartsPrevSnapshotRef.current = cloneMvfParts(next);
+    setMvfSelectedTrenchParts(cloneMvfParts(next));
+    setMvfPartsHistoryTick((t) => t + 1);
+    resumeAsync(mvfPartsHistorySuspendRef);
+  }, [setMvfSelectedTrenchParts]);
+
+  const lvttCanUndo = isLVTT && lvttTermHistoryRef.current.index >= 0;
+  const lvttCanRedo = isLVTT && lvttTermHistoryRef.current.index < (lvttTermHistoryRef.current.actions.length - 1);
+  const lvttUndo = useCallback(() => {
+    const h = lvttTermHistoryRef.current;
+    if (h.index < 0) return;
+    const action = h.actions[h.index];
+    h.index -= 1;
+    setLvttTerminationByInv((prev) => {
+      const base = prev && typeof prev === 'object' ? { ...prev } : {};
+      base[action.invNorm] = Math.max(0, Math.min(3, Number(action.prev ?? 0)));
+      return base;
+    });
+    setLvttTermHistoryTick((t) => t + 1);
+  }, [setLvttTerminationByInv]);
+
+  const lvttRedo = useCallback(() => {
+    const h = lvttTermHistoryRef.current;
+    if (h.index >= h.actions.length - 1) return;
+    const action = h.actions[h.index + 1];
+    h.index += 1;
+    setLvttTerminationByInv((prev) => {
+      const base = prev && typeof prev === 'object' ? { ...prev } : {};
+      base[action.invNorm] = Math.max(0, Math.min(3, Number(action.next ?? 0)));
+      return base;
+    });
+    setLvttTermHistoryTick((t) => t + 1);
+  }, [setLvttTerminationByInv]);
+
+  const mvtCanUndo = isMVT && mvtTermHistoryRef.current.index >= 0;
+  const mvtCanRedo = isMVT && mvtTermHistoryRef.current.index < (mvtTermHistoryRef.current.actions.length - 1);
+  const mvtUndo = useCallback(() => {
+    const h = mvtTermHistoryRef.current;
+    if (h.index < 0) return;
+    const action = h.actions[h.index];
+    h.index -= 1;
+    setMvtTerminationByStation((prev) => {
+      const base = prev && typeof prev === 'object' ? { ...prev } : {};
+      base[action.stationNorm] = Math.max(0, Math.min(3, Number(action.prev ?? 0)));
+      return base;
+    });
+    setMvtTermHistoryTick((t) => t + 1);
+  }, [setMvtTerminationByStation]);
+
+  const mvtRedo = useCallback(() => {
+    const h = mvtTermHistoryRef.current;
+    if (h.index >= h.actions.length - 1) return;
+    const action = h.actions[h.index + 1];
+    h.index += 1;
+    setMvtTerminationByStation((prev) => {
+      const base = prev && typeof prev === 'object' ? { ...prev } : {};
+      base[action.stationNorm] = Math.max(0, Math.min(3, Number(action.next ?? 0)));
+      return base;
+    });
+    setMvtTermHistoryTick((t) => t + 1);
+  }, [setMvtTerminationByStation]);
+
+  const globalCanUndo = noteMode
+    ? canUndoNotes
+    : (isMC4 ? mc4CanUndo
+      : isLVTT ? lvttCanUndo
+        : isMVT ? mvtCanUndo
+          : isLV ? lvInvCanUndo
+            : isMVF ? mvfPartsCanUndo
+              : selectionCanUndo);
+
+  const globalCanRedo = noteMode
+    ? canRedoNotes
+    : (isMC4 ? mc4CanRedo
+      : isLVTT ? lvttCanRedo
+        : isMVT ? mvtCanRedo
+          : isLV ? lvInvCanRedo
+            : isMVF ? mvfPartsCanRedo
+              : selectionCanRedo);
+
+  const globalUndo = useCallback(() => {
+    if (noteMode) return void undoNotes();
+    if (isMC4) return void mc4Undo();
+    if (isLVTT) return void lvttUndo();
+    if (isMVT) return void mvtUndo();
+    if (isLV) return void lvInvUndo();
+    if (isMVF) return void mvfPartsUndo();
+    return void selectionUndo();
+  }, [noteMode, undoNotes, isMC4, mc4Undo, isLVTT, lvttUndo, isMVT, mvtUndo, isLV, lvInvUndo, isMVF, mvfPartsUndo, selectionUndo]);
+
+  const globalRedo = useCallback(() => {
+    if (noteMode) return void redoNotes();
+    if (isMC4) return void mc4Redo();
+    if (isLVTT) return void lvttRedo();
+    if (isMVT) return void mvtRedo();
+    if (isLV) return void lvInvRedo();
+    if (isMVF) return void mvfPartsRedo();
+    return void selectionRedo();
+  }, [noteMode, redoNotes, isMC4, mc4Redo, isLVTT, lvttRedo, isMVT, mvtRedo, isLV, lvInvRedo, isMVF, mvfPartsRedo, selectionRedo]);
 
   useEffect(() => {
     if (!isMC4) return;
@@ -1212,7 +1575,10 @@ export default function BaseModule({
           const l1v = phases?.L1?.value != null ? String(phases.L1.value) : '';
           const l2v = phases?.L2?.value != null ? String(phases.L2.value) : '';
           const l3v = phases?.L3?.value != null ? String(phases.L3.value) : '';
-          const allPass = l1s === 'PASS' && l2s === 'PASS' && l3s === 'PASS';
+          // Check if actually tested: at least one L1/L2/L3 has a value or non-N/A status
+          const hasTested = Boolean(row) && (l1v || l2v || l3v || l1s !== 'N/A' || l2s !== 'N/A' || l3s !== 'N/A');
+          const allPass = hasTested && l1s === 'PASS' && l2s === 'PASS' && l3s === 'PASS';
+          const anyFail = hasTested && (l1s === 'FAIL' || l2s === 'FAIL' || l3s === 'FAIL');
           return {
             fromKey,
             phases: {
@@ -1220,7 +1586,9 @@ export default function BaseModule({
               L2: { value: l2v || '', status: l2s },
               L3: { value: l3v || '', status: l3s },
             },
+            hasTested,
             allPass,
+            anyFail,
           };
         };
         return { statusOf };
@@ -1554,12 +1922,23 @@ export default function BaseModule({
           const ll = map.containerPointToLatLng([baseP.x + dx, baseP.y + dy]);
 
           const st = mvtTestStatusByStation.statusOf(rawStation);
-          const testedColor = st.allPass ? 'rgba(34,197,94,0.98)' : 'rgba(220,38,38,0.98)';
+          // NOT TESTED = white, PASSED = green, FAILED = red
+          let testedText = 'NOT TESTED';
+          let testedColor = 'rgba(255,255,255,0.98)'; // white for NOT TESTED
+          if (st.hasTested) {
+            if (st.allPass) {
+              testedText = 'PASSED';
+              testedColor = 'rgba(34,197,94,0.98)'; // green
+            } else {
+              testedText = 'FAILED';
+              testedColor = 'rgba(220,38,38,0.98)'; // red
+            }
+          }
 
           let lbl = testedPool[testedCount];
           if (!lbl) {
             lbl = L.textLabel(ll, {
-              text: 'TESTED',
+              text: testedText,
               renderer: canvasRenderer,
               textBaseSize: mvtBaseSizeLocal,
               refZoom: stringTextRefZoomCfg,
@@ -1647,6 +2026,7 @@ export default function BaseModule({
           // Update position + style
           lbl.setLatLng(ll);
           let redraw = false;
+          if (lbl.options.text !== testedText) { lbl.options.text = testedText; redraw = true; }
           if (lbl.options.rotation !== (pt.angle || 0)) { lbl.options.rotation = pt.angle || 0; redraw = true; }
           if (lbl.options.textColor !== testedColor) { lbl.options.textColor = testedColor; redraw = true; }
           if (lbl.options.underlineColor !== testedColor) { lbl.options.underlineColor = testedColor; redraw = true; }
@@ -1768,6 +2148,23 @@ export default function BaseModule({
     mvtCounterLabelActiveCountRef.current = 0;
   }, []);
 
+  const clearLvttTermCounterLabelsNow = useCallback(() => {
+    const layer = lvttTermCounterLayerRef.current;
+    if (!layer) return;
+    const pool = lvttTermCounterLabelPoolRef.current;
+    const prevActive = lvttTermCounterLabelActiveCountRef.current;
+    for (let i = 0; i < prevActive; i++) {
+      const lbl = pool[i];
+      if (lbl && layer.hasLayer(lbl)) layer.removeLayer(lbl);
+    }
+    lvttTermCounterLabelActiveCountRef.current = 0;
+    try {
+      lvttTermCounterRendererRef.current?._clear?.();
+    } catch (_e) {
+      void _e;
+    }
+  }, []);
+
   // MVT: load/save manual termination counters (independent from TESTED).
   useEffect(() => {
     if (!isMVT) {
@@ -1793,6 +2190,32 @@ export default function BaseModule({
       void _e;
     }
   }, [isMVT, mvtTerminationByStation]);
+
+  // LVTT: load/save manual termination counters (persistent across sessions).
+  useEffect(() => {
+    if (!isLVTT) {
+      setLvttTerminationByInv({});
+      return;
+    }
+    try {
+      const raw = localStorage.getItem('cew:lvtt:termination_counts');
+      const obj = raw ? JSON.parse(raw) : {};
+      if (obj && typeof obj === 'object') setLvttTerminationByInv(obj);
+      else setLvttTerminationByInv({});
+    } catch (_e) {
+      void _e;
+      setLvttTerminationByInv({});
+    }
+  }, [isLVTT]);
+
+  useEffect(() => {
+    if (!isLVTT) return;
+    try {
+      localStorage.setItem('cew:lvtt:termination_counts', JSON.stringify(lvttTerminationByInv || {}));
+    } catch (_e) {
+      void _e;
+    }
+  }, [isLVTT, lvttTerminationByInv]);
 
   // MVT: load circuit test status CSV (grouped by `from`, phase L1/L2/L3 taken ONLY from that row group).
   useEffect(() => {
@@ -2004,6 +2427,328 @@ export default function BaseModule({
     };
   }, [isMVT, scheduleStringTextLabelUpdate, clearMvtTestedLabelsNow]);
 
+  // LVTT: load inverter test status CSV (grouped by `ind_id`, phase L1/L2/L3 rows per inverter).
+  useEffect(() => {
+    if (!isLVTT) {
+      lvttTestCsvByInvRef.current = {};
+      lvttInvMetaByNormRef.current = {};
+      setLvttPopup(null);
+      setLvttCsvTotals({ total: 0, passed: 0, failed: 0 });
+      clearLvttTermCounterLabelsNow();
+      return;
+    }
+
+    let cancelled = false;
+    const paths = [
+      '/LV_TERMINATION_and_TESTING PROGRESS/lv_testing.csv',
+      '/LV_TERMINATION_and_TESTING PROGRESS/lv_test.csv',
+    ];
+
+    const parse = (text) => {
+      const rawText = String(text || '');
+      const rawLinesArr = rawText.split(/\r?\n/);
+      const lines = rawLinesArr.map((l) => l.trim()).filter(Boolean);
+      if (lines.length <= 1) return { byInv: {}, total: 0, passed: 0, failed: 0 };
+      const first = String(lines[0] || '');
+      const sep = (first.includes(';') && first.split(';').length > first.split(',').length) ? ';' : ',';
+      const headerRaw = first
+        .split(sep)
+        .map((h) => h.replace(/^\uFEFF/, '').trim());
+      const header = headerRaw.map((h) => h.toLowerCase());
+      // ind_id,phase,value,test voltage V,period min,remarks
+      const invIdIdx = header.findIndex((h) => h === 'ind_id' || h === 'inv_id' || h === 'id');
+      const phaseIdx = header.findIndex((h) => h === 'phase');
+      const valueIdx = header.findIndex((h) => h === 'value' || h.includes('gω') || h.includes('gohm'));
+      const remarksIdx = header.findIndex((h) => h === 'remarks' || h === 'result' || h === 'status');
+
+      const normStatus = (s) => {
+        const raw = String(s || '').trim();
+        const u = raw.toUpperCase();
+        if (!u) return 'N/A';
+        if (u === 'PASS') return 'PASS';
+        if (u.startsWith('FAIL')) return 'FAILED';
+        return 'FAILED';
+      };
+
+      const out = {};
+      let totalRows = 0;
+      let passedRows = 0;
+      let failedRows = 0;
+      for (let i = 1; i < lines.length; i++) {
+        const parts = lines[i].split(sep).map((p) => p.trim());
+        const rawInvId = invIdIdx >= 0 ? parts[invIdIdx] : parts[0];
+        const rawPhase = phaseIdx >= 0 ? parts[phaseIdx] : parts[1];
+        const rawValue = valueIdx >= 0 ? parts[valueIdx] : parts[2];
+        const rawRemarks = remarksIdx >= 0 ? parts[remarksIdx] : (parts.length > 5 ? parts[5] : '');
+
+        const invKey = normalizeId(rawInvId);
+        const phaseKey = String(rawPhase || '').trim().toUpperCase();
+        if (!invKey) continue;
+        if (phaseKey !== 'L1' && phaseKey !== 'L2' && phaseKey !== 'L3') continue;
+
+        totalRows++;
+        const st = normStatus(rawRemarks);
+        if (st === 'PASS') passedRows++;
+        else failedRows++;
+
+        if (!out[invKey]) out[invKey] = {};
+        out[invKey][phaseKey] = {
+          value: rawValue || '',
+          status: st,
+        };
+      }
+
+      // LV_TESTING counters are row-based; TOTAL should match CSV rows (excluding header).
+      // Expectation: passedRows + failedRows === totalRows.
+      return { byInv: out, total: totalRows, passed: passedRows, failed: failedRows };
+    };
+
+    (async () => {
+      let text = '';
+      for (const p of paths) {
+        try {
+          const url = `${p}?v=${Date.now()}`;
+          const r = await fetch(url, { cache: 'no-store' });
+          if (r && r.ok) {
+            text = await r.text();
+            break;
+          }
+        } catch (_e) {
+          void _e;
+        }
+      }
+      if (cancelled) return;
+      const parsed = parse(text);
+      lvttTestCsvByInvRef.current = parsed.byInv || {};
+      setLvttCsvTotals({ total: parsed.total || 0, passed: parsed.passed || 0, failed: parsed.failed || 0 });
+      // eslint-disable-next-line no-console
+      console.log('[LVTT CSV] loaded', { inverters: Object.keys(lvttTestCsvByInvRef.current).length, passed: parsed.passed, failed: parsed.failed });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLVTT]);
+
+  // LVTT: refresh inv_id label colors when sub-mode, CSV, or manual counts change.
+  useEffect(() => {
+    if (!isLVTT) return;
+    const labels = lvInvLabelByIdRef.current || {};
+    // Fix for LVTT mode switching: Canvas renderer draws incrementally; clear before repaint to prevent text/color overlap.
+    try {
+      lvttInvIdRendererRef.current?._clear?.();
+    } catch (_e) {
+      void _e;
+    }
+    const updateOne = (invNorm, lbl) => {
+      if (!lbl || !invNorm) return;
+      const displayId = String(lbl._lvttDisplayId || '').trim() || String(lbl._lvttRaw || '').trim() || String(invNorm);
+      const mode = String(lvttSubModeRef.current || 'termination');
+      const nextText = displayId;
+      let nextColor = 'rgba(255,255,255,0.98)';
+
+      if (mode === 'termination') {
+        const terminated = Math.max(0, Math.min(3, Number(lvttTerminationByInvRef.current?.[invNorm] ?? 0)));
+        const locked = terminated === 3;
+        nextColor = locked ? 'rgba(34,197,94,0.98)' : 'rgba(239,68,68,0.98)';
+      } else {
+        const testData = lvttTestCsvByInvRef.current?.[invNorm];
+        if (testData) {
+          const l1 = testData.L1?.status || 'N/A';
+          const l2 = testData.L2?.status || 'N/A';
+          const l3 = testData.L3?.status || 'N/A';
+          const anyFail = l1 === 'FAILED' || l2 === 'FAILED' || l3 === 'FAILED';
+          const allPass = l1 === 'PASS' && l2 === 'PASS' && l3 === 'PASS';
+          if (anyFail) nextColor = 'rgba(239,68,68,0.98)';
+          else if (allPass) nextColor = 'rgba(34,197,94,0.98)';
+        }
+      }
+
+      let redraw = false;
+      if (lbl.options.text !== nextText) { lbl.options.text = nextText; redraw = true; }
+      if (lbl.options.textColor !== nextColor) { lbl.options.textColor = nextColor; redraw = true; }
+      lbl._lvttLocked = mode === 'termination' && nextColor === 'rgba(34,197,94,0.98)';
+      if (redraw) lbl.redraw?.();
+    };
+
+    Object.keys(labels).forEach((k) => updateOne(k, labels[k]));
+  }, [isLVTT, lvttSubMode, lvttTerminationByInv, lvttCsvTotals]);
+
+  // LVTT: draw clickable termination counters (0/3..3/3) under each inv_id, MV-termination-style.
+  useEffect(() => {
+    if (!isLVTT || !mapReady || !mapRef.current) return;
+
+    if (String(lvttSubMode || 'termination') !== 'termination') {
+      clearLvttTermCounterLabelsNow();
+      return;
+    }
+
+    const map = mapRef.current;
+    const layer = lvttTermCounterLayerRef.current;
+    if (!layer) return;
+
+    if (!lvttTermCounterRendererRef.current) lvttTermCounterRendererRef.current = L.canvas({ padding: 0.1 });
+
+    const invScale = typeof activeMode?.invIdTextScale === 'number' ? activeMode.invIdTextScale : 1;
+    const invBase = typeof activeMode?.invIdTextBaseSize === 'number' ? activeMode.invIdTextBaseSize : 19;
+    const invRefZoom = typeof activeMode?.invIdTextRefZoom === 'number' ? activeMode.invIdTextRefZoom : 20;
+    const invTextStyle = activeMode?.invIdTextStyle || '600';
+    const invMinFs = typeof activeMode?.invIdTextMinFontSize === 'number' ? activeMode.invIdTextMinFontSize : null;
+    const invMaxFs = typeof activeMode?.invIdTextMaxFontSize === 'number' ? activeMode.invIdTextMaxFontSize : null;
+    const invStrokeColor = activeMode?.invIdTextStrokeColor || 'rgba(0,0,0,0.88)';
+    const invStrokeWidthFactor =
+      typeof activeMode?.invIdTextStrokeWidthFactor === 'number' ? activeMode.invIdTextStrokeWidthFactor : 1.45;
+
+    const computeFontSizePx = () => {
+      const zoom = map.getZoom();
+      const scale = Math.pow(2, zoom - invRefZoom);
+      let fs = (invBase * invScale) * scale;
+      if (invMinFs != null) fs = Math.max(invMinFs, fs);
+      if (invMaxFs != null) fs = Math.min(invMaxFs, fs);
+      return fs;
+    };
+
+    const render = () => {
+      try {
+        lvttTermCounterRendererRef.current?._clear?.();
+      } catch (_e) {
+        void _e;
+      }
+
+      const fs = computeFontSizePx();
+      const offY = 1.25 * fs;
+      const metaByNorm = lvttInvMetaByNormRef.current || {};
+      const pool = lvttTermCounterLabelPoolRef.current;
+      let activeCount = 0;
+
+      Object.keys(metaByNorm).forEach((invNorm) => {
+        const meta = metaByNorm[invNorm];
+        if (!meta) return;
+        const lat = Number(meta.lat);
+        const lng = Number(meta.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+        const terminated = Math.max(0, Math.min(3, Number(lvttTerminationByInvRef.current?.[invNorm] ?? 0)));
+        const locked = terminated === 3;
+        const color = locked ? 'rgba(34,197,94,0.98)' : 'rgba(239,68,68,0.98)';
+
+        const rot = (Number(meta.angle) || 0) * Math.PI / 180;
+        const baseP = map.latLngToContainerPoint([lat, lng]);
+        const dx = -Math.sin(rot) * offY;
+        const dy = Math.cos(rot) * offY;
+        const ll = map.containerPointToLatLng([baseP.x + dx, baseP.y + dy]);
+
+        let lbl = pool[activeCount];
+        if (!lbl) {
+          lbl = L.textLabel(ll, {
+            text: `${terminated}/3`,
+            renderer: lvttTermCounterRendererRef.current,
+            textBaseSize: (invBase * invScale) * 0.95,
+            refZoom: invRefZoom,
+            textStyle: invTextStyle,
+            textColor: color,
+            textStrokeColor: invStrokeColor,
+            textStrokeWidthFactor: invStrokeWidthFactor,
+            minFontSize: invMinFs,
+            maxFontSize: invMaxFs,
+            rotation: Number(meta.angle) || 0,
+            underline: true,
+            underlineColor: color,
+            underlineWidthFactor: 1,
+            bgColor: 'rgba(10,15,25,0.75)',
+            bgPaddingX: 4,
+            bgPaddingY: 2,
+            bgCornerRadius: 3,
+            radius: 28, // big hitbox at all zoom levels
+            interactive: true,
+            pane: 'overlayPane',
+            bubblingMouseEvents: false,
+          });
+
+          lbl.on('click', (evt) => {
+            try {
+              if (evt?.originalEvent) {
+                evt.originalEvent.stopImmediatePropagation?.();
+                L.DomEvent.stopPropagation(evt.originalEvent);
+                L.DomEvent.preventDefault(evt.originalEvent);
+              }
+            } catch (_e) { void _e; }
+            const invN = String(lbl._lvttInvNorm || '');
+            if (!invN) return;
+            const cur = Math.max(0, Math.min(3, Number(lvttTerminationByInvRef.current?.[invN] ?? 0)));
+            if (cur === 3) return;
+            const oe = evt?.originalEvent;
+            const x = oe?.clientX ?? 0;
+            const y = oe?.clientY ?? 0;
+            setLvttPopup({
+              mode: 'termination',
+              invId: String(lbl._lvttDisplayId || ''),
+              invIdNorm: invN,
+              draft: cur,
+              x,
+              y,
+            });
+          });
+
+          lbl.on('mouseover', () => {
+            try { map.getContainer().style.cursor = 'pointer'; } catch (_e) { void _e; }
+          });
+          lbl.on('mouseout', () => {
+            try { map.getContainer().style.cursor = ''; } catch (_e) { void _e; }
+          });
+
+          pool[activeCount] = lbl;
+        }
+
+        lbl._lvttInvNorm = invNorm;
+        lbl._lvttDisplayId = String(meta.displayId || '').trim() || String(meta.raw || '').trim() || invNorm;
+
+        lbl.setLatLng(ll);
+        let redraw = false;
+        const txt = `${terminated}/3`;
+        if (lbl.options.text !== txt) { lbl.options.text = txt; redraw = true; }
+        if (lbl.options.textColor !== color) { lbl.options.textColor = color; redraw = true; }
+        if (lbl.options.underline !== true) { lbl.options.underline = true; redraw = true; }
+        if (lbl.options.underlineColor !== color) { lbl.options.underlineColor = color; redraw = true; }
+        if (lbl.options.rotation !== (Number(meta.angle) || 0)) { lbl.options.rotation = Number(meta.angle) || 0; redraw = true; }
+        if (lbl.options.radius !== 28) { lbl.options.radius = 28; redraw = true; }
+        if (!layer.hasLayer(lbl)) layer.addLayer(lbl);
+        if (redraw) lbl.redraw?.();
+
+        activeCount++;
+      });
+
+      const prevActive = lvttTermCounterLabelActiveCountRef.current;
+      for (let i = activeCount; i < prevActive; i++) {
+        const old = pool[i];
+        if (old && layer.hasLayer(old)) layer.removeLayer(old);
+      }
+      lvttTermCounterLabelActiveCountRef.current = activeCount;
+    };
+
+    render();
+    map.on('zoomend', render);
+    map.on('moveend', render);
+    return () => {
+      map.off('zoomend', render);
+      map.off('moveend', render);
+    };
+  }, [
+    isLVTT,
+    mapReady,
+    lvttSubMode,
+    lvttTerminationByInv,
+    activeMode?.invIdTextScale,
+    activeMode?.invIdTextBaseSize,
+    activeMode?.invIdTextRefZoom,
+    activeMode?.invIdTextStyle,
+    activeMode?.invIdTextMinFontSize,
+    activeMode?.invIdTextMaxFontSize,
+    activeMode?.invIdTextStrokeColor,
+    activeMode?.invIdTextStrokeWidthFactor,
+    clearLvttTermCounterLabelsNow,
+  ]);
+
   // When the effective visibility changes (TEXT ON/OFF or module config), immediately refresh labels.
   useEffect(() => {
     // Keep the internal gate consistent for "always" mode.
@@ -2159,14 +2904,12 @@ export default function BaseModule({
 
         if (isUndo) {
           e.preventDefault();
-          if (isMC4 && !noteMode) mc4Undo();
-          else undoNotes();
+          globalUndo();
           return;
         }
         if (isRedo) {
           e.preventDefault();
-          if (isMC4 && !noteMode) mc4Redo();
-          else redoNotes();
+          globalRedo();
           return;
         }
       }
@@ -2187,7 +2930,7 @@ export default function BaseModule({
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [noteMode, selectedNotes, isMC4, mc4Undo, mc4Redo, undoNotes, redoNotes]);
+  }, [noteMode, selectedNotes, globalUndo, globalRedo, setNotes]);
   
   // Create new note at click position (no popup on create)
   const createNote = (latlng) => {
@@ -2557,6 +3300,15 @@ export default function BaseModule({
     mvtTestedLabelActiveCountRef.current = 0;
     mvtCounterLabelPoolRef.current = [];
     mvtCounterLabelActiveCountRef.current = 0;
+
+    // LVTT: clear termination counter layer + cached inverter metadata on reload
+    lvttInvMetaByNormRef.current = {};
+    if (lvttTermCounterLayerRef.current) {
+      try { lvttTermCounterLayerRef.current.remove(); } catch (_e) { void _e; }
+      lvttTermCounterLayerRef.current = null;
+    }
+    lvttTermCounterLabelPoolRef.current = [];
+    lvttTermCounterLabelActiveCountRef.current = 0;
     // MVF: clear highlight + trench graph on reload
     try {
       mvfHighlightLayerRef.current?.clearLayers?.();
@@ -2711,11 +3463,41 @@ export default function BaseModule({
             mvtTestedLayerRef.current = null;
             mvtCounterLayerRef.current = null;
           }
+
+          // LVTT: create a separate interactive layer for clickable termination counters.
+          if (isLVTT) {
+            const counterLayer = L.layerGroup();
+            lvttTermCounterLayerRef.current = counterLayer;
+            counterLayer.addTo(mapRef.current);
+            layersRef.current.push(counterLayer);
+          } else {
+            lvttTermCounterLayerRef.current = null;
+          }
           continue;
         }
         
         // Special handling for full.geojson - tables will be selectable (MultiPolygon)
         if (file.name === 'full') {
+          // LVTT: tables must NOT be selectable; draw only.
+          if (isLVTT) {
+            const fullLayer = L.geoJSON(data, {
+              renderer: canvasRenderer,
+              interactive: false,
+              style: () => ({
+                color: 'rgba(255,255,255,0.35)',
+                weight: 1.05,
+                fill: false,
+                fillOpacity: 0,
+              }),
+            });
+            fullLayer.addTo(mapRef.current);
+            layersRef.current.push(fullLayer);
+            if (fullLayer.getBounds().isValid()) {
+              allBounds.extend(fullLayer.getBounds());
+            }
+            continue;
+          }
+
           const fullLayer = L.geoJSON(data, {
             renderer: canvasRenderer,
             interactive: true,
@@ -2973,11 +3755,11 @@ export default function BaseModule({
 
         // Standard processing for other GeoJSON files
         // LV: inv_id labels are clickable (daily completion). Other modules can opt into LV-style label appearance.
-        const invLabelMode = file.name === 'inv_id' && (isLV || activeMode?.invIdLabelMode);
-        const invInteractive = isLV && file.name === 'inv_id';
+        const invLabelMode = file.name === 'inv_id' && (isLV || isLVTT || activeMode?.invIdLabelMode);
+        const invInteractive = (isLV || isLVTT) && file.name === 'inv_id';
         const mvfTrenchInteractive = isMVF && file.name === 'mv_trench';
         // MVT: we don't want table selection interactions in this mode.
-        const disableInteractions = isMVT && (file.name === 'full' || file.name === 'subs');
+        const disableInteractions = (isMVT || isLVTT) && (file.name === 'full' || file.name === 'subs');
         const layer = L.geoJSON(data, {
           renderer: canvasRenderer,
           interactive: !disableInteractions && (invInteractive || mvfTrenchInteractive),
@@ -3033,6 +3815,8 @@ export default function BaseModule({
               const raw = feature.properties.text;
               const invIdNorm = normalizeId(raw);
               const isDone = isLV && lvCompletedInvIdsRef.current?.has(invIdNorm);
+              const displayId = String(raw).replace(/\s+/g, ''); // keep consistent with CSV style
+              
               const invScale = typeof activeMode?.invIdTextScale === 'number' ? activeMode.invIdTextScale : 1;
               const invBase = typeof activeMode?.invIdTextBaseSize === 'number' ? activeMode.invIdTextBaseSize : 19;
               const invRefZoom = typeof activeMode?.invIdTextRefZoom === 'number' ? activeMode.invIdTextRefZoom : 20;
@@ -3059,30 +3843,72 @@ export default function BaseModule({
               const invDoneBgStrokeColor = activeMode?.invIdDoneBgStrokeColor || 'rgba(255,255,255,0.70)';
               const invDoneBgStrokeWidth =
                 typeof activeMode?.invIdDoneBgStrokeWidth === 'number' ? activeMode.invIdDoneBgStrokeWidth : 2;
+              
+              // LVTT colors based on test status
+              let textColor = 'rgba(255,255,255,0.98)'; // default white (not tested)
+              let bgColor = invBgColor;
+              let bgStrokeColor = invBgStrokeColor;
+              let bgStrokeWidth = invBgStrokeWidth;
+              
+              if (isLVTT) {
+                const mode = String(lvttSubModeRef.current || 'termination');
+                if (mode === 'termination') {
+                  const terminated = Math.max(0, Math.min(3, Number(lvttTerminationByInvRef.current?.[invIdNorm] ?? 0)));
+                  textColor = terminated === 3 ? 'rgba(34,197,94,0.98)' : 'rgba(239,68,68,0.98)';
+                } else {
+                  const testData = lvttTestCsvByInvRef.current?.[invIdNorm];
+                  if (testData) {
+                    const l1 = testData.L1?.status || 'N/A';
+                    const l2 = testData.L2?.status || 'N/A';
+                    const l3 = testData.L3?.status || 'N/A';
+                    const anyFail = l1 === 'FAILED' || l2 === 'FAILED' || l3 === 'FAILED';
+                    const allPass = l1 === 'PASS' && l2 === 'PASS' && l3 === 'PASS';
+                    if (anyFail) textColor = 'rgba(239,68,68,0.98)';
+                    else if (allPass) textColor = 'rgba(34,197,94,0.98)';
+                  }
+                }
+              } else if (isDone) {
+                textColor = invDoneTextColor;
+                bgColor = invDoneBgColor;
+                bgStrokeColor = invDoneBgStrokeColor;
+                bgStrokeWidth = invDoneBgStrokeWidth;
+              }
+              
               const baseSize = invBase * invScale;
               const radius = 22 * invScale;
+              const lvttModeNow = String(lvttSubModeRef.current || 'termination');
+              const lvttTerminatedNow = isLVTT
+                ? Math.max(0, Math.min(3, Number(lvttTerminationByInvRef.current?.[invIdNorm] ?? 0)))
+                : 0;
+
+              // LVTT: use a dedicated renderer so toggling modes doesn't leave stale text/colors behind.
+              let invRenderer = canvasRenderer;
+              if (isLVTT) {
+                if (!lvttInvIdRendererRef.current) lvttInvIdRendererRef.current = L.canvas({ padding: 0.1 });
+                invRenderer = lvttInvIdRendererRef.current;
+              }
               const label = L.textLabel(latlng, {
-                text: String(raw).replace(/\s+/g, ''), // match CSV style (INV 2 -> INV2)
-                renderer: canvasRenderer,
+                text: displayId,
+                renderer: invRenderer,
                 textBaseSize: baseSize,
                 refZoom: invRefZoom,
                 textStyle: invTextStyle,
-                textColor: isDone ? invDoneTextColor : 'rgba(255,255,255,0.98)',
+                textColor: textColor,
                 textColorNoBg: isDone ? invDoneTextColorNoBg : null,
                 textStrokeColor: invStrokeColor,
                 textStrokeWidthFactor: invStrokeWidthFactor,
                 minFontSize: invMinFs,
                 maxFontSize: invMaxFs,
-                bgColor: isDone ? invDoneBgColor : invBgColor,
+                bgColor: bgColor,
                 bgPaddingX: invBgPaddingX,
                 bgPaddingY: invBgPaddingY,
-                bgStrokeColor: isDone ? invDoneBgStrokeColor : invBgStrokeColor,
-                bgStrokeWidth: isDone ? invDoneBgStrokeWidth : invBgStrokeWidth,
+                bgStrokeColor: bgStrokeColor,
+                bgStrokeWidth: bgStrokeWidth,
                 bgCornerRadius: invBgCornerRadius,
                 minTextZoom: invMinTextZoom,
                 minBgZoom: invMinBgZoom,
                 rotation: feature.properties.angle || 0,
-                interactive: isLV,
+                interactive: isLV || isLVTT,
                 radius
               });
 
@@ -3104,6 +3930,65 @@ export default function BaseModule({
                     return next;
                   });
                 });
+              }
+
+              // LVTT: show popup with test details on click
+              if (isLVTT) {
+                label.on('click', (e) => {
+                  try {
+                    if (e?.originalEvent) {
+                      L.DomEvent.stopPropagation(e.originalEvent);
+                      L.DomEvent.preventDefault(e.originalEvent);
+                    }
+                  } catch (_e) {
+                    void _e;
+                  }
+                  const mode = String(lvttSubModeRef.current || 'termination');
+                  if (mode === 'termination') {
+                    const cur = Math.max(0, Math.min(3, Number(lvttTerminationByInvRef.current?.[invIdNorm] ?? 0)));
+                    if (cur === 3) return;
+                    const oe = e?.originalEvent;
+                    const x = oe?.clientX ?? 0;
+                    const y = oe?.clientY ?? 0;
+                    setLvttPopup({
+                      mode: 'termination',
+                      invId: displayId,
+                      invIdNorm,
+                      draft: cur,
+                      x,
+                      y,
+                    });
+                  } else {
+                    const oe = e?.originalEvent;
+                    const x = oe?.clientX ?? 0;
+                    const y = oe?.clientY ?? 0;
+                    const testData = lvttTestCsvByInvRef.current?.[invIdNorm] || null;
+                    setLvttPopup({
+                      mode: 'testing',
+                      invId: displayId,
+                      invIdNorm,
+                      testData,
+                      x,
+                      y,
+                    });
+                  }
+                });
+              }
+
+              // LVTT metadata for refresh + lock behavior
+              if (isLVTT) {
+                label._lvttInvNorm = invIdNorm;
+                label._lvttDisplayId = displayId;
+                label._lvttRaw = raw;
+                label._lvttLocked = lvttModeNow === 'termination' && lvttTerminatedNow === 3;
+                // store meta so we can draw a separate clickable 0/3 counter under the inv_id
+                lvttInvMetaByNormRef.current[invIdNorm] = {
+                  lat: latlng.lat,
+                  lng: latlng.lng,
+                  angle: feature.properties.angle || 0,
+                  raw,
+                  displayId,
+                };
               }
 
               lvInvLabelByIdRef.current[invIdNorm] = label;
@@ -3642,7 +4527,7 @@ export default function BaseModule({
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     // MVT: no table work in this mode; disable box selection / global mouse capture so labels are clickable.
-    if (isMVT) return;
+    if (isMVT || isLVTT) return;
     
     const map = mapRef.current;
     const container = map.getContainer();
@@ -4342,17 +5227,20 @@ export default function BaseModule({
               const stationNorm = String(best._mvtStationNorm || '');
               const lockedNow = Boolean(best._mvtLocked);
               if (stationNorm && !lockedNow) {
-                setMvtTerminationByStation((prev) => {
-                  const base = prev && typeof prev === 'object' ? { ...prev } : {};
-                  const cur = Math.max(0, Math.min(3, Number(base[stationNorm] ?? 0)));
-                  const next = Math.min(3, cur + 1);
-                  base[stationNorm] = next;
-                  return base;
-                });
+                const prevVal = Math.max(0, Math.min(3, Number(mvtTerminationByStationRef.current?.[stationNorm] ?? 0)));
+                const nextVal = Math.min(3, prevVal + 1);
+                if (nextVal !== prevVal) {
+                  mvtTermPushHistory(stationNorm, prevVal, nextVal);
+                  setMvtTerminationByStation((prev) => {
+                    const base = prev && typeof prev === 'object' ? { ...prev } : {};
+                    base[stationNorm] = nextVal;
+                    return base;
+                  });
+                }
                 setMvtTermPanel({
                   stationLabel: String(best._mvtStationLabel || '').trim() || stationNorm,
                   stationNorm,
-                  value: Math.max(0, Math.min(3, Number(mvtTerminationByStationRef.current?.[stationNorm] ?? 0))) + 1,
+                  value: nextVal,
                 });
               } else if (stationNorm && lockedNow) {
                 setMvtTermPanel({
@@ -4671,7 +5559,7 @@ export default function BaseModule({
       container.removeEventListener('mouseup', onMouseUp);
     };
   // IMPORTANT: include isMC4 (and module key) so drag-selection behavior updates when switching modes.
-  }, [mapReady, activeMode?.key, isLV, isMVF, isMC4, isMVT, stringPoints, noteMode, notes]);
+  }, [mapReady, activeMode?.key, isLV, isMVF, isMC4, isMVT, isLVTT, stringPoints, noteMode, notes]);
 
   useEffect(() => {
     mapRef.current = L.map('map', {
@@ -5041,6 +5929,13 @@ export default function BaseModule({
   const mvtCompletedForSubmit = isMVT
     ? Math.max(0, Object.values(mvtTerminationByStation || {}).reduce((s, v) => s + Math.max(0, Math.min(3, Number(v) || 0)), 0))
     : 0;
+  const lvttCompletedForSubmit = (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+    ? Math.max(
+      0,
+      Object.values(lvttTerminationByInv || {}).reduce((s, v) => s + Math.max(0, Math.min(3, Number(v) || 0)), 0)
+    )
+    : 0;
+  const lvttWorkUnit = lvttCompletedForSubmit === 1 ? 'cable terminated' : 'cables terminated';
   const workAmount = isMVF 
     ? mvfSelectedCableMeters 
     : (isMC4 
@@ -5072,14 +5967,26 @@ export default function BaseModule({
           const isMc4Mode = mc4SelectionMode === 'mc4';
           const isTermMode = mc4SelectionMode === 'termination';
           const canTerminate = mc4Done > 0;
+          const mc4DoneLabelCls = isMc4Mode ? 'text-xs font-bold text-blue-400' : 'text-xs font-bold text-slate-500';
+          const mc4DoneValueCls = isMc4Mode ? 'text-xs font-bold text-blue-400 tabular-nums' : 'text-xs font-bold text-slate-500 tabular-nums';
+          const termDoneLabelCls = isTermMode ? COUNTER_DONE_LABEL : 'text-xs font-bold text-slate-500';
+          const termDoneValueCls = isTermMode ? COUNTER_DONE_VALUE : 'text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap';
           return (
             <div className="min-w-[800px] border-2 border-slate-700 bg-slate-900/40 py-3 px-3">
               <div className="flex flex-col gap-2">
                 {/* MC4 Install row with checkbox */}
-                <div className="grid grid-cols-[24px_170px_repeat(3,max-content)] items-center gap-x-3 gap-y-2">
+                <div
+                  className="grid grid-cols-[24px_170px_repeat(3,max-content)] items-center gap-x-3 gap-y-2 cursor-pointer"
+                  onClick={() => {
+                    if (!isMc4Mode) setMc4SelectionMode('mc4');
+                  }}
+                >
                   <button
                     type="button"
-                    onClick={() => setMc4SelectionMode(isMc4Mode ? null : 'mc4')}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isMc4Mode) setMc4SelectionMode('mc4');
+                    }}
                     className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
                       isMc4Mode 
                         ? 'border-blue-500 bg-blue-500 text-white' 
@@ -5098,8 +6005,8 @@ export default function BaseModule({
                   </div>
                   <div className={COUNTER_BOX}>
                     <div className={COUNTER_GRID}>
-                      <span className="text-xs font-bold text-blue-400">Done</span>
-                      <span className="text-xs font-bold text-blue-400 tabular-nums">{mc4Done} ({mc4Pct}%)</span>
+                      <span className={mc4DoneLabelCls}>Done</span>
+                      <span className={mc4DoneValueCls}>{mc4Done} ({mc4Pct}%)</span>
                     </div>
                   </div>
                   <div className={COUNTER_BOX}>
@@ -5111,16 +6018,26 @@ export default function BaseModule({
                 </div>
 
                 {/* Cable Termination row with checkbox */}
-                <div className="grid grid-cols-[24px_170px_repeat(3,max-content)] items-center gap-x-3 gap-y-2">
+                <div
+                  className="grid grid-cols-[24px_170px_repeat(3,max-content)] items-center gap-x-3 gap-y-2 cursor-pointer"
+                  onClick={() => {
+                    if (!canTerminate) {
+                      if (!isMc4Mode) setMc4SelectionMode('mc4');
+                      return;
+                    }
+                    if (!isTermMode) setMc4SelectionMode('termination');
+                  }}
+                >
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       if (!canTerminate) {
                         // No MC4 (blue) ends yet; termination cannot be selected.
                         if (mc4SelectionMode !== 'mc4') setMc4SelectionMode('mc4');
                         return;
                       }
-                      setMc4SelectionMode(isTermMode ? null : 'termination');
+                      if (!isTermMode) setMc4SelectionMode('termination');
                     }}
                     disabled={!canTerminate}
                     className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
@@ -5143,8 +6060,8 @@ export default function BaseModule({
                   </div>
                   <div className={COUNTER_BOX}>
                     <div className={COUNTER_GRID}>
-                      <span className={COUNTER_DONE_LABEL}>Done</span>
-                      <span className={COUNTER_DONE_VALUE}>{termDone} ({termPct}%)</span>
+                      <span className={termDoneLabelCls}>Done</span>
+                      <span className={termDoneValueCls}>{termDone} ({termPct}%)</span>
                     </div>
                   </div>
                   <div className={COUNTER_BOX}>
@@ -5173,23 +6090,160 @@ export default function BaseModule({
             <>
               <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
                 <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                  <span className="text-xs font-bold text-slate-200">TOTAL</span>
+                  <span className="text-xs font-bold text-slate-200">MV termination TOTAL</span>
                   <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{total}</span>
                 </div>
               </div>
               <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
                 <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                  <span className="text-xs font-bold text-emerald-400">COMPLETED</span>
+                  <span className="text-xs font-bold text-emerald-400">MV termination COMPLETED</span>
                   <span className="text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap">{completed}</span>
                 </div>
               </div>
               <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
                 <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                  <span className="text-xs font-bold text-slate-200">REMAINING</span>
+                  <span className="text-xs font-bold text-slate-200">MV termination REMAINING</span>
                   <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remaining}</span>
                 </div>
               </div>
             </>
+          );
+        })()}
+      </div>
+    ) : null) ||
+    (isLVTT ? (
+      <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start">
+        {(() => {
+          const total = Number(lvttCsvTotals?.total) || 0;
+          const passed = Number(lvttCsvTotals?.passed) || 0;
+          const failed = Number(lvttCsvTotals?.failed) || 0;
+          const mode = String(lvttSubMode || 'termination');
+          const isTermMode = mode === 'termination';
+          const isTestMode = mode === 'testing';
+
+          const termDone = Math.max(
+            0,
+            Object.values(lvttTerminationByInv || {}).reduce((s, v) => {
+              const n = Math.max(0, Math.min(3, Number(v) || 0));
+              return s + n;
+            }, 0)
+          );
+          const termRem = Math.max(0, total - termDone);
+          const termPct = total > 0 ? ((termDone / total) * 100).toFixed(1) : '0.0';
+
+          const passPct = total > 0 ? ((passed / total) * 100).toFixed(1) : '0.0';
+
+          const termDoneLabelCls = isTermMode ? COUNTER_DONE_LABEL : 'text-xs font-bold text-slate-500';
+          const termDoneValueCls = isTermMode ? COUNTER_DONE_VALUE : 'text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap';
+          const passLabelCls = isTestMode ? 'text-xs font-bold text-emerald-400' : 'text-xs font-bold text-slate-500';
+          const passValueCls = isTestMode ? 'text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap' : 'text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap';
+          const failLabelCls = isTestMode ? 'text-xs font-bold text-red-400' : 'text-xs font-bold text-slate-500';
+          const failValueCls = isTestMode ? 'text-xs font-bold text-red-400 tabular-nums whitespace-nowrap' : 'text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap';
+
+          return (
+            <div className="min-w-[820px] border-2 border-slate-700 bg-slate-900/40 py-3 px-3">
+              <div className="flex flex-col gap-2">
+                {/* LV TERMINATION row */}
+                <div
+                  className="grid grid-cols-[24px_170px_repeat(3,max-content)] items-center gap-x-3 gap-y-2 cursor-pointer"
+                  onClick={() => {
+                    if (!isTermMode) {
+                      setLvttSubMode('termination');
+                      setLvttPopup(null);
+                    }
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isTermMode) {
+                        setLvttSubMode('termination');
+                        setLvttPopup(null);
+                      }
+                    }}
+                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
+                      isTermMode
+                        ? 'border-emerald-500 bg-emerald-500 text-white'
+                        : 'border-slate-500 bg-slate-800 hover:border-emerald-400'
+                    }`}
+                    title="Select LV_TERMINATION"
+                    aria-pressed={isTermMode}
+                  >
+                    {isTermMode && <span className="text-xs font-bold">✓</span>}
+                  </button>
+                  <div className={`text-sm font-bold ${isTermMode ? 'text-emerald-300' : 'text-emerald-400/60'}`}>LV_TERMINATION:</div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_LABEL}>Total</span>
+                      <span className={COUNTER_VALUE}>{total}</span>
+                    </div>
+                  </div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={termDoneLabelCls}>Done</span>
+                      <span className={termDoneValueCls}>{termDone} ({termPct}%)</span>
+                    </div>
+                  </div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_LABEL}>Remaining</span>
+                      <span className={COUNTER_VALUE}>{termRem}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* LV TESTING row */}
+                <div
+                  className="grid grid-cols-[24px_170px_repeat(3,max-content)] items-center gap-x-3 gap-y-2 cursor-pointer"
+                  onClick={() => {
+                    if (!isTestMode) {
+                      setLvttSubMode('testing');
+                      setLvttPopup(null);
+                    }
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isTestMode) {
+                        setLvttSubMode('testing');
+                        setLvttPopup(null);
+                      }
+                    }}
+                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
+                      isTestMode
+                        ? 'border-sky-500 bg-sky-500 text-white'
+                        : 'border-slate-500 bg-slate-800 hover:border-sky-400'
+                    }`}
+                    title="Select LV_TESTING"
+                    aria-pressed={isTestMode}
+                  >
+                    {isTestMode && <span className="text-xs font-bold">✓</span>}
+                  </button>
+                  <div className={`text-sm font-bold ${isTestMode ? 'text-sky-300' : 'text-sky-400/60'}`}>LV_TESTING:</div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_LABEL}>Total</span>
+                      <span className={COUNTER_VALUE}>{total}</span>
+                    </div>
+                  </div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={passLabelCls}>PASSED</span>
+                      <span className={passValueCls}>{passed} ({passPct}%)</span>
+                    </div>
+                  </div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={failLabelCls}>FAILED</span>
+                      <span className={failValueCls}>{failed}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           );
         })()}
       </div>
@@ -5297,10 +6351,9 @@ export default function BaseModule({
 
             <button
               onClick={() => {
-                if (isMC4 && !noteMode) mc4Undo();
-                else undoNotes();
+                globalUndo();
               }}
-              disabled={isMC4 && !noteMode ? !mc4CanUndo : !canUndoNotes}
+              disabled={!globalCanUndo}
               className={BTN_SMALL_NEUTRAL}
               title="Undo (Ctrl+Z)"
               aria-label="Undo"
@@ -5313,10 +6366,9 @@ export default function BaseModule({
 
             <button
               onClick={() => {
-                if (isMC4 && !noteMode) mc4Redo();
-                else redoNotes();
+                globalRedo();
               }}
-              disabled={isMC4 && !noteMode ? !mc4CanRedo : !canRedoNotes}
+              disabled={!globalCanRedo}
               className={BTN_SMALL_NEUTRAL}
               title="Redo (Ctrl+Y / Ctrl+Shift+Z)"
               aria-label="Redo"
@@ -5329,7 +6381,13 @@ export default function BaseModule({
 
             <button
               onClick={() => setModalOpen(true)}
-              disabled={(isMVT ? mvtCompletedForSubmit === 0 : workSelectionCount === 0) || noteMode || (isMC4 && !mc4SelectionMode)}
+              disabled={
+                noteMode ||
+                (isMC4 && !mc4SelectionMode) ||
+                (isLVTT
+                  ? (String(lvttSubMode || 'termination') === 'testing' || lvttCompletedForSubmit === 0)
+                  : (isMVT ? mvtCompletedForSubmit === 0 : workSelectionCount === 0))
+              }
               className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
               title={isMC4 && !mc4SelectionMode ? "Select MC4 Install or Cable Termination first" : "Submit Work"}
               aria-label="Submit Work"
@@ -5339,9 +6397,9 @@ export default function BaseModule({
 
             <button
               onClick={() => setHistoryOpen(true)}
-              disabled={dailyLog.length === 0 && notes.length === 0}
+              disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || (dailyLog.length === 0 && notes.length === 0)}
               className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-              title="History"
+              title={isLVTT && String(lvttSubMode || 'termination') === 'testing' ? 'History disabled in LV_TESTING' : 'History'}
               aria-label="History"
             >
               History
@@ -5352,17 +6410,32 @@ export default function BaseModule({
                 exportToExcel(dailyLog, {
                   moduleKey: isMC4
                     ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST')
-                    : (isMVT ? 'MVT_TERM' : (activeMode?.key || '')),
+                    : (isMVT
+                      ? 'MVT_TERM'
+                      : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                        ? 'LVTT_TERM'
+                        : (activeMode?.key || '')),
                   moduleLabel: isMC4
                     ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
-                    : (isMVT ? 'Cable Termination' : moduleName),
-                  unit: isMC4 ? 'ends' : (isMVT ? 'cables' : 'm'),
-                  chartSheetName: isMVT ? 'Cable Termination' : undefined,
+                    : (isMVT
+                      ? 'Cable Termination'
+                      : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                        ? 'Cable Termination'
+                        : moduleName),
+                  unit: isMC4
+                    ? 'ends'
+                    : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination')) ? 'cables' : 'm'),
+                  chartSheetName: (isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
+                    ? 'Cable Termination'
+                    : undefined,
+                  chartTitle: (isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
+                    ? 'Cable Termination'
+                    : undefined,
                 })
               }
-              disabled={dailyLog.length === 0}
+              disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || dailyLog.length === 0}
               className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-              title="Export Excel"
+              title={isLVTT && String(lvttSubMode || 'termination') === 'testing' ? 'Export disabled in LV_TESTING' : 'Export Excel'}
               aria-label="Export Excel"
             >
               Export
@@ -5524,6 +6597,32 @@ export default function BaseModule({
                         <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Terminated</span>
                       </div>
                     </>
+                  ) : isLVTT ? (
+                    <>
+                      {String(lvttSubMode || 'termination') === 'termination' ? (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <span className="h-3 w-3 border-2 border-red-300 bg-red-500" aria-hidden="true" />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">0/3 – 2/3</span>
+                          </div>
+                          <div className="mt-2 flex items-center gap-2">
+                            <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">3/3</span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">PASSED</span>
+                          </div>
+                          <div className="mt-2 flex items-center gap-2">
+                            <span className="h-3 w-3 border-2 border-red-300 bg-red-500" aria-hidden="true" />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">FAILED</span>
+                          </div>
+                        </>
+                      )}
+                    </>
                   ) : (
                     <>
                       <div className="flex items-center gap-2">
@@ -5679,6 +6778,218 @@ export default function BaseModule({
         </div>
       ) : null}
 
+      {/* LVTT: click-position popup (termination or testing) */}
+      {isLVTT && lvttPopup ? (
+        <div
+          style={{
+            position: 'fixed',
+            left: Math.min(window.innerWidth - 300, Math.max(8, (lvttPopup.x || 0) + 10)),
+            top: Math.min(window.innerHeight - 320, Math.max(8, (lvttPopup.y || 0) + 10)),
+            zIndex: 1400,
+          }}
+          className="w-[280px] border-2 border-slate-700 bg-slate-900 px-3 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.55)]"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] font-black uppercase tracking-wide text-white">
+                {lvttPopup.mode === 'termination' ? 'LV Termination' : 'LV Testing'}
+              </div>
+              <div className="mt-1 text-sm font-extrabold text-slate-100 truncate">
+                {lvttPopup.invId || 'Inverter'}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setLvttPopup(null)}
+              className="inline-flex h-6 w-6 items-center justify-center border-2 border-slate-700 bg-slate-800 text-xs font-black text-white hover:bg-slate-700"
+              title="Close"
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+
+          {lvttPopup.mode === 'termination' ? (
+            (() => {
+              const invNorm = String(lvttPopup.invIdNorm || '');
+              const stored = Math.max(0, Math.min(3, Number(lvttTerminationByInv?.[invNorm] ?? 0)));
+              const draft = Math.max(0, Math.min(3, Number(lvttPopup.draft ?? stored)));
+              const locked = stored === 3;
+              const setDraft = (v) => setLvttPopup((p) => (p ? { ...p, draft: Math.max(0, Math.min(3, v)) } : p));
+
+              const applyDraft = (valueToApply) => {
+                if (!invNorm) return;
+                const nextVal = Math.max(0, Math.min(3, Number(valueToApply ?? 0)));
+                const prevVal = Math.max(0, Math.min(3, Number(lvttTerminationByInvRef.current?.[invNorm] ?? 0)));
+                if (nextVal === prevVal) return;
+                lvttTermPushHistory(invNorm, prevVal, nextVal);
+                setLvttTerminationByInv((prev) => {
+                  const base = prev && typeof prev === 'object' ? { ...prev } : {};
+                  base[invNorm] = nextVal;
+                  return base;
+                });
+              };
+
+              const orderedInvs = (() => {
+                const meta = lvttInvMetaByNormRef.current || {};
+                return Object.keys(meta)
+                  .map((k) => ({
+                    norm: k,
+                    display: String(meta[k]?.displayId || meta[k]?.raw || k || '').trim() || String(k),
+                  }))
+                  .filter((x) => x.norm)
+                  .sort((a, b) => a.display.localeCompare(b.display, undefined, { numeric: true, sensitivity: 'base' }));
+              })();
+
+              const openNextInv = () => {
+                const list = orderedInvs;
+                if (!list.length || !invNorm) return;
+
+                const snapshot = {
+                  ...(lvttTerminationByInvRef.current || {}),
+                  [invNorm]: draft,
+                };
+
+                const idx = list.findIndex((x) => x.norm === invNorm);
+                const start = idx >= 0 ? idx : 0;
+
+                let next = null;
+                for (let step = 1; step <= list.length; step++) {
+                  const cand = list[(start + step) % list.length];
+                  const vv = Math.max(0, Math.min(3, Number(snapshot?.[cand.norm] ?? 0)));
+                  if (vv === 3) continue; // skip locked
+                  next = { norm: cand.norm, display: cand.display, draft: vv };
+                  break;
+                }
+
+                if (!next) {
+                  setLvttPopup(null);
+                  return;
+                }
+
+                setLvttPopup((p) => (p ? {
+                  ...p,
+                  mode: 'termination',
+                  invId: next.display,
+                  invIdNorm: next.norm,
+                  draft: next.draft,
+                } : p));
+              };
+
+              return (
+                <div className="mt-3">
+                  <div className="border border-slate-700 bg-slate-800 px-2 py-2">
+                    {locked ? (
+                      <div className="flex items-center justify-end">
+                        <span className="text-[11px] font-black uppercase tracking-wide text-emerald-300">LOCKED</span>
+                      </div>
+                    ) : null}
+                    <div className="mt-0 flex items-center justify-end gap-2">
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min={0}
+                          max={3}
+                          step={1}
+                          value={draft}
+                          disabled={locked}
+                          onKeyDown={(e) => {
+                            if (e.key !== 'Enter') return;
+                            try {
+                              e.preventDefault();
+                              e.stopPropagation();
+                            } catch (_e) { void _e; }
+                            if (locked) return;
+                            applyDraft(draft);
+                            setLvttPopup(null);
+                          }}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (v === '') return;
+                            const n = Math.max(0, Math.min(3, parseInt(v, 10)));
+                            if (Number.isFinite(n)) setDraft(n);
+                          }}
+                          className={`w-14 h-8 border-2 bg-slate-900 px-2 text-center text-[13px] font-black tabular-nums outline-none ${
+                            locked
+                              ? 'border-slate-700 text-slate-500 cursor-not-allowed'
+                              : (draft === 3 ? 'border-emerald-700 text-emerald-200' : 'border-red-700 text-red-200')
+                          }`}
+                          title="Enter 0..3"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={locked}
+                      onClick={() => {
+                        if (locked) return;
+                        applyDraft(draft);
+                        openNextInv();
+                      }}
+                      className={`flex-1 h-8 border-2 text-[11px] font-extrabold uppercase tracking-wide ${
+                        locked
+                          ? 'border-slate-700 bg-slate-900/40 text-slate-500 cursor-not-allowed'
+                          : 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
+                      }`}
+                      title={locked ? 'Locked at 3/3' : 'Apply and open next inverter'}
+                    >
+                      Next
+                    </button>
+                    <button
+                      type="button"
+                      disabled={locked}
+                      onClick={() => {
+                        if (!invNorm) return;
+                        applyDraft(draft);
+                        setLvttPopup(null);
+                      }}
+                      className={`flex-1 h-8 border-2 text-[11px] font-extrabold uppercase tracking-wide ${
+                        locked
+                          ? 'border-slate-700 bg-slate-900/40 text-slate-500 cursor-not-allowed'
+                          : 'border-emerald-700 bg-emerald-950/30 text-emerald-200 hover:bg-emerald-950/40'
+                      }`}
+                      title="Apply"
+                    >
+                      OK
+                    </button>
+                  </div>
+                </div>
+              );
+            })()
+          ) : (
+            (lvttPopup.testData ? (
+              <div className="mt-3 space-y-2">
+                {(['L1', 'L2', 'L3']).map((ph) => {
+                  const obj = lvttPopup.testData?.[ph] || { value: '', status: 'N/A' };
+                  const statusRaw = String(obj?.status || 'N/A').trim();
+                  const statusU = statusRaw.toUpperCase();
+                  const val = String(obj?.value || '').trim();
+                  const pass = statusU === 'PASS';
+                  const status = pass ? 'PASS' : (statusRaw || 'N/A');
+                  return (
+                    <div key={ph} className="flex items-center justify-between border border-slate-700 bg-slate-800 px-2 py-1">
+                      <span className="text-[11px] font-black uppercase tracking-wide text-slate-200">{ph}</span>
+                      <span className="ml-2 flex items-center gap-2">
+                        {val ? (
+                          <span className={`text-[11px] font-extrabold tabular-nums ${pass ? 'text-emerald-200' : 'text-red-200'}`}>{val}</span>
+                        ) : null}
+                        <span className={`text-[11px] font-black uppercase tracking-wide ${pass ? 'text-emerald-300' : 'text-red-300'}`}>{status}</span>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="mt-3 border border-slate-700 bg-slate-800 px-2 py-2 text-center">
+                <span className="text-[11px] font-black uppercase tracking-wide text-slate-400">NOT TESTED</span>
+              </div>
+            ))
+          )}
+        </div>
+      ) : null}
+
       {isMVT && mvtTermPopup ? (
         <div
           style={{
@@ -5711,18 +7022,89 @@ export default function BaseModule({
             const draft = Math.max(0, Math.min(3, Number(mvtTermPopup.draft ?? stored)));
             const locked = stored === 3;
             const setDraft = (v) => setMvtTermPopup((p) => (p ? { ...p, draft: Math.max(0, Math.min(3, v)) } : p));
+
+            const applyDraft = (valueToApply) => {
+              if (!stationNorm) return;
+              const nextVal = Math.max(0, Math.min(3, Number(valueToApply ?? 0)));
+              const prevVal = Math.max(0, Math.min(3, Number(mvtTerminationByStationRef.current?.[stationNorm] ?? 0)));
+              if (nextVal === prevVal) return;
+              mvtTermPushHistory(stationNorm, prevVal, nextVal);
+              setMvtTerminationByStation((prev) => {
+                const base = prev && typeof prev === 'object' ? { ...prev } : {};
+                base[stationNorm] = nextVal;
+                return base;
+              });
+            };
+
+            const orderedStations = (() => {
+              const pts = stringTextPointsRef.current || [];
+              const seen = new Set();
+              const arr = [];
+              for (const pt of pts) {
+                const raw = String(pt?.text || '').trim();
+                const norm = normalizeId(raw);
+                if (!(norm && /^ss\d{1,2}$/i.test(norm))) continue;
+                if (seen.has(norm)) continue;
+                seen.add(norm);
+                arr.push({ norm, label: raw || norm });
+              }
+              const numOf = (n) => {
+                const m = String(n || '').match(/\d+/);
+                return m ? Number(m[0]) : Number.POSITIVE_INFINITY;
+              };
+              arr.sort((a, b) => {
+                const na = numOf(a.norm);
+                const nb = numOf(b.norm);
+                if (na !== nb) return na - nb;
+                return a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' });
+              });
+              return arr;
+            })();
+
+            const openNextStation = () => {
+              const list = orderedStations;
+              if (!list.length || !stationNorm) return;
+
+              const snapshot = {
+                ...(mvtTerminationByStationRef.current || {}),
+                [stationNorm]: draft,
+              };
+
+              const idx = list.findIndex((x) => x.norm === stationNorm);
+              const start = idx >= 0 ? idx : 0;
+
+              let next = null;
+              for (let step = 1; step <= list.length; step++) {
+                const cand = list[(start + step) % list.length];
+                const vv = Math.max(0, Math.min(3, Number(snapshot?.[cand.norm] ?? 0)));
+                if (vv === 3) continue; // skip locked
+                next = { norm: cand.norm, label: cand.label, draft: vv };
+                break;
+              }
+
+              if (!next) {
+                setMvtTermPopup(null);
+                return;
+              }
+
+              setMvtTermPopup((p) => (p ? {
+                ...p,
+                stationNorm: next.norm,
+                stationLabel: next.label,
+                draft: next.draft,
+              } : p));
+            };
+
             return (
               <div className="mt-3">
                 <div className="border border-slate-700 bg-slate-800 px-2 py-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-black uppercase tracking-wide text-slate-200">Value</span>
-                    <span className={`text-[11px] font-black uppercase tracking-wide ${locked ? 'text-emerald-300' : 'text-red-300'}`}>
-                      {locked ? 'LOCKED' : 'EDITABLE'}
-                    </span>
-                  </div>
+                  {locked ? (
+                    <div className="flex items-center justify-end">
+                      <span className="text-[11px] font-black uppercase tracking-wide text-emerald-300">LOCKED</span>
+                    </div>
+                  ) : null}
 
-                  <div className="mt-2 flex items-center justify-between gap-2">
-                    <span className="text-[12px] font-black tabular-nums text-slate-200">0/3 → 3/3</span>
+                  <div className="mt-0 flex items-center justify-end gap-2">
                     <div className="flex items-center gap-1">
                       <input
                         type="number"
@@ -5731,6 +7113,16 @@ export default function BaseModule({
                         step={1}
                         value={draft}
                         disabled={locked}
+                        onKeyDown={(e) => {
+                          if (e.key !== 'Enter') return;
+                          try {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          } catch (_e) { void _e; }
+                          if (locked) return;
+                          applyDraft(draft);
+                          setMvtTermPopup(null);
+                        }}
                         onChange={(e) => {
                           const v = e.target.value;
                           if (v === '') return;
@@ -5742,7 +7134,6 @@ export default function BaseModule({
                         }`}
                         title="Enter 0..3"
                       />
-                      <span className={`text-[13px] font-black tabular-nums ${draft === 3 ? 'text-emerald-300' : 'text-red-300'}`}>/3</span>
                     </div>
                   </div>
                 </div>
@@ -5751,11 +7142,15 @@ export default function BaseModule({
                   <button
                     type="button"
                     disabled={locked}
-                    onClick={() => setDraft((draft + 1) % 4)}
+                    onClick={() => {
+                      if (locked) return;
+                      applyDraft(draft);
+                      openNextStation();
+                    }}
                     className={`flex-1 h-8 border-2 text-[11px] font-extrabold uppercase tracking-wide ${
                       locked ? 'border-slate-700 bg-slate-900/40 text-slate-500 cursor-not-allowed' : 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
                     }`}
-                    title={locked ? 'Locked at 3/3' : '0/3 → 1/3 → 2/3 → 3/3'}
+                    title={locked ? 'Locked at 3/3' : 'Apply and open next SS'}
                   >
                     Next
                   </button>
@@ -5764,11 +7159,7 @@ export default function BaseModule({
                     disabled={locked}
                     onClick={() => {
                       if (!stationNorm) return;
-                      setMvtTerminationByStation((prev) => {
-                        const base = prev && typeof prev === 'object' ? { ...prev } : {};
-                        base[stationNorm] = draft;
-                        return base;
-                      });
+                      applyDraft(draft);
                       setMvtTermPopup(null);
                     }}
                     className={`flex-1 h-8 border-2 text-[11px] font-extrabold uppercase tracking-wide ${
@@ -5976,19 +7367,35 @@ export default function BaseModule({
         }}
         moduleKey={isMC4
           ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST')
-          : (isMVT ? 'MVT_TERM' : (activeMode?.key || ''))}
+          : (isMVT
+            ? 'MVT_TERM'
+            : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+              ? 'LVTT_TERM'
+              : (activeMode?.key || ''))}
         moduleLabel={isMC4
           ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
-          : (isMVT ? 'Cable Termination' : moduleName)}
+          : (isMVT
+            ? 'Cable Termination'
+            : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+              ? 'Cable Termination'
+              : moduleName)}
         workAmount={isMC4
           ? (mc4SelectionMode === 'termination'
             ? (mc4Counts?.terminatedCompleted || 0)
             : (mc4Counts?.mc4Completed || 0))
-          : (isMVT ? mvtCompletedForSubmit : workAmount)}
+          : (isMVT
+            ? mvtCompletedForSubmit
+            : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+              ? lvttCompletedForSubmit
+              : workAmount)}
         workUnit={
           isMC4
             ? (mc4SelectionMode === 'termination' ? 'cables terminated' : 'mc4')
-            : (isMVT ? 'cables terminated' : 'm')
+            : (isMVT
+              ? 'cables terminated'
+              : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                ? lvttWorkUnit
+                : 'm')
         }
       />
       

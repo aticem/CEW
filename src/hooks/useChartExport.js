@@ -18,6 +18,7 @@ export function useChartExport() {
       const moduleLabel = String(options.moduleLabel || moduleKey);
       const unit = String(options.unit || "m");
       const dataSheetName = String(options.dataSheetName || "Daily Progress");
+      const chartTitle = String(options.chartTitle || `Daily ${moduleLabel} Progress`);
       const chartSheetNameRaw = String(options.chartSheetName || "Chart");
       const chartSheetName =
         chartSheetNameRaw === dataSheetName
@@ -93,7 +94,7 @@ export function useChartExport() {
           plugins: {
             title: {
               display: true,
-              text: `Daily ${moduleLabel} Progress`,
+              text: chartTitle,
               font: { size: 16 },
             },
             legend: {

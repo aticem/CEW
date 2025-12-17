@@ -220,7 +220,7 @@ export const MV_TERMINATION_MODULE_CONFIG = {
   stringTextVisibility: 'always',
   stringTextToggle: true,
   stringTextDefaultOn: true,
-  stringTextColor: 'rgba(250,204,21,0.98)',
+  stringTextColor: 'rgba(255,255,255,0.98)',
   stringTextBaseSize: 22,
   stringTextStyle: '400',
   stringTextStrokeColor: 'rgba(0,0,0,0.85)',
@@ -236,5 +236,52 @@ export const MV_TERMINATION_MODULE_CONFIG = {
     { url: '/MV_TERMINATION_PROGRESS_TRACKING/subs_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
     { url: '/MV_TERMINATION_PROGRESS_TRACKING/mv_text.geojson', name: 'mv_text', color: '#22c55e', fillColor: '#22c55e' },
     { url: '/MV_TERMINATION_PROGRESS_TRACKING/arrow.geojson', name: 'arrow', color: '#f97316', fillColor: '#fb923c' },
+  ],
+};
+
+export const LV_TERMINATION_AND_TESTING_MODULE_CONFIG = {
+  key: 'LVTT',
+  label: 'LV_TERMINATION_and_TESTING PROGRESS',
+  // Files live in: public/LV_TERMINATION_and_TESTING PROGRESS/
+  csvFormat: null,
+  csvPath: '/LV_TERMINATION_and_TESTING PROGRESS/lv_testing.csv',
+  linkPath: '/LV_TERMINATION_and_TESTING PROGRESS/link',
+  simpleCounters: true,
+  stringTextVisibility: 'always',
+  stringTextToggle: true,
+  stringTextDefaultOn: true,
+  stringTextColor: 'rgba(255,255,255,0.98)',
+  stringTextBaseSize: 22,
+  stringTextStyle: '400',
+  stringTextStrokeColor: 'rgba(0,0,0,0.85)',
+  stringTextStrokeWidthFactor: 1.2,
+  stringTextMinZoom: 0,
+  stringTextMinFontSize: 14,
+  stringTextMaxFontSize: 26,
+  stringTextRefZoom: 20,
+  // Enable inv_id labels in label mode (clickable for LVTT test popup)
+  invIdLabelMode: true,
+  invIdTextScale: 1,
+  invIdTextBaseSize: 18,
+  invIdTextRefZoom: 20,
+  invIdTextStyle: '600',
+  invIdTextMinFontSize: 10,
+  invIdTextMaxFontSize: 24,
+  invIdTextStrokeColor: 'rgba(0,0,0,0.88)',
+  invIdTextStrokeWidthFactor: 1.45,
+  geojsonFiles: [
+    { url: '/LV_TERMINATION_and_TESTING PROGRESS/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
+    // Map subs_text.geojson into the shared string_text rendering path
+    { url: '/LV_TERMINATION_and_TESTING PROGRESS/subs_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
+    { url: '/LV_TERMINATION_and_TESTING PROGRESS/inv_id.geojson', name: 'inv_id', color: '#16a34a', fillColor: '#22c55e' },
+    {
+      // This dataset uses inv_box.geojson as the LV box/boundary layer
+      url: '/LV_TERMINATION_and_TESTING PROGRESS/inv_box.geojson',
+      name: 'lv_box',
+      color: '#eab308',
+      fillColor: '#facc15',
+      weight: 3,
+      fillOpacity: 0.6,
+    },
   ],
 };
