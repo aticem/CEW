@@ -323,6 +323,8 @@ export default function BaseModule({
   useEffect(() => {
     isDCCTRef.current = isDCCT;
   }, [isDCCT]);
+  // TABLE_INSTALLATION_PROGRESS mode
+  const isTIP = String(activeMode?.key || '').toUpperCase() === 'TIP' || Boolean(activeMode?.tableCounters);
   const mvfCircuitsMultiplier =
     typeof activeMode?.circuitsMultiplier === 'number' && Number.isFinite(activeMode.circuitsMultiplier)
       ? activeMode.circuitsMultiplier
@@ -910,6 +912,13 @@ export default function BaseModule({
   // MVF: committed (submitted/locked) trenches by day
   const [mvfCommittedTrenchIds, setMvfCommittedTrenchIds] = useState(() => new Set()); // Set<string>
   const mvfCommittedTrenchIdsRef = useRef(mvfCommittedTrenchIds);
+  
+  // TABLE_INSTALLATION: küçük ve büyük masa sayaçları (masa = 2 panel üst üste)
+  const [tableSmallCount, setTableSmallCount] = useState(0); // 2V14 küçük masalar
+  const [tableBigCount, setTableBigCount] = useState(0);     // 2V27 büyük masalar
+  // Panel eşleştirme: polygonId -> partnerId (üst üste duran paneller)
+  const tipPanelPairsRef = useRef(new Map()); // Map<polygonId, partnerPolygonId>
+  
   const [totalPlus, setTotalPlus] = useState(0); // Total +DC Cable from CSV
   const [totalMinus, setTotalMinus] = useState(0); // Total -DC Cable from CSV
   const [completedPlus, setCompletedPlus] = useState(0); // Selected +DC Cable
@@ -4116,6 +4125,124 @@ export default function BaseModule({
         
         // Special handling for full.geojson - tables will be selectable (MultiPolygon)
         if (file.name === 'full') {
+          // TABLE_INSTALLATION_PROGRESS: count tables (2 panels = 1 table)
+          if (isTIP) {
+            const threshold = activeMode?.tableAreaThreshold || 50; // m²
+            
+            // Calculate polygon area in m² using Shoelace formula
+            const calcAreaM2 = (coords) => {
+              try {
+                let ring = coords;
+                while (Array.isArray(ring) && ring.length > 0 && Array.isArray(ring[0]) && Array.isArray(ring[0][0])) {
+                  ring = ring[0];
+                }
+                if (!Array.isArray(ring) || ring.length < 3) return 0;
+                let area = 0;
+                for (let i = 0; i < ring.length - 1; i++) {
+                  area += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
+                }
+                const avgLat = ring[0]?.[1] || 50;
+                const latFactor = Math.cos(avgLat * Math.PI / 180);
+                return Math.abs(area) / 2 * 111319.9 * 111319.9 * latFactor;
+              } catch (_e) {
+                return 0;
+              }
+            };
+            
+            // Calculate centroid for each panel
+            const getCentroid = (coords) => {
+              try {
+                let ring = coords;
+                while (Array.isArray(ring) && ring.length > 0 && Array.isArray(ring[0]) && Array.isArray(ring[0][0])) {
+                  ring = ring[0];
+                }
+                if (!Array.isArray(ring) || ring.length < 3) return null;
+                let cx = 0, cy = 0;
+                ring.forEach(p => { cx += p[0]; cy += p[1]; });
+                return [cx / ring.length, cy / ring.length];
+              } catch (_e) {
+                return null;
+              }
+            };
+            
+            // Build panel info array
+            const panels = (data.features || []).map((feature, idx) => ({
+              idx,
+              area: calcAreaM2(feature?.geometry?.coordinates),
+              centroid: getCentroid(feature?.geometry?.coordinates),
+            })).filter(p => p.centroid);
+            
+            // Pair panels by proximity (panels that form a table are very close)
+            const PAIR_THRESHOLD = 0.00008; // ~8m in degrees
+            const used = new Set();
+            const pairs = []; // [{idx1, idx2, area}]
+            
+            for (let i = 0; i < panels.length; i++) {
+              if (used.has(i)) continue;
+              const p1 = panels[i];
+              let minDist = Infinity, minJ = -1;
+              
+              for (let j = i + 1; j < panels.length; j++) {
+                if (used.has(j)) continue;
+                const p2 = panels[j];
+                const dist = Math.sqrt(
+                  Math.pow(p1.centroid[0] - p2.centroid[0], 2) + 
+                  Math.pow(p1.centroid[1] - p2.centroid[1], 2)
+                );
+                if (dist < minDist) {
+                  minDist = dist;
+                  minJ = j;
+                }
+              }
+              
+              if (minJ >= 0 && minDist < PAIR_THRESHOLD) {
+                used.add(i);
+                used.add(minJ);
+                // Combined area of both panels
+                const combinedArea = p1.area + panels[minJ].area;
+                pairs.push({ idx1: panels[i].idx, idx2: panels[minJ].idx, area: combinedArea });
+              }
+            }
+            
+            // Count tables by size (combined area of both panels)
+            let smallTables = 0;
+            let bigTables = 0;
+            const combinedThreshold = threshold * 2; // Both panels combined
+            
+            pairs.forEach(pair => {
+              if (pair.area < combinedThreshold) {
+                smallTables++;
+              } else {
+                bigTables++;
+              }
+            });
+            
+            // Also count unpaired panels as half tables (shouldn't happen normally)
+            const unpairedCount = panels.length - used.size;
+            if (unpairedCount > 0) {
+              // Add unpaired as individual (likely edge cases)
+              panels.forEach((p, i) => {
+                if (!used.has(i)) {
+                  if (p.area < threshold) smallTables += 0.5;
+                  else bigTables += 0.5;
+                }
+              });
+            }
+            
+            setTableSmallCount(Math.round(smallTables));
+            setTableBigCount(Math.round(bigTables));
+            
+            // Store panel pairs by feature index (will map to polygonId after layer creation)
+            // tipFeaturePairs: featureIndex -> partnerFeatureIndex
+            const tipFeaturePairs = new Map();
+            pairs.forEach(pair => {
+              tipFeaturePairs.set(pair.idx1, pair.idx2);
+              tipFeaturePairs.set(pair.idx2, pair.idx1);
+            });
+            // Store for use in onEachFeature
+            tipPanelPairsRef.current = { featurePairs: tipFeaturePairs, polygonPairs: new Map() };
+          }
+          
           // LVTT: tables must NOT be selectable; draw only.
           if (isLVTT) {
             const fullLayer = L.geoJSON(data, {
@@ -4136,6 +4263,10 @@ export default function BaseModule({
             continue;
           }
 
+          // TIP: Track feature index for panel pairing
+          let tipFeatureIndex = 0;
+          const tipFeatureToPolygonId = new Map(); // featureIndex -> polygonId
+          
           const fullLayer = L.geoJSON(data, {
             renderer: canvasRenderer,
             interactive: true,
@@ -4148,6 +4279,7 @@ export default function BaseModule({
             }),
             
             onEachFeature: (feature, featureLayer) => {
+              const currentFeatureIdx = tipFeatureIndex++;
               const gType = feature?.geometry?.type;
               const isPoly = gType === 'Polygon' || gType === 'MultiPolygon';
               const isLine = gType === 'LineString';
@@ -4157,6 +4289,11 @@ export default function BaseModule({
               // Assign unique ID to this panel/polygon
               const uniqueId = `polygon_${polygonIdCounter.current++}`;
               featureLayer._uniquePolygonId = uniqueId;
+              
+              // TIP: Map feature index to polygon ID for panel pairing
+              if (isTIP) {
+                tipFeatureToPolygonId.set(currentFeatureIdx, uniqueId);
+              }
 
               // Store reference (will be updated with stringId and size later)
               polygonById.current[uniqueId] = {
@@ -4350,6 +4487,24 @@ export default function BaseModule({
                 if (noteMode) return;
                 const polygonId = featureLayer._uniquePolygonId;
                 if (polygonId) {
+                  // TIP: Select/unselect both panels of a table together
+                  if (isTIP) {
+                    const partnerPolygonId = tipPanelPairsRef.current?.polygonPairs?.get(polygonId);
+                    setSelectedPolygons(prev => {
+                      const next = new Set(prev);
+                      const isSelected = next.has(polygonId);
+                      if (isSelected) {
+                        next.delete(polygonId);
+                        if (partnerPolygonId) next.delete(partnerPolygonId);
+                      } else {
+                        next.add(polygonId);
+                        if (partnerPolygonId) next.add(partnerPolygonId);
+                      }
+                      return next;
+                    });
+                    return;
+                  }
+                  
                   // For small tables: select all polygons with same string ID
                   const polygonInfo = polygonById.current[polygonId];
                   if (polygonInfo && polygonInfo.stringId && polygonInfo.isSmallTable) {
@@ -4389,6 +4544,18 @@ export default function BaseModule({
                 if (noteMode) return;
                 const polygonId = featureLayer._uniquePolygonId;
                 if (polygonId) {
+                  // TIP: Unselect both panels of a table together
+                  if (isTIP && tipPanelPairsRef.current?.polygonPairs) {
+                    const partnerPolygonId = tipPanelPairsRef.current.polygonPairs.get(polygonId);
+                    setSelectedPolygons(prev => {
+                      const next = new Set(prev);
+                      next.delete(polygonId);
+                      if (partnerPolygonId) next.delete(partnerPolygonId);
+                      return next;
+                    });
+                    return;
+                  }
+                  
                   // For small tables: unselect all polygons with same string ID
                   const polygonInfo = polygonById.current[polygonId];
                   if (polygonInfo && polygonInfo.stringId && polygonInfo.isSmallTable) {
@@ -4415,6 +4582,22 @@ export default function BaseModule({
               });
             }
           });
+          
+          // TIP: Build polygonPairs map from feature pairs (bidirectional)
+          if (isTIP && tipPanelPairsRef.current?.featurePairs) {
+            const polygonPairs = new Map();
+            tipPanelPairsRef.current.featurePairs.forEach((partnerIdx, featureIdx) => {
+              const polygonId = tipFeatureToPolygonId.get(featureIdx);
+              const partnerPolygonId = tipFeatureToPolygonId.get(partnerIdx);
+              if (polygonId && partnerPolygonId) {
+                // Bidirectional mapping
+                polygonPairs.set(polygonId, partnerPolygonId);
+                polygonPairs.set(partnerPolygonId, polygonId);
+              }
+            });
+            tipPanelPairsRef.current.polygonPairs = polygonPairs;
+            console.log('TIP: Built polygonPairs map with', polygonPairs.size, 'entries');
+          }
           
           fullLayer.addTo(mapRef.current);
           layersRef.current.push(fullLayer);
@@ -6058,6 +6241,19 @@ export default function BaseModule({
             }
           });
           
+          // TIP: Add partner panels for each selected panel (table = 2 panels)
+          if (isTIP && tipPanelPairsRef.current?.polygonPairs) {
+            const partnersToAdd = new Set();
+            finalSelectedIds.forEach(pid => {
+              const partner = tipPanelPairsRef.current.polygonPairs.get(pid);
+              if (partner && !finalSelectedIds.has(partner)) {
+                partnersToAdd.add(partner);
+              }
+            });
+            partnersToAdd.forEach(p => finalSelectedIds.add(p));
+            console.log('[TIP Selection Box] directlySelectedIds:', directlySelectedIds.length, 'finalSelectedIds:', finalSelectedIds.size, 'partnersAdded:', partnersToAdd.size);
+          }
+          
           if (finalSelectedIds.size > 0) {
             setSelectedPolygons(prev => {
               const next = new Set(prev);
@@ -6066,6 +6262,7 @@ export default function BaseModule({
               } else {
                 finalSelectedIds.forEach(id => next.add(id));
               }
+              if (isTIP) console.log('[TIP Selection Box] prev.size:', prev.size, 'next.size:', next.size, 'finalSelectedIds.size:', finalSelectedIds.size);
               return next;
             });
           }
@@ -6194,17 +6391,9 @@ export default function BaseModule({
                     return base;
                   });
                 }
-                setMvtTermPanel({
-                  stationLabel: String(best._mvtStationLabel || '').trim() || stationNorm,
-                  stationNorm,
-                  value: nextVal,
-                });
+                // setMvtTermPanel removed - not defined
               } else if (stationNorm && lockedNow) {
-                setMvtTermPanel({
-                  stationLabel: String(best._mvtStationLabel || '').trim() || stationNorm,
-                  stationNorm,
-                  value: 3,
-                });
+                // setMvtTermPanel removed - not defined
               }
               draggingRef.current = null;
               return;
@@ -6825,11 +7014,18 @@ export default function BaseModule({
     ? (mvfSegments || []).reduce((sum, s) => (mvfDoneSegmentKeys.has(s.key) ? sum + (Number(s.length) || 0) : sum), 0)
     : 0;
 
+  // TIP: Total = 2V14 + 2V27 (from full.geojson), Completed = selected tables count
+  const tipTotal = tableSmallCount + tableBigCount;
+  // TIP: Count selected tables (each table = 2 panels, so divide by 2)
+  const tipCompletedTables = isTIP ? Math.floor(selectedPolygons.size / 2) : 0;
+
   // MVF Total must come from CSV (already represents 3 circuits); completed comes from selected trench meters * 3.
-  const overallTotal = isMVF ? totalPlus : ((isLV || useSimpleCounters) ? totalPlus : (totalPlus + totalMinus));
-  const completedTotal = isLV
-    ? lvCompletedLength
-    : (isMVF ? (mvfSelectedCableMeters + mvfCommittedCableMeters + mvfDoneCableMeters) : (completedPlus + completedMinus));
+  const overallTotal = isTIP ? tipTotal : (isMVF ? totalPlus : ((isLV || useSimpleCounters) ? totalPlus : (totalPlus + totalMinus)));
+  const completedTotal = isTIP
+    ? tipCompletedTables
+    : (isLV
+      ? lvCompletedLength
+      : (isMVF ? (mvfSelectedCableMeters + mvfCommittedCableMeters + mvfDoneCableMeters) : (completedPlus + completedMinus)));
   const completedPct = overallTotal > 0 ? (completedTotal / overallTotal) * 100 : 0;
   const remainingPlus = Math.max(0, totalPlus - completedPlus);
   const remainingMinus = Math.max(0, totalMinus - completedMinus);
@@ -7368,31 +7564,79 @@ export default function BaseModule({
             effectiveCustomCounters ? (
               effectiveCustomCounters
             ) : (
-              <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start">
+              <div className="flex min-w-0 items-center gap-3 overflow-x-auto pb-1 justify-self-start">
                 {useSimpleCounters ? (
                   <>
-                    <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-                      <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                        <span className="text-xs font-bold text-slate-200">Total</span>
-                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{formatSimpleCounter(overallTotal)}</span>
-                      </div>
-                    </div>
+                    {/* TABLE_INSTALLATION: 2V14/2V27 card + Total/Completed/Remaining group */}
+                    {isTIP ? (
+                      <>
+                        {/* Left card: 2V14 / 2V27 */}
+                        <div className="min-w-[140px] border-2 border-slate-700 bg-slate-800 py-3 px-3 self-center">
+                          <div className="flex flex-col gap-y-1">
+                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                              <span className="text-xs font-bold text-slate-200">{activeMode?.smallTableLabel || '2V14'}</span>
+                              <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{tableSmallCount}</span>
+                            </div>
+                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                              <span className="text-xs font-bold text-slate-200">{activeMode?.bigTableLabel || '2V27'}</span>
+                              <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{tableBigCount}</span>
+                            </div>
+                          </div>
+                        </div>
 
-                    <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-                      <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                        <span className="text-xs font-bold text-emerald-400">Completed</span>
-                        <span className="text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap">
-                          {formatSimpleCounter(completedTotal)}, {completedPct.toFixed(2)}%
-                        </span>
-                      </div>
-                    </div>
+                        {/* Right group: Total / Completed / Remaining */}
+                        <div className="flex items-center gap-3 self-center">
+                          <div className="min-w-[120px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
+                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                              <span className="text-xs font-bold text-slate-200">Total</span>
+                              <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{tipTotal}</span>
+                            </div>
+                          </div>
 
-                    <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-                      <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                        <span className="text-xs font-bold text-slate-200">Remaining</span>
-                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{formatSimpleCounter(remainingTotal)}</span>
-                      </div>
-                    </div>
+                          <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
+                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                              <span className="text-xs font-bold text-emerald-400">Completed</span>
+                              <span className="text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap">
+                                {tipCompletedTables}, {completedPct.toFixed(2)}%
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="min-w-[140px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
+                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                              <span className="text-xs font-bold text-slate-200">Remaining</span>
+                              <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingTotal}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        {/* Non-TIP simple counters */}
+                        <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                          <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                            <span className="text-xs font-bold text-slate-200">Total</span>
+                            <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{formatSimpleCounter(overallTotal)}</span>
+                          </div>
+                        </div>
+
+                        <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                          <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                            <span className="text-xs font-bold text-emerald-400">Completed</span>
+                            <span className="text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap">
+                              {formatSimpleCounter(completedTotal)}, {completedPct.toFixed(2)}%
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                          <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                            <span className="text-xs font-bold text-slate-200">Remaining</span>
+                            <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{formatSimpleCounter(remainingTotal)}</span>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </>
                 ) : (
                   <>

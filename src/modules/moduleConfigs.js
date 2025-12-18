@@ -372,15 +372,21 @@ export const TABLE_INSTALLATION_PROGRESS_MODULE_CONFIG = {
   csvPath: null,
   linkPath: '/TABLE_INSTALLATION_PROGRESS/link',
   // Keep the same UI/counters layout as MIPT by default.
-  // (User can later enable weighted counters if needed.)
   simpleCounters: true,
+  simpleCounterUnit: '', // No unit for table counts
+  // Table size counters - küçük ve büyük masa sayısı
+  tableCounters: true,
+  tableAreaThreshold: 50, // m² - bu değerden küçükse small (2V14), büyükse big (2V27)
+  smallTableLabel: '2V14',
+  bigTableLabel: '2V27',
+  // string_text görünmez olacak (render edilir ama opacity 0)
   stringTextVisibility: 'always',
-  stringTextToggle: true,
-  stringTextDefaultOn: true,
-  stringTextColor: 'rgba(255,255,255,0.98)',
+  stringTextToggle: false,
+  stringTextDefaultOn: false,
+  stringTextColor: 'rgba(255,255,255,0)',       // Görünmez
   stringTextBaseSize: 22,
   stringTextStyle: '400',
-  stringTextStrokeColor: 'rgba(0,0,0,0.85)',
+  stringTextStrokeColor: 'rgba(0,0,0,0)',       // Görünmez
   stringTextStrokeWidthFactor: 1.2,
   stringTextMinZoom: 0,
   stringTextMinFontSize: 14,
@@ -388,7 +394,6 @@ export const TABLE_INSTALLATION_PROGRESS_MODULE_CONFIG = {
   stringTextRefZoom: 20,
   geojsonFiles: [
     { url: '/TABLE_INSTALLATION_PROGRESS/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
-    { url: '/TABLE_INSTALLATION_PROGRESS/string_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
     { url: '/TABLE_INSTALLATION_PROGRESS/inv_id.geojson', name: 'inv_id', color: '#16a34a', fillColor: '#22c55e' },
     {
       // This dataset uses inv_box.geojson as the LV box/boundary layer
