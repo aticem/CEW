@@ -7,6 +7,8 @@ import MC4Module from './modules/MC4Module.jsx';
 import MVTerminationModule from './modules/MVTerminationModule.jsx';
 import LVTerminationTestingModule from './modules/LVTerminationTestingModule.jsx';
 import DCCableTestingProgressModule from './modules/DCCableTestingProgressModule.jsx';
+import ModuleInstallationProgressTrackingModule from './modules/ModuleInstallationProgressTrackingModule.jsx';
+import TableInstallationProgressModule from './modules/TableInstallationProgressModule.jsx';
 
 const MODULES = {
   DC: { key: 'DC', label: 'DC CABLE PULLING PROGRESS', Component: DCModule },
@@ -17,6 +19,8 @@ const MODULES = {
   MVT: { key: 'MVT', label: 'MV TERMINATION PROGRESS', Component: MVTerminationModule },
   LVTT: { key: 'LVTT', label: 'LV_TERMINATION_and_TESTING PROGRESS', Component: LVTerminationTestingModule },
   DCCT: { key: 'DCCT', label: 'DC_CABLE_TESTING_PROGRESS', Component: DCCableTestingProgressModule },
+  MIPT: { key: 'MIPT', label: 'MODULE_INSTALLATION_PROGRES_TRACKING', Component: ModuleInstallationProgressTrackingModule },
+  TIP: { key: 'TIP', label: 'TABLE_INSTALLATION_PROGRESS', Component: TableInstallationProgressModule },
 };
 
 export default function App() {

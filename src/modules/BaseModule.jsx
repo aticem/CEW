@@ -3723,6 +3723,22 @@ export default function BaseModule({
 
   // Calculate counters when selection changes
   useEffect(() => {
+    // Weighted counters (module-specific): sum per-polygon workUnits instead of CSV meters.
+    // Used by MODULE_INSTALLATION_PROGRES_TRACKING.
+    if (activeMode?.workUnitWeights) {
+      let units = 0;
+      const seen = new Set();
+      selectedPolygons.forEach((polygonId) => {
+        const polygonInfo = polygonById.current?.[polygonId];
+        const key = String(polygonInfo?.dedupeKey || polygonId);
+        if (seen.has(key)) return;
+        seen.add(key);
+        units += Number(polygonInfo?.workUnits) || 0;
+      });
+      setCompletedPlus(units);
+      setCompletedMinus(0);
+      return;
+    }
     if (isLV) {
       // LV uses inv_id click tracking, not polygon selection.
       setCompletedPlus(0);
@@ -4905,6 +4921,26 @@ export default function BaseModule({
                 const boundsHeight = bounds.getNorthWest().distanceTo(bounds.getSouthWest());
                 const diag = Math.sqrt(boundsWidth * boundsWidth + boundsHeight * boundsHeight);
                 const isSmallTable = diag < 25;
+
+                // Many CAD exports contain exact duplicate polygons.
+                // For weighted-counter modes, we must count each physical table once.
+                const dedupeKey = (() => {
+                  try {
+                    const sw = bounds.getSouthWest();
+                    const ne = bounds.getNorthEast();
+                    if (!sw || !ne) return '';
+                    // 7 decimals is ~1cm-ish; plenty to collapse exact duplicates but not nearby tables.
+                    return `${sw.lat.toFixed(7)}:${sw.lng.toFixed(7)}:${ne.lat.toFixed(7)}:${ne.lng.toFixed(7)}`;
+                  } catch (_e) {
+                    void _e;
+                    return '';
+                  }
+                })();
+
+                // Persist on polygon record for later selection/counter de-duplication.
+                if (uid && polygonById.current?.[uid]) {
+                  polygonById.current[uid].dedupeKey = dedupeKey;
+                }
                 
                 polygonInfos.push({
                   featureLayer,
@@ -4912,7 +4948,8 @@ export default function BaseModule({
                   center,
                   geometry,
                   diag,
-                  isSmallTable
+                  isSmallTable,
+                  dedupeKey,
                 });
               } catch (_e) { void _e; }
             }
@@ -4921,6 +4958,121 @@ export default function BaseModule({
       });
       
       polygonInfos.sort((a, b) => b.diag - a.diag);
+
+      // MODULE_INSTALLATION_PROGRES_TRACKING (and other potential weighted-counter modules):
+      // Classify table sizes from full.geojson into 3 buckets (long/medium/short) using
+      // the most-common longest-edge lengths. This is robust to tiny outliers (e.g. stray micro-polygons)
+      // that would otherwise steal a k-means cluster and collapse 14/13 into one group.
+      if (activeMode?.workUnitWeights && polygonInfos.length) {
+        try {
+          const weights = activeMode.workUnitWeights;
+          const wLong = Number(weights?.long);
+          const wMed = Number(weights?.medium);
+          const wShort = Number(weights?.short);
+          if (Number.isFinite(wLong) && Number.isFinite(wMed) && Number.isFinite(wShort)) {
+            const map = mapRef.current;
+            const longestEdgeOf = (featureLayer) => {
+              if (!map || !featureLayer || typeof featureLayer.getLatLngs !== 'function') return 0;
+              let ll = featureLayer.getLatLngs();
+              // Drill down to an array of LatLngs representing the outer ring.
+              while (Array.isArray(ll) && ll.length && Array.isArray(ll[0])) ll = ll[0];
+              while (Array.isArray(ll) && ll.length && Array.isArray(ll[0])) ll = ll[0];
+              const ring = Array.isArray(ll) ? ll : null;
+              if (!ring || ring.length < 2) return 0;
+              let max = 0;
+              for (let i = 0; i < ring.length - 1; i++) {
+                const a = ring[i];
+                const b = ring[i + 1];
+                if (!a || !b) continue;
+                try {
+                  const d = L.latLng(a.lat, a.lng).distanceTo(L.latLng(b.lat, b.lng));
+                  if (Number.isFinite(d) && d > max) max = d;
+                } catch (_e) {
+                  void _e;
+                }
+              }
+              // If the ring isn't explicitly closed, also measure last->first.
+              try {
+                const first = ring[0];
+                const last = ring[ring.length - 1];
+                if (first && last) {
+                  const d = L.latLng(first.lat, first.lng).distanceTo(L.latLng(last.lat, last.lng));
+                  if (Number.isFinite(d) && d > max) max = d;
+                }
+              } catch (_e) {
+                void _e;
+              }
+              return max;
+            };
+
+            // Build a histogram of longest-edge lengths (bucketed) and pick the top-3 most common buckets.
+            // Bucket size 0.1m is tight enough given CAD-derived data.
+            const bucketStep = 0.1;
+            const bucketOf = (val) => (Math.round(val / bucketStep) * bucketStep);
+            const counts = new Map();
+
+            polygonInfos.forEach((p) => {
+              const e = longestEdgeOf(p?.featureLayer);
+              p.longestEdge = e;
+              // Ignore degenerate shapes (e.g. 0.2m micro-features)
+              if (!(e > 1)) return;
+              const b = bucketOf(e);
+              counts.set(b, (counts.get(b) || 0) + 1);
+            });
+
+            const reps = Array.from(counts.entries())
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 3)
+              .map(([edge]) => Number(edge))
+              .filter((v) => Number.isFinite(v) && v > 0)
+              .sort((a, b) => b - a);
+
+            if (reps.length === 3) {
+              const repWeights = new Map([
+                [reps[0], wLong],
+                [reps[1], wMed],
+                [reps[2], wShort],
+              ]);
+
+              const nearestRep = (val) => {
+                let best = reps[0];
+                let bestDist = Math.abs(val - reps[0]);
+                for (let i = 1; i < reps.length; i++) {
+                  const d = Math.abs(val - reps[i]);
+                  if (d < bestDist) {
+                    best = reps[i];
+                    bestDist = d;
+                  }
+                }
+                return best;
+              };
+
+              let totalUnits = 0;
+              const seenKeys = new Set();
+              polygonInfos.forEach((p) => {
+                const uid = p?.featureLayer?._uniquePolygonId;
+                if (!uid || !polygonById.current?.[uid]) return;
+                const e = Number(p?.longestEdge) || 0;
+                if (!(e > 0)) return;
+                const rep = nearestRep(e);
+                const units = Number(repWeights.get(rep)) || 0;
+                polygonById.current[uid].workUnits = units;
+
+                const key = String(polygonById.current?.[uid]?.dedupeKey || uid);
+                if (!seenKeys.has(key)) {
+                  seenKeys.add(key);
+                  totalUnits += units;
+                }
+              });
+
+              setTotalPlus(totalUnits);
+              setTotalMinus(0);
+            }
+          }
+        } catch (_e) {
+          void _e;
+        }
+      }
 
       const total = polygonInfos.length;
       const chunkSize = 80; // smaller chunks to keep first render responsive
@@ -5742,16 +5894,153 @@ export default function BaseModule({
             }
           } else {
             // NORMAL MODE: Select polygons (DC)
+          const map = mapRef.current;
           const directlySelectedIds = [];
-          
-          Object.keys(polygonById.current).forEach(polygonId => {
-            const polygonInfo = polygonById.current[polygonId];
-            if (polygonInfo && polygonInfo.layer && polygonInfo.layer.getBounds) {
-              const polygonBounds = polygonInfo.layer.getBounds();
-              if (bounds.intersects(polygonBounds)) {
-                directlySelectedIds.push(polygonId);
+
+          // For weighted-counter modes (e.g. MODULE_INSTALLATION_PROGRES_TRACKING),
+          // bounds-only checks significantly over-select. Use a robust intersection test.
+          const useStrictIntersection = !!activeMode?.workUnitWeights;
+
+          const rectData = (() => {
+            if (!useStrictIntersection || !map) return null;
+            try {
+              const sw = bounds.getSouthWest();
+              const ne = bounds.getNorthEast();
+              const nw = L.latLng(ne.lat, sw.lng);
+              const se = L.latLng(sw.lat, ne.lng);
+              const rectPts = [
+                map.latLngToLayerPoint(nw),
+                map.latLngToLayerPoint(ne),
+                map.latLngToLayerPoint(se),
+                map.latLngToLayerPoint(sw),
+              ];
+              if (rectPts.some((p) => !p || !Number.isFinite(p.x) || !Number.isFinite(p.y))) return null;
+              const xs = rectPts.map((p) => p.x);
+              const ys = rectPts.map((p) => p.y);
+              const minX = Math.min(...xs);
+              const maxX = Math.max(...xs);
+              const minY = Math.min(...ys);
+              const maxY = Math.max(...ys);
+              const rectEdges = [
+                [rectPts[0], rectPts[1]],
+                [rectPts[1], rectPts[2]],
+                [rectPts[2], rectPts[3]],
+                [rectPts[3], rectPts[0]],
+              ];
+              return { rectPts, rectEdges, minX, maxX, minY, maxY };
+            } catch (_e) {
+              void _e;
+              return null;
+            }
+          })();
+
+          const isPointInBox = (p, minX, maxX, minY, maxY) => p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY;
+
+          const isPointInPoly = (pt, poly) => {
+            // Ray casting
+            let inside = false;
+            for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+              const xi = poly[i].x, yi = poly[i].y;
+              const xj = poly[j].x, yj = poly[j].y;
+              const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+                (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi + 1e-12) + xi);
+              if (intersect) inside = !inside;
+            }
+            return inside;
+          };
+
+          const segIntersects = (p1, p2, q1, q2) => {
+            const orient = (a, b, c) => (b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y);
+            const onSeg = (a, b, c) =>
+              Math.min(a.x, c.x) <= b.x && b.x <= Math.max(a.x, c.x) &&
+              Math.min(a.y, c.y) <= b.y && b.y <= Math.max(a.y, c.y);
+            const o1 = orient(p1, p2, q1);
+            const o2 = orient(p1, p2, q2);
+            const o3 = orient(q1, q2, p1);
+            const o4 = orient(q1, q2, p2);
+            if ((o1 > 0 && o2 < 0 || o1 < 0 && o2 > 0) && (o3 > 0 && o4 < 0 || o3 < 0 && o4 > 0)) return true;
+            if (Math.abs(o1) < 1e-9 && onSeg(p1, q1, p2)) return true;
+            if (Math.abs(o2) < 1e-9 && onSeg(p1, q2, p2)) return true;
+            if (Math.abs(o3) < 1e-9 && onSeg(q1, p1, q2)) return true;
+            if (Math.abs(o4) < 1e-9 && onSeg(q1, p2, q2)) return true;
+            return false;
+          };
+
+          const layerIntersectsSelection = (layer) => {
+            if (!useStrictIntersection || !rectData || !map || !layer) return true;
+
+            const geomType = layer?.feature?.geometry?.type;
+            // Weighted-counter modes are table-only: ignore non-polygons.
+            if (geomType && geomType !== 'Polygon' && geomType !== 'MultiPolygon') return false;
+
+            const { rectPts, rectEdges, minX, maxX, minY, maxY } = rectData;
+
+            const collectRings = (latlngs) => {
+              const out = [];
+              const walk = (node) => {
+                if (!Array.isArray(node) || node.length === 0) return;
+                if (node.length && node[0] && typeof node[0].lat === 'number' && typeof node[0].lng === 'number') {
+                  out.push(node);
+                  return;
+                }
+                node.forEach(walk);
+              };
+              walk(latlngs);
+              return out;
+            };
+
+            let ll = null;
+            try {
+              if (typeof layer.getLatLngs !== 'function') return false;
+              ll = layer.getLatLngs();
+            } catch (_e) {
+              void _e;
+              return false;
+            }
+
+            const rings = collectRings(ll);
+            for (let r = 0; r < rings.length; r++) {
+              const ring = rings[r];
+              if (!ring || ring.length < 3) continue;
+              const pts = ring.map((p) => map.latLngToLayerPoint(p)).filter(Boolean);
+              if (pts.length < 3) continue;
+              // drop duplicate last point if it equals first
+              const a = pts[0];
+              const z = pts[pts.length - 1];
+              if (a && z && a.x === z.x && a.y === z.y) pts.pop();
+              if (pts.length < 3) continue;
+
+              // 1) Any polygon vertex in selection box
+              if (pts.some((p) => isPointInBox(p, minX, maxX, minY, maxY))) return true;
+              // 2) Any selection corner inside polygon
+              if (rectPts.some((c) => isPointInPoly(c, pts))) return true;
+              // 3) Any edge intersection
+              for (let i = 0; i < pts.length; i++) {
+                const p1 = pts[i];
+                const p2 = pts[(i + 1) % pts.length];
+                for (let k = 0; k < rectEdges.length; k++) {
+                  const [q1, q2] = rectEdges[k];
+                  if (segIntersects(p1, p2, q1, q2)) return true;
+                }
               }
             }
+            return false;
+          };
+
+          Object.keys(polygonById.current).forEach(polygonId => {
+            const polygonInfo = polygonById.current[polygonId];
+            const layer = polygonInfo?.layer;
+            if (!layer || typeof layer.getBounds !== 'function') return;
+            let polygonBounds = null;
+            try {
+              polygonBounds = layer.getBounds();
+            } catch (_e) {
+              void _e;
+              return;
+            }
+            if (!polygonBounds || !bounds.intersects(polygonBounds)) return;
+            if (useStrictIntersection && !layerIntersectsSelection(layer)) return;
+            directlySelectedIds.push(polygonId);
           });
           
           const finalSelectedIds = new Set();
@@ -6546,6 +6835,12 @@ export default function BaseModule({
   const remainingMinus = Math.max(0, totalMinus - completedMinus);
   const remainingTotal = Math.max(0, overallTotal - completedTotal);
 
+  const simpleCounterUnit = typeof activeMode?.simpleCounterUnit === 'string' ? activeMode.simpleCounterUnit : 'm';
+  const formatSimpleCounter = (value) => {
+    const v = Number(value) || 0;
+    return `${v.toFixed(0)}${simpleCounterUnit ? ` ${simpleCounterUnit}` : ''}`;
+  };
+
   // MC4 counters (per string_text count; each string/table has 2 ends)
   // IMPORTANT: Must be defined before workSelectionCount/workAmount which depend on it
   const mc4Counts = useMemo(() => {
@@ -6616,7 +6911,17 @@ export default function BaseModule({
       ? (mvfSelectedTrenchParts?.length || 0) 
       : (isMC4 
         ? Object.keys(mc4PanelStates || {}).length 
-        : selectedPolygons.size));
+        : (activeMode?.workUnitWeights
+          ? (() => {
+              const seen = new Set();
+              (selectedPolygons || new Set()).forEach((pid) => {
+                const info = polygonById.current?.[pid];
+                const key = String(info?.dedupeKey || pid);
+                seen.add(key);
+              });
+              return seen.size;
+            })()
+          : selectedPolygons.size)));
   const mvtCompletedForSubmit = isMVT
     ? Math.max(0, Object.values(mvtTerminationByStation || {}).reduce((s, v) => s + Math.max(0, Math.min(3, Number(v) || 0)), 0))
     : 0;
@@ -7069,7 +7374,7 @@ export default function BaseModule({
                     <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
                       <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
                         <span className="text-xs font-bold text-slate-200">Total</span>
-                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{overallTotal.toFixed(0)} m</span>
+                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{formatSimpleCounter(overallTotal)}</span>
                       </div>
                     </div>
 
@@ -7077,7 +7382,7 @@ export default function BaseModule({
                       <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
                         <span className="text-xs font-bold text-emerald-400">Completed</span>
                         <span className="text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap">
-                          {completedTotal.toFixed(0)} m, {completedPct.toFixed(2)}%
+                          {formatSimpleCounter(completedTotal)}, {completedPct.toFixed(2)}%
                         </span>
                       </div>
                     </div>
@@ -7085,7 +7390,7 @@ export default function BaseModule({
                     <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
                       <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
                         <span className="text-xs font-bold text-slate-200">Remaining</span>
-                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingTotal.toFixed(0)} m</span>
+                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{formatSimpleCounter(remainingTotal)}</span>
                       </div>
                     </div>
                   </>
@@ -8252,7 +8557,9 @@ export default function BaseModule({
               ? 'cables terminated'
               : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
                 ? lvttWorkUnit
-                : 'm')
+                : (activeMode?.submitWorkUnit
+                  ? String(activeMode.submitWorkUnit)
+                  : (activeMode?.workUnitWeights ? 'panels' : 'm')))
         }
       />
       

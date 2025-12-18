@@ -324,3 +324,80 @@ export const DC_CABLE_TESTING_PROGRESS_MODULE_CONFIG = {
     },
   ],
 };
+
+export const MODULE_INSTALLATION_PROGRESS_TRACKING_MODULE_CONFIG = {
+  key: 'MIPT',
+  label: 'MODULE_INSTALLATION_PROGRES_TRACKING',
+  // Files live in: public/MODULE_INSTALLATION_PROGRES_TRACKING/
+  csvFormat: null,
+  csvPath: null,
+  linkPath: '/MODULE_INSTALLATION_PROGRES_TRACKING/link',
+  simpleCounters: true,
+  simpleCounterUnit: '',
+  // Weighted counters by table type (auto-classified from full.geojson geometry sizes)
+  workUnitWeights: { long: 27, medium: 14, short: 13 },
+  stringTextVisibility: 'always',
+  stringTextToggle: true,
+  stringTextDefaultOn: true,
+  stringTextColor: 'rgba(255,255,255,0.98)',
+  stringTextBaseSize: 22,
+  stringTextStyle: '400',
+  stringTextStrokeColor: 'rgba(0,0,0,0.85)',
+  stringTextStrokeWidthFactor: 1.2,
+  stringTextMinZoom: 0,
+  stringTextMinFontSize: 14,
+  stringTextMaxFontSize: 26,
+  stringTextRefZoom: 20,
+  geojsonFiles: [
+    { url: '/MODULE_INSTALLATION_PROGRES_TRACKING/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
+    { url: '/MODULE_INSTALLATION_PROGRES_TRACKING/string_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
+    { url: '/MODULE_INSTALLATION_PROGRES_TRACKING/inv_id.geojson', name: 'inv_id', color: '#16a34a', fillColor: '#22c55e' },
+    {
+      // This dataset uses inv_box.geojson as the LV box/boundary layer
+      url: '/MODULE_INSTALLATION_PROGRES_TRACKING/inv_box.geojson',
+      name: 'lv_box',
+      color: '#eab308',
+      fillColor: '#facc15',
+      weight: 3,
+      fillOpacity: 0.6,
+    },
+  ],
+};
+
+export const TABLE_INSTALLATION_PROGRESS_MODULE_CONFIG = {
+  key: 'TIP',
+  label: 'TABLE_INSTALLATION_PROGRESS',
+  // Files live in: public/TABLE_INSTALLATION_PROGRESS/
+  csvFormat: null,
+  csvPath: null,
+  linkPath: '/TABLE_INSTALLATION_PROGRESS/link',
+  // Keep the same UI/counters layout as MIPT by default.
+  // (User can later enable weighted counters if needed.)
+  simpleCounters: true,
+  stringTextVisibility: 'always',
+  stringTextToggle: true,
+  stringTextDefaultOn: true,
+  stringTextColor: 'rgba(255,255,255,0.98)',
+  stringTextBaseSize: 22,
+  stringTextStyle: '400',
+  stringTextStrokeColor: 'rgba(0,0,0,0.85)',
+  stringTextStrokeWidthFactor: 1.2,
+  stringTextMinZoom: 0,
+  stringTextMinFontSize: 14,
+  stringTextMaxFontSize: 26,
+  stringTextRefZoom: 20,
+  geojsonFiles: [
+    { url: '/TABLE_INSTALLATION_PROGRESS/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
+    { url: '/TABLE_INSTALLATION_PROGRESS/string_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
+    { url: '/TABLE_INSTALLATION_PROGRESS/inv_id.geojson', name: 'inv_id', color: '#16a34a', fillColor: '#22c55e' },
+    {
+      // This dataset uses inv_box.geojson as the LV box/boundary layer
+      url: '/TABLE_INSTALLATION_PROGRESS/inv_box.geojson',
+      name: 'lv_box',
+      color: '#eab308',
+      fillColor: '#facc15',
+      weight: 3,
+      fillOpacity: 0.6,
+    },
+  ],
+};
