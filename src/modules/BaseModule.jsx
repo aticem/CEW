@@ -314,6 +314,8 @@ export default function BaseModule({
   const isLV = String(activeMode?.key || '').toUpperCase() === 'LV';
   // Treat any module with mvf-style CSV/logic as MVF-mode (e.g., MV + FIBRE modules).
   const isMVF = String(activeMode?.csvFormat || '').toLowerCase() === 'mvf';
+  // MV+FIBRE_TRENCH (GeoJSON-only trench measurement)
+  const isMVFT = String(activeMode?.key || '').toUpperCase() === 'MVFT';
   const isMC4 = String(activeMode?.key || '').toUpperCase() === 'MC4';
   const isMVT = String(activeMode?.key || '').toUpperCase() === 'MVT';
   const isLVTT = String(activeMode?.key || '').toUpperCase() === 'LVTT';
@@ -904,6 +906,14 @@ export default function BaseModule({
   const mvfTrenchLenByIdRef = useRef({}); // id -> meters
   const [mvfTrenchTotalMeters, setMvfTrenchTotalMeters] = useState(0);
   const mvfTrenchEdgeIndexRef = useRef(new Map()); // "lat,lng|lat,lng" -> { fid, lineIndex, startM, endM }
+
+  // MVFT: mv_trench selection via box (store selected PART geometries inside the selection rectangle)
+  const mvftTrenchByIdRef = useRef({}); // id -> L.Path
+  const mvftTrenchLenByIdRef = useRef({}); // id -> meters (per feature, for total)
+  const [mvftTrenchTotalMeters, setMvftTrenchTotalMeters] = useState(0);
+  const [mvftSelectedTrenchParts, setMvftSelectedTrenchParts] = useState([]); // [{id, fid, lineIndex, startM, endM, coords, meters}]
+  const mvftSelectedTrenchPartsRef = useRef(mvftSelectedTrenchParts);
+  const mvftTrenchSelectedLayerRef = useRef(null); // L.LayerGroup
   // MVF: partial trench completion via selection box (store selected/committed PART geometries)
   const [mvfSelectedTrenchParts, setMvfSelectedTrenchParts] = useState([]); // [{id, fid, coords:[[lat,lng],...], meters}]
   const [mvfCommittedTrenchParts, setMvfCommittedTrenchParts] = useState([]); // same shape, locked
@@ -1551,6 +1561,10 @@ export default function BaseModule({
   }, [mvfSelectedTrenchIds]);
 
   useEffect(() => {
+    mvftSelectedTrenchPartsRef.current = mvftSelectedTrenchParts;
+  }, [mvftSelectedTrenchParts]);
+
+  useEffect(() => {
     mvfCommittedTrenchIdsRef.current = mvfCommittedTrenchIds;
   }, [mvfCommittedTrenchIds]);
 
@@ -1688,6 +1702,59 @@ export default function BaseModule({
     });
     mvfPrevSelectedTrenchRef.current = new Set();
   }, [isMVF]);
+
+  // MVFT: keep base mv_trench geometry always WHITE; completed portion is drawn via green overlays.
+  useEffect(() => {
+    if (!isMVFT) return;
+    const baseStyle = {
+      color: 'rgba(255,255,255,0.85)',
+      weight: 1.25,
+      opacity: 1.0,
+      lineJoin: 'round',
+      lineCap: 'round',
+      fill: false,
+      fillOpacity: 0,
+    };
+    const byId = mvftTrenchByIdRef.current || {};
+    Object.keys(byId).forEach((id) => {
+      const layer = byId[id];
+      if (layer && typeof layer.setStyle === 'function') layer.setStyle(baseStyle);
+    });
+  }, [isMVFT]);
+
+  // MVFT: render selected trench PART overlays.
+  useEffect(() => {
+    const selectedLayer = mvftTrenchSelectedLayerRef.current;
+    if (!selectedLayer) return;
+
+    if (!isMVFT) {
+      try { selectedLayer.clearLayers(); } catch (_e) { void _e; }
+      return;
+    }
+
+    const map = mapRef.current;
+    if (!map) return;
+
+    try { selectedLayer.clearLayers(); } catch (_e) { void _e; }
+
+    (mvftSelectedTrenchParts || []).forEach((p) => {
+      if (!p?.coords || p.coords.length < 2) return;
+      const line = L.polyline(p.coords, { color: '#00e676', weight: 6.4, opacity: 1.0, interactive: true });
+      line._mvftTrenchPartId = p.id;
+      line.on('contextmenu', (evt) => {
+        try {
+          if (evt?.originalEvent) {
+            L.DomEvent.stopPropagation(evt.originalEvent);
+            L.DomEvent.preventDefault(evt.originalEvent);
+          }
+        } catch (_e) {
+          void _e;
+        }
+        setMvftSelectedTrenchParts((prev) => (prev || []).filter((x) => x?.id !== p.id));
+      });
+      selectedLayer.addLayer(line);
+    });
+  }, [isMVFT, mvftSelectedTrenchParts]);
 
   // MC4: render panel end-status markers (blue=mc4, green=terminated)
   useEffect(() => {
@@ -4008,6 +4075,19 @@ export default function BaseModule({
     mvfPrevSelectedTrenchRef.current = new Set();
     setMvfSelectedTrenchIds(new Set());
     setMvfSelectedTrenchParts([]);
+
+    // MVFT: clear trench state on reload
+    mvftTrenchByIdRef.current = {};
+    mvftTrenchLenByIdRef.current = {};
+    setMvftTrenchTotalMeters(0);
+    setMvftSelectedTrenchParts([]);
+    if (isMVFT) {
+      // MVFT totals come from mv_trench length, not CSV.
+      setTotalPlus(0);
+      setTotalMinus(0);
+      setCompletedPlus(0);
+      setCompletedMinus(0);
+    }
     
     const allBounds = L.latLngBounds();
     let totalFeatures = 0;
@@ -4095,6 +4175,62 @@ export default function BaseModule({
           } catch (_e) {
             void _e;
             mvfTrenchGraphRef.current = null;
+          }
+        }
+
+        // MVFT: compute total trench length (meters) from mv_trench
+        if (isMVFT && file.name === 'mv_trench' && Array.isArray(data?.features)) {
+          try {
+            const makeId = (feature) => {
+              const fidRaw = feature?.properties?.fid ?? feature?.properties?.FID ?? feature?.properties?.id ?? feature?.id;
+              if (fidRaw != null) return `mvft_trench_${String(fidRaw)}`;
+              try {
+                const coords = feature?.geometry?.coordinates;
+                const head = Array.isArray(coords) ? JSON.stringify(coords).slice(0, 160) : '';
+                return `mvft_trench_geom_${head.length}_${head}`;
+              } catch {
+                return 'mvft_trench_geom_unknown';
+              }
+            };
+
+            const metersOfLine = (coords) => {
+              if (!Array.isArray(coords) || coords.length < 2) return 0;
+              let sum = 0;
+              for (let i = 0; i < coords.length - 1; i++) {
+                const a = coords[i];
+                const b = coords[i + 1];
+                const lng1 = a?.[0];
+                const lat1 = a?.[1];
+                const lng2 = b?.[0];
+                const lat2 = b?.[1];
+                if (typeof lat1 !== 'number' || typeof lng1 !== 'number' || typeof lat2 !== 'number' || typeof lng2 !== 'number') continue;
+                sum += L.latLng(lat1, lng1).distanceTo(L.latLng(lat2, lng2));
+              }
+              return sum;
+            };
+
+            let totalM = 0;
+            const lenById = {};
+            for (const f of data.features) {
+              const g = f?.geometry;
+              if (!g) continue;
+              const id = makeId(f);
+              let m = 0;
+              if (g.type === 'LineString') m = metersOfLine(g.coordinates);
+              else if (g.type === 'MultiLineString') m = (g.coordinates || []).reduce((s, c) => s + metersOfLine(c), 0);
+              if (Number.isFinite(m) && m > 0) {
+                lenById[id] = m;
+                totalM += m;
+              }
+            }
+            mvftTrenchLenByIdRef.current = lenById;
+            setMvftTrenchTotalMeters(totalM);
+            setTotalPlus(totalM);
+            setTotalMinus(0);
+          } catch (_e) {
+            void _e;
+            mvftTrenchLenByIdRef.current = {};
+            setMvftTrenchTotalMeters(0);
           }
         }
 
@@ -4311,6 +4447,26 @@ export default function BaseModule({
 
           // LVIB: tables (full.geojson) must NOT be selectable; only lv_box and inv_box are selectable
           if (isLVIB) {
+            const fullLayer = L.geoJSON(data, {
+              renderer: canvasRenderer,
+              interactive: false,
+              style: () => ({
+                color: 'rgba(255,255,255,0.35)',
+                weight: 1.05,
+                fill: false,
+                fillOpacity: 0,
+              }),
+            });
+            fullLayer.addTo(mapRef.current);
+            layersRef.current.push(fullLayer);
+            if (fullLayer.getBounds().isValid()) {
+              allBounds.extend(fullLayer.getBounds());
+            }
+            continue;
+          }
+
+          // MVFT: tables (full.geojson) must NOT be selectable; only mv_trench is selectable
+          if (isMVFT) {
             const fullLayer = L.geoJSON(data, {
               renderer: canvasRenderer,
               interactive: false,
@@ -4871,13 +5027,14 @@ export default function BaseModule({
         const invLabelMode = file.name === 'inv_id' && (isLV || isLVTT || activeMode?.invIdLabelMode);
         const invInteractive = (isLV || isLVTT) && file.name === 'inv_id';
         const mvfTrenchInteractive = isMVF && file.name === 'mv_trench';
+        const mvftTrenchInteractive = isMVFT && file.name === 'mv_trench';
         // MVT: we don't want table selection interactions in this mode.
         const disableInteractions = (isMVT || isLVTT) && (file.name === 'full' || file.name === 'subs');
         const layer = L.geoJSON(data, {
           renderer: canvasRenderer,
-          interactive: !disableInteractions && (invInteractive || mvfTrenchInteractive),
+          interactive: !disableInteractions && (invInteractive || mvfTrenchInteractive || mvftTrenchInteractive),
           
-          style: () => {
+          style: (feature) => {
             // LVIB mode: lv_box and inv_box with red color
             if (isLVIB && (file.name === 'lv_box' || file.name === 'inv_box')) {
               return {
@@ -4902,6 +5059,19 @@ export default function BaseModule({
               return {
                 color: 'rgba(255,255,255,0.85)',
                 weight: 1.25,
+                fill: false,
+                fillOpacity: 0,
+              };
+            }
+
+            // MVFT: base mv_trench stays white; selected portion is rendered via overlay parts.
+            if (mvftTrenchInteractive) {
+              return {
+                color: 'rgba(255,255,255,0.85)',
+                weight: 1.25,
+                opacity: 1.0,
+                lineJoin: 'round',
+                lineCap: 'round',
                 fill: false,
                 fillOpacity: 0,
               };
@@ -5141,6 +5311,21 @@ export default function BaseModule({
           },
           
           onEachFeature: (feature, featureLayer) => {
+            // MVFT: index mv_trench features for click-near selection + style updates
+            if (mvftTrenchInteractive && featureLayer) {
+              const fidRaw = feature?.properties?.fid ?? feature?.properties?.FID ?? feature?.properties?.id ?? feature?.id;
+              const id = fidRaw != null ? `mvft_trench_${String(fidRaw)}` : (() => {
+                try {
+                  const coords = feature?.geometry?.coordinates;
+                  const head = Array.isArray(coords) ? JSON.stringify(coords).slice(0, 160) : '';
+                  return `mvft_trench_geom_${head.length}_${head}`;
+                } catch {
+                  return 'mvft_trench_geom_unknown';
+                }
+              })();
+              mvftTrenchByIdRef.current[id] = featureLayer;
+            }
+
             // MVF: allow selecting mv_trench segments (click toggles green)
             if (mvfTrenchInteractive && featureLayer && typeof featureLayer.on === 'function') {
               const fidRaw = feature?.properties?.fid;
@@ -6156,6 +6341,146 @@ export default function BaseModule({
 
             // MVF segment selections are mapped into trench PARTs now,
             // so partial erase/select via box works automatically (no separate segment-route unselect needed).
+          } else if (isMVFT) {
+            // MVFT MODE: Box select ONLY mv_trench (partial meters inside the box)
+            const byId = mvftTrenchByIdRef.current || {};
+
+            if (isRightClick) {
+              // Partial erase: remove only the portion inside the box.
+              setMvftSelectedTrenchParts((prev) => {
+                const parts = prev || [];
+                if (parts.length === 0) return parts;
+
+                const groups = new Map(); // fid:lineIndex -> parts[]
+                parts.forEach((p) => {
+                  const fid = String(p?.fid || '');
+                  const lineIndex = Number(p?.lineIndex);
+                  if (!fid || !Number.isFinite(lineIndex) || !Number.isFinite(Number(p?.startM)) || !Number.isFinite(Number(p?.endM))) {
+                    const k = `__raw__:${Math.random()}`;
+                    groups.set(k, [p]);
+                    return;
+                  }
+                  const k = `${fid}:${lineIndex}`;
+                  if (!groups.has(k)) groups.set(k, []);
+                  groups.get(k).push(p);
+                });
+
+                const out = [];
+                for (const [k, arr] of groups.entries()) {
+                  if (k.startsWith('__raw__')) {
+                    out.push(...arr);
+                    continue;
+                  }
+                  const [fid, lineIndexStr] = k.split(':');
+                  const lineIndex = Number(lineIndexStr);
+                  const layer = byId[fid];
+                  if (!layer || typeof layer.getLatLngs !== 'function') {
+                    out.push(...arr);
+                    continue;
+                  }
+                  const lines = asLineStrings(layer.getLatLngs());
+                  const lineLL = lines[lineIndex];
+                  if (!lineLL || lineLL.length < 2) {
+                    out.push(...arr);
+                    continue;
+                  }
+
+                  const eraseIntervals = computeIntervalsInBox({ L, map, bounds, lineLatLngs: lineLL, minMeters: 0.5 });
+                  if (!eraseIntervals.length) {
+                    out.push(...arr);
+                    continue;
+                  }
+                  const eraseMerged = mergeIntervals(eraseIntervals);
+                  const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+
+                  arr.forEach((p) => {
+                    const startM = Number(p.startM);
+                    const endM = Number(p.endM);
+                    const lo = Math.min(startM, endM);
+                    const hi = Math.max(startM, endM);
+                    const remainIntervals = subtractInterval([lo, hi], eraseMerged, 0.2);
+                    remainIntervals.forEach(([a, b]) => {
+                      const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: a, endM: b });
+                      if (!coords || coords.length < 2) return;
+                      out.push({
+                        ...p,
+                        id: `mvft:${fid}:${lineIndex}:${a.toFixed(2)}-${b.toFixed(2)}`,
+                        fid,
+                        lineIndex,
+                        startM: a,
+                        endM: b,
+                        coords,
+                        meters: Math.max(0, b - a),
+                      });
+                    });
+                  });
+                }
+                return out;
+              });
+            } else {
+              // Add only the portion inside the box.
+              const toAdd = [];
+              const coveredIntervalsByKey = new Map(); // fid:lineIndex -> merged intervals
+              const addCovered = (p) => {
+                const fid = String(p?.fid || '');
+                const lineIndex = Number(p?.lineIndex);
+                const a = Number(p?.startM);
+                const b = Number(p?.endM);
+                if (!fid || !Number.isFinite(lineIndex) || !Number.isFinite(a) || !Number.isFinite(b)) return;
+                const lo = Math.min(a, b);
+                const hi = Math.max(a, b);
+                if (!(hi > lo)) return;
+                const key = `${fid}:${lineIndex}`;
+                if (!coveredIntervalsByKey.has(key)) coveredIntervalsByKey.set(key, []);
+                coveredIntervalsByKey.get(key).push([lo, hi]);
+              };
+              (mvftSelectedTrenchPartsRef.current || []).forEach(addCovered);
+              for (const [k, arr] of coveredIntervalsByKey.entries()) coveredIntervalsByKey.set(k, mergeIntervals(arr));
+
+              Object.keys(byId).forEach((fid) => {
+                const layer = byId[fid];
+                if (!layer || typeof layer.getBounds !== 'function' || typeof layer.getLatLngs !== 'function') return;
+                try {
+                  const lb = layer.getBounds();
+                  if (!lb || !bounds.intersects(lb)) return;
+                } catch (_e) {
+                  void _e;
+                  return;
+                }
+
+                const lines = asLineStrings(layer.getLatLngs());
+                lines.forEach((lineLL, lineIndex) => {
+                  if (!lineLL || lineLL.length < 2) return;
+                  const key = `${fid}:${lineIndex}`;
+                  let candidates = computeIntervalsInBox({ L, map, bounds, lineLatLngs: lineLL, minMeters: 0.5 });
+                  if (!candidates.length) return;
+
+                  let covered = coveredIntervalsByKey.get(key) || [];
+                  const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+                  candidates.forEach(([a, b]) => {
+                    const newInts = subtractInterval([a, b], covered, 0.2);
+                    if (!newInts.length) return;
+                    covered = mergeIntervals([...covered, ...newInts]);
+                    coveredIntervalsByKey.set(key, covered);
+                    newInts.forEach(([x, y]) => {
+                      const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: x, endM: y });
+                      if (!coords || coords.length < 2) return;
+                      toAdd.push({
+                        id: `mvft:${fid}:${lineIndex}:${x.toFixed(2)}-${y.toFixed(2)}`,
+                        fid: String(fid),
+                        lineIndex,
+                        startM: x,
+                        endM: y,
+                        coords,
+                        meters: Math.max(0, y - x),
+                      });
+                    });
+                  });
+                });
+              });
+
+              if (toAdd.length > 0) setMvftSelectedTrenchParts((prev) => [...(prev || []), ...toAdd]);
+            }
           } else if (isMC4) {
             // MC4 MODE: Box advance/reset panel-end states (both ends)
             const ids = [];
@@ -6587,6 +6912,10 @@ export default function BaseModule({
             setMvfActiveSegmentKeys(new Set());
           }
         }
+        // MVFT: right-click clears current trench selection
+        if (isMVFT) {
+          if ((mvftSelectedTrenchPartsRef.current?.length || 0) > 0) setMvftSelectedTrenchParts([]);
+        }
       } else if (!wasDrag && !isRightClick && noteMode) {
         // NOTE MODE: Create note on simple click (unless a marker click just happened)
         if (!markerClickedRef.current) {
@@ -6879,6 +7208,40 @@ export default function BaseModule({
               void _e;
             }
           }
+        } else if (isMVFT) {
+          // MVFT: Single click near a trench line toggles the WHOLE trench feature (green = completed)
+          const byId = mvftTrenchByIdRef.current || {};
+          let bestId = null;
+          let bestDist = Infinity;
+
+          Object.keys(byId).forEach((id) => {
+            const layer = byId[id];
+            if (!layer || typeof layer.getLatLngs !== 'function') return;
+            const lines = asLineStrings(layer.getLatLngs());
+            lines.forEach((lineLL) => {
+              if (!lineLL || lineLL.length < 2) return;
+              for (let i = 0; i < lineLL.length - 1; i++) {
+                const p1 = map.latLngToLayerPoint(lineLL[i]);
+                const p2 = map.latLngToLayerPoint(lineLL[i + 1]);
+                const dx = p2.x - p1.x;
+                const dy = p2.y - p1.y;
+                const len2 = dx * dx + dy * dy;
+                let t = 0;
+                if (len2 > 0) {
+                  t = Math.max(0, Math.min(1, ((clickPoint.x - p1.x) * dx + (clickPoint.y - p1.y) * dy) / len2));
+                }
+                const projX = p1.x + t * dx;
+                const projY = p1.y + t * dy;
+                const dist = Math.sqrt((clickPoint.x - projX) ** 2 + (clickPoint.y - projY) ** 2);
+                if (dist < clickTolerance && dist < bestDist) {
+                  bestDist = dist;
+                  bestId = id;
+                }
+              }
+            });
+          });
+
+          // MVFT: do not toggle on click (box selection only)
         } else if (isMVF) {
           // MVF: Single click near a trench line to select a small segment around the click point
           const byId = mvfTrenchByIdRef.current || {};
@@ -7085,7 +7448,7 @@ export default function BaseModule({
       container.removeEventListener('mouseup', onMouseUp);
     };
   // IMPORTANT: include isMC4 (and module key) so drag-selection behavior updates when switching modes.
-  }, [mapReady, activeMode?.key, isLV, isMVF, isMC4, isMVT, isLVTT, isDCCT, stringPoints, noteMode, notes]);
+  }, [mapReady, activeMode?.key, isLV, isMVF, isMVFT, isMC4, isMVT, isLVTT, isDCCT, stringPoints, noteMode, notes]);
 
   useEffect(() => {
     mapRef.current = L.map('map', {
@@ -7137,6 +7500,15 @@ export default function BaseModule({
     } catch (_e) {
       void _e;
       mvfTrenchCommittedLayerRef.current = null;
+    }
+
+    // MVFT: partial trench selection overlay layer
+    try {
+      if (mvftTrenchSelectedLayerRef.current) mvftTrenchSelectedLayerRef.current.remove();
+      mvftTrenchSelectedLayerRef.current = L.layerGroup().addTo(mapRef.current);
+    } catch (_e) {
+      void _e;
+      mvftTrenchSelectedLayerRef.current = null;
     }
 
     // Hide raster tiles for best performance + clean dark background
@@ -7384,6 +7756,10 @@ export default function BaseModule({
         return sum + m * mult;
       }, 0)
     : 0;
+
+  const mvftSelectedMeters = isMVFT
+    ? (mvftSelectedTrenchParts || []).reduce((sum, p) => sum + (Number(p?.meters) || 0), 0)
+    : 0;
   const mvfCommittedCableMeters = isMVF
     ? (mvfCommittedTrenchParts || []).reduce((sum, p) => {
         const segKey = String(p?.segmentKey || '');
@@ -7406,12 +7782,18 @@ export default function BaseModule({
   const tipCompletedTables = isTIP ? Math.floor(selectedPolygons.size / 2) : 0;
 
   // MVF Total must come from CSV (already represents 3 circuits); completed comes from selected trench meters * 3.
-  const overallTotal = isTIP ? tipTotal : (isMVF ? totalPlus : ((isLV || useSimpleCounters) ? totalPlus : (totalPlus + totalMinus)));
+  const overallTotal = isTIP
+    ? tipTotal
+    : (isMVFT
+      ? mvftTrenchTotalMeters
+      : (isMVF ? totalPlus : ((isLV || useSimpleCounters) ? totalPlus : (totalPlus + totalMinus))));
   const completedTotal = isTIP
     ? tipCompletedTables
-    : (isLV
-      ? lvCompletedLength
-      : (isMVF ? (mvfSelectedCableMeters + mvfCommittedCableMeters + mvfDoneCableMeters) : (completedPlus + completedMinus)));
+    : (isMVFT
+      ? mvftSelectedMeters
+      : (isLV
+        ? lvCompletedLength
+        : (isMVF ? (mvfSelectedCableMeters + mvfCommittedCableMeters + mvfDoneCableMeters) : (completedPlus + completedMinus))));
   const completedPct = overallTotal > 0 ? (completedTotal / overallTotal) * 100 : 0;
   const remainingPlus = Math.max(0, totalPlus - completedPlus);
   const remainingMinus = Math.max(0, totalMinus - completedMinus);
@@ -7495,21 +7877,23 @@ export default function BaseModule({
     ? lvCompletedInvIds.size
     : (isLVIB
       ? lvibActiveSelectedCount
-      : (isMVF
-        ? (mvfSelectedTrenchParts?.length || 0)
-        : (isMC4
-          ? Object.keys(mc4PanelStates || {}).length
-          : (activeMode?.workUnitWeights
-            ? (() => {
-                const seen = new Set();
-                (selectedPolygons || new Set()).forEach((pid) => {
-                  const info = polygonById.current?.[pid];
-                  const key = String(info?.dedupeKey || pid);
-                  seen.add(key);
-                });
-                return seen.size;
-              })()
-            : selectedPolygons.size))));
+      : (isMVFT
+        ? (mvftSelectedTrenchParts?.length || 0)
+        : (isMVF
+          ? (mvfSelectedTrenchParts?.length || 0)
+          : (isMC4
+            ? Object.keys(mc4PanelStates || {}).length
+            : (activeMode?.workUnitWeights
+              ? (() => {
+                  const seen = new Set();
+                  (selectedPolygons || new Set()).forEach((pid) => {
+                    const info = polygonById.current?.[pid];
+                    const key = String(info?.dedupeKey || pid);
+                    seen.add(key);
+                  });
+                  return seen.size;
+                })()
+              : selectedPolygons.size)))));
   const mvtCompletedForSubmit = isMVT
     ? Math.max(0, Object.values(mvtTerminationByStation || {}).reduce((s, v) => s + Math.max(0, Math.min(3, Number(v) || 0)), 0))
     : 0;
@@ -7522,9 +7906,11 @@ export default function BaseModule({
   const lvttWorkUnit = lvttCompletedForSubmit === 1 ? 'cable terminated' : 'cables terminated';
   const workAmount = isMVF 
     ? mvfSelectedCableMeters 
-    : (isMC4 
-      ? (mc4Counts?.mc4Completed || 0) 
-      : completedTotal); // MVF: pending selected cable meters (scaled), MC4: completed ends count
+    : (isMVFT
+      ? mvftSelectedMeters
+      : (isMC4 
+        ? (mc4Counts?.mc4Completed || 0) 
+        : completedTotal)); // MVF: pending selected cable meters (scaled), MVFT: selected trench meters, MC4: completed ends count
 
   const [dwgUrl, setDwgUrl] = useState('');
   useEffect(() => {
@@ -9295,6 +9681,9 @@ export default function BaseModule({
             const modeNow = String(lvibSubModeRef.current || 'lvBox');
             if (modeNow === 'invBox') setLvibSelectedInvBoxes(new Set());
             else setLvibSelectedLvBoxes(new Set());
+          }
+          if (isMVFT) {
+            setMvftSelectedTrenchParts([]);
           }
           addRecord({ ...record, notes: notesOnDate });
           alert('Work submitted successfully!');

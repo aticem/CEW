@@ -105,6 +105,39 @@ export const MV_FIBER_MODULE_CONFIG = {
   ],
 };
 
+export const MV_FIBRE_TRENCH_PROGRESS_TRACKING_CONFIG = {
+  key: 'MVFT',
+  label: 'MV+FIBRE_TRENCH_PROGRESS_TRACKING',
+  // Files live in: public/MV+FIBRE_TRENCH_PROGRESS_TRACKING/
+  // This scaffold is GeoJSON-only by default (no CSV required).
+  csvFormat: null,
+  csvPath: null,
+  linkPath: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/link',
+  simpleCounters: true,
+  simpleCounterUnit: 'm',
+  submitWorkUnit: 'm excavated',
+  // Render subs_text through shared string_text pipeline (toggle + perf)
+  stringTextVisibility: 'always',
+  stringTextToggle: true,
+  stringTextDefaultOn: true,
+  // Keep labels readable
+  stringTextColor: 'rgba(250,204,21,0.98)',
+  stringTextBaseSize: 22,
+  stringTextStyle: '400',
+  stringTextStrokeColor: 'rgba(0,0,0,0.85)',
+  stringTextStrokeWidthFactor: 1.2,
+  stringTextMinZoom: 0,
+  stringTextMinFontSize: 14,
+  stringTextMaxFontSize: 26,
+  stringTextRefZoom: 20,
+  geojsonFiles: [
+    { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
+    { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/mv_trench.geojson', name: 'mv_trench', color: '#eab308', fillColor: '#facc15' },
+    { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/subs.geojson', name: 'subs', color: '#94a3b8', fillColor: '#94a3b8' },
+    { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/subs_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
+  ],
+};
+
 export const FIBRE_MODULE_CONFIG = {
   key: 'FIB',
   label: 'FIBRE PULLING PROGRESS TRACKING',

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import DCModule from './modules/DCModule.jsx';
 import LVModule from './modules/LVModule.jsx';
 import MVFiberModule from './modules/MVFiberModule.jsx';
+import MVFiberTrenchProgressTrackingModule from './modules/MVFiberTrenchProgressTrackingModule.jsx';
 import FibreModule from './modules/FibreModule.jsx';
 import MC4Module from './modules/MC4Module.jsx';
 import MVTerminationModule from './modules/MVTerminationModule.jsx';
@@ -15,6 +16,7 @@ const MODULES = {
   DC: { key: 'DC', label: 'DC CABLE PULLING PROGRESS', Component: DCModule },
   LV: { key: 'LV', label: 'LV CABLE PULLING PROGRESS', Component: LVModule },
   MVF: { key: 'MVF', label: 'MV+FIBER PULLING PROGRESS', Component: MVFiberModule },
+  MVFT: { key: 'MVFT', label: 'MV+FIBRE_TRENCH_PROGRESS_TRACKING', Component: MVFiberTrenchProgressTrackingModule },
   FIB: { key: 'FIB', label: 'FIBRE PULLING PROGRESS', Component: FibreModule },
   MC4: { key: 'MC4', label: 'MC4 INSTALLATION', Component: MC4Module },
   MVT: { key: 'MVT', label: 'MV TERMINATION PROGRESS', Component: MVTerminationModule },
