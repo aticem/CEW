@@ -4783,30 +4783,19 @@ export default function BaseModule({
             allBounds.extend(boxLayer.getBounds());
           }
           
-          // Add LV/INV text labels inside boxes using the SAME rendering system/options as inv_id labels.
-          // This ensures identical zoom scaling, stroke, and optional background plate behavior.
+          // Add LV/INV text labels inside boxes using smaller, lighter styling
+          // so they fit inside the boxes without overflowing.
           const boxLabel = boxType === 'lvBox' ? 'LV' : 'INV';
-          const invScale = typeof activeMode?.invIdTextScale === 'number' ? activeMode.invIdTextScale : 1;
-          const invBase = typeof activeMode?.invIdTextBaseSize === 'number' ? activeMode.invIdTextBaseSize : 19;
-          const invRefZoom = typeof activeMode?.invIdTextRefZoom === 'number' ? activeMode.invIdTextRefZoom : 20;
-          const invTextStyle = activeMode?.invIdTextStyle || '600';
-          const invMinFs = typeof activeMode?.invIdTextMinFontSize === 'number' ? activeMode.invIdTextMinFontSize : null;
-          const invMaxFs = typeof activeMode?.invIdTextMaxFontSize === 'number' ? activeMode.invIdTextMaxFontSize : null;
-          const invStrokeColor = activeMode?.invIdTextStrokeColor || 'rgba(0,0,0,0.88)';
-          const invStrokeWidthFactor =
-            typeof activeMode?.invIdTextStrokeWidthFactor === 'number' ? activeMode.invIdTextStrokeWidthFactor : 1.45;
-          const invBgColor = activeMode?.invIdTextBgColor || null;
-          const invBgPaddingX = typeof activeMode?.invIdTextBgPaddingX === 'number' ? activeMode.invIdTextBgPaddingX : 0;
-          const invBgPaddingY = typeof activeMode?.invIdTextBgPaddingY === 'number' ? activeMode.invIdTextBgPaddingY : 0;
-          const invBgStrokeColor = activeMode?.invIdTextBgStrokeColor || null;
-          const invBgStrokeWidth = typeof activeMode?.invIdTextBgStrokeWidth === 'number' ? activeMode.invIdTextBgStrokeWidth : 0;
-          const invBgCornerRadius =
-            typeof activeMode?.invIdTextBgCornerRadius === 'number' ? activeMode.invIdTextBgCornerRadius : 0;
-          const invMinTextZoom = typeof activeMode?.invIdTextMinTextZoom === 'number' ? activeMode.invIdTextMinTextZoom : null;
-          const invMinBgZoom = typeof activeMode?.invIdTextMinBgZoom === 'number' ? activeMode.invIdTextMinBgZoom : null;
+          // Use dedicated box label config (smaller than inv_id labels)
+          const boxBaseSize = typeof activeMode?.boxLabelTextBaseSize === 'number' ? activeMode.boxLabelTextBaseSize : 6;
+          const boxRefZoom = typeof activeMode?.boxLabelTextRefZoom === 'number' ? activeMode.boxLabelTextRefZoom : 20;
+          const boxTextStyle = activeMode?.boxLabelTextStyle || '400';
+          const boxMinFs = typeof activeMode?.boxLabelTextMinFontSize === 'number' ? activeMode.boxLabelTextMinFontSize : 4;
+          const boxMaxFs = typeof activeMode?.boxLabelTextMaxFontSize === 'number' ? activeMode.boxLabelTextMaxFontSize : 10;
+          const boxStrokeColor = activeMode?.boxLabelTextStrokeColor || 'rgba(0,0,0,0.7)';
+          const boxStrokeWidthFactor =
+            typeof activeMode?.boxLabelTextStrokeWidthFactor === 'number' ? activeMode.boxLabelTextStrokeWidthFactor : 0.8;
 
-          const baseSize = invBase * invScale;
-          const radius = 22 * invScale;
           const features = data.features || [];
           features.forEach((feature) => {
             if (!feature.geometry) return;
@@ -4827,30 +4816,32 @@ export default function BaseModule({
                 sumLng += lng;
               });
               center = [sumLat / coords.length, sumLng / coords.length];
+            } else if (feature.geometry.type === 'LineString' && feature.geometry.coordinates?.length > 0) {
+              // LineString boxes: compute center from all coordinates
+              const coords = feature.geometry.coordinates;
+              let sumLat = 0, sumLng = 0;
+              coords.forEach(([lng, lat]) => {
+                sumLat += lat;
+                sumLng += lng;
+              });
+              center = [sumLat / coords.length, sumLng / coords.length];
             }
             if (!center) return;
 
             const textMarker = L.textLabel(center, {
               text: boxLabel,
               renderer: canvasRenderer,
-              textBaseSize: baseSize,
-              refZoom: invRefZoom,
-              textStyle: invTextStyle,
-              textColor: 'rgba(255,255,255,0.98)',
-              textStrokeColor: invStrokeColor,
-              textStrokeWidthFactor: invStrokeWidthFactor,
-              minFontSize: invMinFs,
-              maxFontSize: invMaxFs,
-              bgColor: invBgColor,
-              bgPaddingX: invBgPaddingX,
-              bgPaddingY: invBgPaddingY,
-              bgStrokeColor: invBgStrokeColor,
-              bgStrokeWidth: invBgStrokeWidth,
-              bgCornerRadius: invBgCornerRadius,
-              minTextZoom: invMinTextZoom,
-              minBgZoom: invMinBgZoom,
+              textBaseSize: boxBaseSize,
+              refZoom: boxRefZoom,
+              textStyle: boxTextStyle,
+              textColor: 'rgba(255,255,255,0.95)',
+              textStrokeColor: boxStrokeColor,
+              textStrokeWidthFactor: boxStrokeWidthFactor,
+              minFontSize: boxMinFs,
+              maxFontSize: boxMaxFs,
+              bgColor: null,
               interactive: false,
-              radius,
+              radius: 0,
             });
             textMarker.addTo(mapRef.current);
             layersRef.current.push(textMarker);
