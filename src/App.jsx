@@ -9,6 +9,7 @@ import LVTerminationTestingModule from './modules/LVTerminationTestingModule.jsx
 import DCCableTestingProgressModule from './modules/DCCableTestingProgressModule.jsx';
 import ModuleInstallationProgressTrackingModule from './modules/ModuleInstallationProgressTrackingModule.jsx';
 import TableInstallationProgressModule from './modules/TableInstallationProgressModule.jsx';
+import LVBoxInvBoxModule from './modules/LVBoxInvBoxModule.jsx';
 
 const MODULES = {
   DC: { key: 'DC', label: 'DC CABLE PULLING PROGRESS', Component: DCModule },
@@ -21,6 +22,7 @@ const MODULES = {
   DCCT: { key: 'DCCT', label: 'DC_CABLE_TESTING_PROGRESS', Component: DCCableTestingProgressModule },
   MIPT: { key: 'MIPT', label: 'MODULE_INSTALLATION_PROGRES_TRACKING', Component: ModuleInstallationProgressTrackingModule },
   TIP: { key: 'TIP', label: 'TABLE_INSTALLATION_PROGRESS', Component: TableInstallationProgressModule },
+  LVIB: { key: 'LVIB', label: 'LV_BOX_INV_BOX_INSTALLATION', Component: LVBoxInvBoxModule },
 };
 
 export default function App() {

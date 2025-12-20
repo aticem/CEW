@@ -406,3 +406,52 @@ export const TABLE_INSTALLATION_PROGRESS_MODULE_CONFIG = {
     },
   ],
 };
+
+export const LV_BOX_INV_BOX_INSTALLATION_PROGRESS_CONFIG = {
+  key: 'LVIB',
+  label: 'LV BOX & INV BOX INSTALLATION PROGRESS TRACKING',
+  // Files live in: public/LV_BOX_INV_BOX_INSTALLATION_PROGRESS_TRACKING/
+  csvFormat: null,
+  csvPath: null,
+  linkPath: '/LV_BOX_INV_BOX_INSTALLATION_PROGRESS_TRACKING/link',
+  simpleCounters: true,
+  simpleCounterUnit: '', // No unit
+  // Box labels for LV and INV boxes
+  boxLabelsEnabled: true,
+  lvBoxLabel: 'LV',
+  invBoxLabel: 'INV',
+  stringTextVisibility: 'always',
+  stringTextToggle: true,
+  stringTextDefaultOn: true,
+  stringTextColor: 'rgba(250,204,21,0.98)',
+  stringTextBaseSize: 22,
+  stringTextStyle: '400',
+  stringTextStrokeColor: 'rgba(0,0,0,0.85)',
+  stringTextStrokeWidthFactor: 1.2,
+  stringTextMinZoom: 0,
+  stringTextMinFontSize: 14,
+  stringTextMaxFontSize: 26,
+  stringTextRefZoom: 20,
+  geojsonFiles: [
+    { url: '/LV_BOX_INV_BOX_INSTALLATION_PROGRESS_TRACKING/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
+    { url: '/LV_BOX_INV_BOX_INSTALLATION_PROGRESS_TRACKING/inv_id.geojson', name: 'inv_id', color: '#16a34a', fillColor: '#22c55e' },
+    {
+      url: '/LV_BOX_INV_BOX_INSTALLATION_PROGRESS_TRACKING/lv_box.geojson',
+      name: 'lv_box',
+      color: '#dc2626',
+      fillColor: '#ef4444',
+      weight: 3,
+      fillOpacity: 0.6,
+      boxLabel: 'LV',
+    },
+    {
+      url: '/LV_BOX_INV_BOX_INSTALLATION_PROGRESS_TRACKING/inv_box.geojson',
+      name: 'inv_box',
+      color: '#dc2626',
+      fillColor: '#ef4444',
+      weight: 3,
+      fillOpacity: 0.6,
+      boxLabel: 'INV',
+    },
+  ],
+};

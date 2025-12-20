@@ -325,6 +325,8 @@ export default function BaseModule({
   }, [isDCCT]);
   // TABLE_INSTALLATION_PROGRESS mode
   const isTIP = String(activeMode?.key || '').toUpperCase() === 'TIP' || Boolean(activeMode?.tableCounters);
+  // LV_BOX_INV_BOX_INSTALLATION mode
+  const isLVIB = String(activeMode?.key || '').toUpperCase() === 'LVIB' || Boolean(activeMode?.boxLabelsEnabled);
   const mvfCircuitsMultiplier =
     typeof activeMode?.circuitsMultiplier === 'number' && Number.isFinite(activeMode.circuitsMultiplier)
       ? activeMode.circuitsMultiplier
@@ -918,6 +920,38 @@ export default function BaseModule({
   const [tableBigCount, setTableBigCount] = useState(0);     // 2V27 büyük masalar
   // Panel eşleştirme: polygonId -> partnerId (üst üste duran paneller)
   const tipPanelPairsRef = useRef(new Map()); // Map<polygonId, partnerPolygonId>
+  // LVIB: Box label data for rendering LV/INV text inside boxes
+  const lvibBoxLabelsRef = useRef([]); // [{center: [lat, lng], label: 'LV'|'INV'}, ...]
+  // LVIB: Sub-mode state (which box type is currently selectable)
+  const [lvibSubMode, setLvibSubMode] = useState('lvBox'); // 'lvBox' | 'invBox'
+  const lvibSubModeRef = useRef(lvibSubMode);
+  useEffect(() => { lvibSubModeRef.current = lvibSubMode; }, [lvibSubMode]);
+  // LVIB: Selected box IDs for each type
+  const [lvibSelectedLvBoxes, setLvibSelectedLvBoxes] = useState(new Set());
+  const [lvibSelectedInvBoxes, setLvibSelectedInvBoxes] = useState(new Set());
+  const lvibSelectedLvBoxesRef = useRef(lvibSelectedLvBoxes);
+  const lvibSelectedInvBoxesRef = useRef(lvibSelectedInvBoxes);
+  useEffect(() => { lvibSelectedLvBoxesRef.current = lvibSelectedLvBoxes; }, [lvibSelectedLvBoxes]);
+  useEffect(() => { lvibSelectedInvBoxesRef.current = lvibSelectedInvBoxes; }, [lvibSelectedInvBoxes]);
+
+  // LVIB: repaint box layers when selections change so selected boxes turn green.
+  useEffect(() => {
+    if (!isLVIB) return;
+    try {
+      if (lvibLvBoxLayerRef.current) lvibLvBoxLayerRef.current.setStyle(lvibLvBoxLayerRef.current.options.style);
+      if (lvibInvBoxLayerRef.current) lvibInvBoxLayerRef.current.setStyle(lvibInvBoxLayerRef.current.options.style);
+    } catch (_e) {
+      void _e;
+    }
+  }, [isLVIB, lvibSelectedLvBoxes, lvibSelectedInvBoxes]);
+  // LVIB: Total box counts from geojson (feature count)
+  const [lvibLvBoxTotal, setLvibLvBoxTotal] = useState(0);
+  const [lvibInvBoxTotal, setLvibInvBoxTotal] = useState(0);
+  // LVIB: Layer references for styling updates
+  const lvibLvBoxLayerRef = useRef(null);
+  const lvibInvBoxLayerRef = useRef(null);
+  // LVIB: polygonId -> boxType mapping
+  const lvibBoxTypeRef = useRef(new Map()); // Map<polygonId, 'lvBox'|'invBox'>
   
   const [totalPlus, setTotalPlus] = useState(0); // Total +DC Cable from CSV
   const [totalMinus, setTotalMinus] = useState(0); // Total -DC Cable from CSV
@@ -4263,6 +4297,26 @@ export default function BaseModule({
             continue;
           }
 
+          // LVIB: tables (full.geojson) must NOT be selectable; only lv_box and inv_box are selectable
+          if (isLVIB) {
+            const fullLayer = L.geoJSON(data, {
+              renderer: canvasRenderer,
+              interactive: false,
+              style: () => ({
+                color: 'rgba(255,255,255,0.35)',
+                weight: 1.05,
+                fill: false,
+                fillOpacity: 0,
+              }),
+            });
+            fullLayer.addTo(mapRef.current);
+            layersRef.current.push(fullLayer);
+            if (fullLayer.getBounds().isValid()) {
+              allBounds.extend(fullLayer.getBounds());
+            }
+            continue;
+          }
+
           // TIP: Track feature index for panel pairing
           let tipFeatureIndex = 0;
           const tipFeatureToPolygonId = new Map(); // featureIndex -> polygonId
@@ -4608,6 +4662,168 @@ export default function BaseModule({
           continue;
         }
 
+        // LVIB: Special handling for lv_box and inv_box (clickable, selectable)
+        if (isLVIB && (file.name === 'lv_box' || file.name === 'inv_box')) {
+          const boxType = file.name === 'lv_box' ? 'lvBox' : 'invBox';
+          const featureCount = data.features?.length || 0;
+          
+          // Set total counts
+          if (boxType === 'lvBox') {
+            setLvibLvBoxTotal(featureCount);
+          } else {
+            setLvibInvBoxTotal(featureCount);
+          }
+          
+          const boxLayer = L.geoJSON(data, {
+            renderer: canvasRenderer,
+            interactive: true,
+            style: (feature) => {
+              // LVIB: IDs must be stable. These files include properties.fid.
+              const fid = feature?.properties?.fid ?? feature?.properties?.FID ?? feature?.properties?.id ?? feature?.id;
+              const polygonId = `${boxType}_${String(fid)}`;
+              const selectedSet = boxType === 'lvBox' ? lvibSelectedLvBoxesRef.current : lvibSelectedInvBoxesRef.current;
+              const isSelected = selectedSet.has(polygonId);
+              
+              if (isSelected) {
+                return {
+                  color: '#16a34a',
+                  weight: 3.2,
+                  fill: true,
+                  fillColor: '#22c55e',
+                  fillOpacity: 0.5
+                };
+              }
+              return {
+                color: '#dc2626',
+                weight: 3.2,
+                fill: true,
+                fillColor: '#ef4444',
+                fillOpacity: 0.3
+              };
+            },
+            onEachFeature: (feature, featureLayer) => {
+              // LVIB: IDs must be stable and match the style() path.
+              // Prefer CAD-exported feature.properties.fid.
+              const fidRaw = feature?.properties?.fid ?? feature?.properties?.FID ?? feature?.properties?.id ?? feature?.id;
+              // If fid is missing, derive a deterministic fallback from geometry.
+              // (Still stable within a session and avoids the “1 click = 4 count” bug from random IDs.)
+              const fid =
+                fidRaw != null
+                  ? String(fidRaw)
+                  : (() => {
+                      try {
+                        const g = feature?.geometry;
+                        const coords = g?.coordinates;
+                        const head = Array.isArray(coords) ? JSON.stringify(coords).slice(0, 160) : '';
+                        return `geom_${head.length}_${head}`;
+                      } catch {
+                        return 'geom_unknown';
+                      }
+                    })();
+              const polygonId = `${boxType}_${fid}`;
+              
+              // Store box type mapping
+              lvibBoxTypeRef.current.set(polygonId, boxType);
+              
+              // Store in polygonById for selection box support
+              polygonById.current[polygonId] = {
+                layer: featureLayer,
+                boxType: boxType,
+                polygonId: polygonId
+              };
+              
+              featureLayer.on('click', (e) => {
+                try {
+                  if (e?.originalEvent) {
+                    L.DomEvent.stopPropagation(e.originalEvent);
+                    L.DomEvent.preventDefault(e.originalEvent);
+                  }
+                } catch (_e) { void _e; }
+                
+                // Only allow selection if this box type matches current sub-mode
+                const currentSubMode = lvibSubModeRef.current;
+                if (currentSubMode !== boxType) return;
+                
+                const isRightClick = e?.originalEvent?.button === 2;
+                const setSelected = boxType === 'lvBox' ? setLvibSelectedLvBoxes : setLvibSelectedInvBoxes;
+                
+                setSelected(prev => {
+                  const next = new Set(prev);
+                  if (isRightClick) {
+                    next.delete(polygonId);
+                  } else {
+                    if (next.has(polygonId)) {
+                      next.delete(polygonId);
+                    } else {
+                      next.add(polygonId);
+                    }
+                  }
+                  return next;
+                });
+                
+                // Update style
+                boxLayer.resetStyle(featureLayer);
+              });
+            }
+          });
+          
+          // Store layer reference for style updates
+          if (boxType === 'lvBox') {
+            lvibLvBoxLayerRef.current = boxLayer;
+          } else {
+            lvibInvBoxLayerRef.current = boxLayer;
+          }
+          
+          boxLayer.addTo(mapRef.current);
+          layersRef.current.push(boxLayer);
+          
+          if (boxLayer.getBounds().isValid()) {
+            allBounds.extend(boxLayer.getBounds());
+          }
+          
+          // Add text labels inside boxes
+          const boxLabel = boxType === 'lvBox' ? 'LV' : 'INV';
+          const features = data.features || [];
+          features.forEach((feature) => {
+            if (!feature.geometry) return;
+            let center = null;
+            if (feature.geometry.type === 'Polygon' && feature.geometry.coordinates?.[0]) {
+              const coords = feature.geometry.coordinates[0];
+              let sumLat = 0, sumLng = 0;
+              coords.forEach(([lng, lat]) => {
+                sumLat += lat;
+                sumLng += lng;
+              });
+              center = [sumLat / coords.length, sumLng / coords.length];
+            } else if (feature.geometry.type === 'MultiPolygon' && feature.geometry.coordinates?.[0]?.[0]) {
+              const coords = feature.geometry.coordinates[0][0];
+              let sumLat = 0, sumLng = 0;
+              coords.forEach(([lng, lat]) => {
+                sumLat += lat;
+                sumLng += lng;
+              });
+              center = [sumLat / coords.length, sumLng / coords.length];
+            }
+            if (center) {
+              const textMarker = L.textLabel(center, {
+                text: boxLabel,
+                renderer: canvasRenderer,
+                textBaseSize: 14,
+                refZoom: 20,
+                textStyle: '700',
+                // LVIB: match other in-map labels (no orange).
+                textColor: 'rgba(255,255,255,0.98)',
+                strokeColor: 'rgba(0,0,0,0.9)',
+                strokeWidthFactor: 1.5,
+              });
+              textMarker.addTo(mapRef.current);
+              layersRef.current.push(textMarker);
+            }
+          });
+          
+          continue;
+        }
+
         // Standard processing for other GeoJSON files
         // LV: inv_id labels are clickable (daily completion). Other modules can opt into LV-style label appearance.
         const invLabelMode = file.name === 'inv_id' && (isLV || isLVTT || activeMode?.invIdLabelMode);
@@ -4620,6 +4836,16 @@ export default function BaseModule({
           interactive: !disableInteractions && (invInteractive || mvfTrenchInteractive),
           
           style: () => {
+            // LVIB mode: lv_box and inv_box with red color
+            if (isLVIB && (file.name === 'lv_box' || file.name === 'inv_box')) {
+              return {
+                color: '#dc2626',
+                weight: 3.2,
+                fill: true,
+                fillColor: '#ef4444',
+                fillOpacity: 0.3
+              };
+            }
             // Restore the "dim white" look for all layers, with a stronger LV box outline.
             if (file.name === 'lv_box') {
               return {
@@ -6223,8 +6449,39 @@ export default function BaseModule({
             }
             if (!polygonBounds || !bounds.intersects(polygonBounds)) return;
             if (useStrictIntersection && !layerIntersectsSelection(layer)) return;
+
+            // LVIB: Selection box must ONLY select the currently active box type.
+            // Do not allow selecting other polygons/tables.
+            if (isLVIB) {
+              const currentSubMode = lvibSubModeRef.current;
+              if (polygonInfo?.boxType !== currentSubMode) return;
+            }
+
             directlySelectedIds.push(polygonId);
           });
+          
+          // LVIB: Update lvibSelectedLvBoxes or lvibSelectedInvBoxes instead of selectedPolygons
+          if (isLVIB && directlySelectedIds.length > 0) {
+            const currentSubMode = lvibSubModeRef.current;
+            const setSelected = currentSubMode === 'lvBox' ? setLvibSelectedLvBoxes : setLvibSelectedInvBoxes;
+            const uniqueIds = Array.from(new Set(directlySelectedIds));
+            setSelected(prev => {
+              const next = new Set(prev);
+              if (isRightClick) {
+                uniqueIds.forEach(id => next.delete(id));
+              } else {
+                uniqueIds.forEach(id => next.add(id));
+              }
+              return next;
+            });
+          }
+
+          // LVIB: Skip normal polygon selection for selectedPolygons.
+          // IMPORTANT: do not return early here; onMouseUp must always reach the shared
+          // cleanup so the selection box closes (same pattern as LV/MC4 special logic).
+          if (isLVIB) {
+            // no-op
+          } else {
           
           const finalSelectedIds = new Set();
           directlySelectedIds.forEach(polygonId => {
@@ -6265,6 +6522,7 @@ export default function BaseModule({
               if (isTIP) console.log('[TIP Selection Box] prev.size:', prev.size, 'next.size:', next.size, 'finalSelectedIds.size:', finalSelectedIds.size);
               return next;
             });
+          }
           }
           }
         }
@@ -6507,6 +6765,77 @@ export default function BaseModule({
               }
               return next;
             });
+          }
+        } else if (isLVIB) {
+          // LVIB: Single click fallback selection (ensure click works in both modes)
+          // We only allow toggling boxes that match the current sub-mode.
+          const currentSubMode = lvibSubModeRef.current;
+          const byId = polygonById.current || {};
+
+          const isPointInPoly = (pt, poly) => {
+            let inside = false;
+            for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+              const xi = poly[i].x, yi = poly[i].y;
+              const xj = poly[j].x, yj = poly[j].y;
+              const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+                (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi + 1e-12) + xi);
+              if (intersect) inside = !inside;
+            }
+            return inside;
+          };
+
+          const latLngsToLayerPoints = (layer) => {
+            if (!map || !layer || typeof layer.getLatLngs !== 'function') return null;
+            let ll = layer.getLatLngs();
+            const rings = [];
+            const walk = (node) => {
+              if (!Array.isArray(node) || node.length === 0) return;
+              if (node[0] && typeof node[0].lat === 'number' && typeof node[0].lng === 'number') {
+                rings.push(node);
+                return;
+              }
+              node.forEach(walk);
+            };
+            walk(ll);
+            if (!rings.length) return null;
+            const ring = rings[0];
+            const pts = ring.map((p) => map.latLngToLayerPoint(p)).filter(Boolean);
+            if (pts.length < 3) return null;
+            const a = pts[0];
+            const z = pts[pts.length - 1];
+            if (a && z && a.x === z.x && a.y === z.y) pts.pop();
+            return pts;
+          };
+
+          let clickedId = null;
+          Object.keys(byId).forEach((pid) => {
+            if (clickedId) return;
+            const info = byId[pid];
+            if (!info?.layer) return;
+            if (info?.boxType !== currentSubMode) return;
+            const poly = latLngsToLayerPoints(info.layer);
+            if (poly && isPointInPoly(clickPoint, poly)) clickedId = pid;
+          });
+
+          if (clickedId) {
+            const setSelected = currentSubMode === 'lvBox' ? setLvibSelectedLvBoxes : setLvibSelectedInvBoxes;
+            setSelected((prev) => {
+              const next = new Set(prev);
+              if (isRightClick) next.delete(clickedId);
+              else if (next.has(clickedId)) next.delete(clickedId);
+              else next.add(clickedId);
+              return next;
+            });
+
+            // Ensure the rendered layer updates to green/red immediately.
+            const layerRef = currentSubMode === 'lvBox' ? lvibLvBoxLayerRef : lvibInvBoxLayerRef;
+            try {
+              if (layerRef.current && byId[clickedId]?.layer) {
+                layerRef.current.resetStyle(byId[clickedId].layer);
+              }
+            } catch (_e) {
+              void _e;
+            }
           }
         } else if (isMVF) {
           // MVF: Single click near a trench line to select a small segment around the click point
@@ -6864,6 +7193,21 @@ export default function BaseModule({
     if (!mapRef.current) return;
     fetchAllGeoJson();
   }, [activeMode]);
+
+  // LVIB: Update box styles when selection changes
+  useEffect(() => {
+    if (!isLVIB) return;
+    if (lvibLvBoxLayerRef.current) {
+      lvibLvBoxLayerRef.current.eachLayer((layer) => {
+        lvibLvBoxLayerRef.current.resetStyle(layer);
+      });
+    }
+    if (lvibInvBoxLayerRef.current) {
+      lvibInvBoxLayerRef.current.eachLayer((layer) => {
+        lvibInvBoxLayerRef.current.resetStyle(layer);
+      });
+    }
+  }, [isLVIB, lvibSelectedLvBoxes, lvibSelectedInvBoxes]);
 
   // If a module wants string_text on hover/cursor, control label visibility by map pointer state.
   useEffect(() => {
@@ -7564,11 +7908,123 @@ export default function BaseModule({
             effectiveCustomCounters ? (
               effectiveCustomCounters
             ) : (
-              <div className="flex min-w-0 items-center gap-3 overflow-x-auto pb-1 justify-self-start">
+              <div className={`flex min-w-0 gap-3 overflow-x-auto pb-1 justify-self-start ${isLVIB ? 'flex-col items-start gap-1' : 'items-center'}`}>
                 {useSimpleCounters ? (
                   <>
-                    {/* TABLE_INSTALLATION: 2V14/2V27 card + Total/Completed/Remaining group */}
-                    {isTIP ? (
+                    {/* LVIB: LV Box / INV Box counters with checkbox toggle (MC4 style) */}
+                    {isLVIB ? (
+                      <div className="flex flex-col gap-2">
+                        {(() => {
+                          // Match DC cable pulling counters typography + spacing
+                          // - smaller padding
+                          // - same label/value fonts
+                          // Also reduce label-to-counters gap by shrinking label column and gap-x.
+                          const ROW = 'grid grid-cols-[24px_140px_repeat(3,max-content)] items-center gap-x-2 gap-y-2 cursor-pointer';
+
+                          const lvDone = lvibSelectedLvBoxes.size;
+                          const lvPct = lvibLvBoxTotal > 0 ? ((lvDone / lvibLvBoxTotal) * 100).toFixed(1) : '0.0';
+                          const lvRem = Math.max(0, lvibLvBoxTotal - lvDone);
+
+                          const invDone = lvibSelectedInvBoxes.size;
+                          const invPct = lvibInvBoxTotal > 0 ? ((invDone / lvibInvBoxTotal) * 100).toFixed(1) : '0.0';
+                          const invRem = Math.max(0, lvibInvBoxTotal - invDone);
+
+                          const checkboxBase = 'w-5 h-5 border-2 rounded flex items-center justify-center transition-colors';
+
+                          return (
+                            <>
+                              {/* LV Box row */}
+                              <div
+                                className={ROW}
+                                onClick={() => {
+                                  if (lvibSubMode !== 'lvBox') setLvibSubMode('lvBox');
+                                }}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (lvibSubMode !== 'lvBox') setLvibSubMode('lvBox');
+                                  }}
+                                  className={`${checkboxBase} ${
+                                    lvibSubMode === 'lvBox'
+                                        ? 'border-slate-200 bg-slate-200 text-slate-900'
+                                        : 'border-slate-500 bg-slate-800 hover:border-slate-200'
+                                  }`}
+                                  title="Select LV Box"
+                                  aria-pressed={lvibSubMode === 'lvBox'}
+                                >
+                                  {lvibSubMode === 'lvBox' && <span className="text-xs font-bold">✓</span>}
+                                </button>
+                                  <div className={`text-sm font-bold ${lvibSubMode === 'lvBox' ? 'text-white' : 'text-slate-500'}`}>LV Box:</div>
+                                <div className={COUNTER_BOX}>
+                                  <div className={COUNTER_GRID}>
+                                    <span className={COUNTER_LABEL}>Total</span>
+                                    <span className={COUNTER_VALUE}>{lvibLvBoxTotal}</span>
+                                  </div>
+                                </div>
+                                <div className={COUNTER_BOX}>
+                                  <div className={COUNTER_GRID}>
+                                    <span className={COUNTER_LABEL}>Done</span>
+                                    <span className={COUNTER_VALUE}>{lvDone} ({lvPct}%)</span>
+                                  </div>
+                                </div>
+                                <div className={COUNTER_BOX}>
+                                  <div className={COUNTER_GRID}>
+                                    <span className={COUNTER_LABEL}>Remaining</span>
+                                    <span className={COUNTER_VALUE}>{lvRem}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* INV Box row */}
+                              <div
+                                className={ROW}
+                                onClick={() => {
+                                  if (lvibSubMode !== 'invBox') setLvibSubMode('invBox');
+                                }}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (lvibSubMode !== 'invBox') setLvibSubMode('invBox');
+                                  }}
+                                  className={`${checkboxBase} ${
+                                    lvibSubMode === 'invBox'
+                                        ? 'border-slate-200 bg-slate-200 text-slate-900'
+                                        : 'border-slate-500 bg-slate-800 hover:border-slate-200'
+                                  }`}
+                                  title="Select INV Box"
+                                  aria-pressed={lvibSubMode === 'invBox'}
+                                >
+                                  {lvibSubMode === 'invBox' && <span className="text-xs font-bold">✓</span>}
+                                </button>
+                                  <div className={`text-sm font-bold ${lvibSubMode === 'invBox' ? 'text-white' : 'text-slate-500'}`}>INV Box:</div>
+                                <div className={COUNTER_BOX}>
+                                  <div className={COUNTER_GRID}>
+                                    <span className={COUNTER_LABEL}>Total</span>
+                                    <span className={COUNTER_VALUE}>{lvibInvBoxTotal}</span>
+                                  </div>
+                                </div>
+                                <div className={COUNTER_BOX}>
+                                  <div className={COUNTER_GRID}>
+                                    <span className={COUNTER_LABEL}>Done</span>
+                                    <span className={COUNTER_VALUE}>{invDone} ({invPct}%)</span>
+                                  </div>
+                                </div>
+                                <div className={COUNTER_BOX}>
+                                  <div className={COUNTER_GRID}>
+                                    <span className={COUNTER_LABEL}>Remaining</span>
+                                    <span className={COUNTER_VALUE}>{invRem}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    ) : isTIP ? (
                       <>
                         {/* Left card: 2V14 / 2V27 */}
                         <div className="min-w-[140px] border-2 border-slate-700 bg-slate-800 py-3 px-3 self-center">
@@ -8028,6 +8484,17 @@ export default function BaseModule({
                           </div>
                         </>
                       )}
+                    </>
+                  ) : isLVIB ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-red-300 bg-red-500" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">Uncompleted</span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Completed</span>
+                      </div>
                     </>
                   ) : (
                     <>
