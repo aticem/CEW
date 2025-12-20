@@ -3276,7 +3276,19 @@ export default function BaseModule({
   }, [effectiveStringTextVisibility, scheduleStringTextLabelUpdate]);
   
   // Hooks for daily log and export
-  const { dailyLog, addRecord } = useDailyLog(activeMode?.key || 'DC');
+  const { dailyLog: moduleDailyLog, addRecord: addModuleRecord } = useDailyLog(activeMode?.key || 'DC');
+  const { dailyLog: lvibLvDailyLog, addRecord: addLvibLvRecord } = useDailyLog('LVIB_LV');
+  const { dailyLog: lvibInvDailyLog, addRecord: addLvibInvRecord } = useDailyLog('LVIB_INV');
+
+  const lvibActiveKey = String(lvibSubMode || 'lvBox') === 'invBox' ? 'LVIB_INV' : 'LVIB_LV';
+  const lvibActiveLabel = String(lvibSubMode || 'lvBox') === 'invBox' ? 'Inverter Box Installation' : 'LV Box Installation';
+  const lvibActiveUnit = String(lvibSubMode || 'lvBox') === 'invBox' ? 'Inverter box installed' : 'LV box installed';
+  const lvibAllDailyLog = [...(lvibLvDailyLog || []), ...(lvibInvDailyLog || [])];
+
+  const dailyLog = isLVIB ? lvibAllDailyLog : moduleDailyLog;
+  const addRecord = isLVIB
+    ? (lvibActiveKey === 'LVIB_INV' ? addLvibInvRecord : addLvibLvRecord)
+    : addModuleRecord;
   const { exportToExcel } = useChartExport();
   
   // Save notes to localStorage
@@ -4686,21 +4698,25 @@ export default function BaseModule({
               
               if (isSelected) {
                 return {
-                  color: '#16a34a',
-                  weight: 4.0,
+                  color: '#166534',
+                  weight: 3.6,
                   opacity: 1,
+                  lineJoin: 'round',
+                  lineCap: 'round',
                   fill: true,
                   fillColor: '#22c55e',
-                  fillOpacity: 0.75
+                  fillOpacity: 0.78
                 };
               }
               return {
-                color: '#dc2626',
-                weight: 3.2,
-                opacity: 1,
+                color: '#991b1b',
+                weight: 3.0,
+                opacity: 0.98,
+                lineJoin: 'round',
+                lineCap: 'round',
                 fill: true,
                 fillColor: '#ef4444',
-                fillOpacity: 0.3
+                fillOpacity: 0.55
               };
             },
             onEachFeature: (feature, featureLayer) => {
@@ -7471,23 +7487,29 @@ export default function BaseModule({
     return { totalStrings, totalEnds, mc4Completed, terminatedCompleted };
   }, [isMC4, mc4PanelStates, mc4HistoryTick, mc4TotalStringsCsv]);
 
-  const workSelectionCount = isLV 
-    ? lvCompletedInvIds.size 
-    : (isMVF 
-      ? (mvfSelectedTrenchParts?.length || 0) 
-      : (isMC4 
-        ? Object.keys(mc4PanelStates || {}).length 
-        : (activeMode?.workUnitWeights
-          ? (() => {
-              const seen = new Set();
-              (selectedPolygons || new Set()).forEach((pid) => {
-                const info = polygonById.current?.[pid];
-                const key = String(info?.dedupeKey || pid);
-                seen.add(key);
-              });
-              return seen.size;
-            })()
-          : selectedPolygons.size)));
+  const lvibActiveSelectedCount = isLVIB
+    ? (String(lvibSubMode || 'lvBox') === 'invBox' ? lvibSelectedInvBoxes.size : lvibSelectedLvBoxes.size)
+    : 0;
+
+  const workSelectionCount = isLV
+    ? lvCompletedInvIds.size
+    : (isLVIB
+      ? lvibActiveSelectedCount
+      : (isMVF
+        ? (mvfSelectedTrenchParts?.length || 0)
+        : (isMC4
+          ? Object.keys(mc4PanelStates || {}).length
+          : (activeMode?.workUnitWeights
+            ? (() => {
+                const seen = new Set();
+                (selectedPolygons || new Set()).forEach((pid) => {
+                  const info = polygonById.current?.[pid];
+                  const key = String(info?.dedupeKey || pid);
+                  seen.add(key);
+                });
+                return seen.size;
+              })()
+            : selectedPolygons.size))));
   const mvtCompletedForSubmit = isMVT
     ? Math.max(0, Object.values(mvtTerminationByStation || {}).reduce((s, v) => s + Math.max(0, Math.min(3, Number(v) || 0)), 0))
     : 0;
@@ -8249,17 +8271,24 @@ export default function BaseModule({
                           ? 'MVT_TERM'
                           : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
                             ? 'LVTT_TERM'
-                            : (activeMode?.key || '')),
+                            : (isLVIB
+                              ? 'LVIB'
+                              : (activeMode?.key || ''))),
                       moduleLabel: isMC4
                         ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
                         : (isMVT
                           ? 'Cable Termination'
                           : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
                             ? 'Cable Termination'
-                            : moduleName),
+                            : (isLVIB
+                              ? 'LV/INV Box Installation'
+                              : moduleName)),
                       unit: isMC4
                         ? 'ends'
-                        : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination')) ? 'cables' : 'm'),
+                        : (isLVIB
+                          ? 'boxes'
+                          : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination')) ? 'cables' : 'm')),
+                      lvibBreakdown: Boolean(isLVIB),
                       chartSheetName: (isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
                         ? 'Cable Termination'
                         : undefined,
@@ -9261,6 +9290,12 @@ export default function BaseModule({
               setMvfActiveSegmentKeys(new Set());
             }
           }
+          // LVIB: submit must apply only to the active sub-mode; clear only that selection.
+          if (isLVIB) {
+            const modeNow = String(lvibSubModeRef.current || 'lvBox');
+            if (modeNow === 'invBox') setLvibSelectedInvBoxes(new Set());
+            else setLvibSelectedLvBoxes(new Set());
+          }
           addRecord({ ...record, notes: notesOnDate });
           alert('Work submitted successfully!');
         }}
@@ -9270,14 +9305,18 @@ export default function BaseModule({
             ? 'MVT_TERM'
             : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
               ? 'LVTT_TERM'
-              : (activeMode?.key || ''))}
+              : (isLVIB
+                ? lvibActiveKey
+                : (activeMode?.key || '')))}
         moduleLabel={isMC4
           ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
           : (isMVT
             ? 'Cable Termination'
             : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
               ? 'Cable Termination'
-              : moduleName)}
+              : (isLVIB
+                ? lvibActiveLabel
+                : moduleName))}
         workAmount={isMC4
           ? (mc4SelectionMode === 'termination'
             ? (mc4Counts?.terminatedCompleted || 0)
@@ -9286,7 +9325,9 @@ export default function BaseModule({
             ? mvtCompletedForSubmit
             : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
               ? lvttCompletedForSubmit
-              : workAmount)}
+              : (isLVIB
+                ? lvibActiveSelectedCount
+                : workAmount))}
         workUnit={
           isMC4
             ? (mc4SelectionMode === 'termination' ? 'cables terminated' : 'mc4')
@@ -9294,9 +9335,11 @@ export default function BaseModule({
               ? 'cables terminated'
               : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
                 ? lvttWorkUnit
-                : (activeMode?.submitWorkUnit
-                  ? String(activeMode.submitWorkUnit)
-                  : (activeMode?.workUnitWeights ? 'panels' : 'm')))
+                : (isLVIB
+                  ? lvibActiveUnit
+                  : (activeMode?.submitWorkUnit
+                    ? String(activeMode.submitWorkUnit)
+                    : (activeMode?.workUnitWeights ? 'panels' : 'm'))))
         }
       />
       
@@ -9336,7 +9379,7 @@ export default function BaseModule({
                   else { setHistorySortBy('cable'); setHistorySortOrder('desc'); }
                 }}
               >
-                Cable {historySortBy === 'cable' && (historySortOrder === 'desc' ? '↓' : '↑')}
+                {isLVIB ? 'Work' : 'Cable'} {historySortBy === 'cable' && (historySortOrder === 'desc' ? '↓' : '↑')}
               </button>
             </div>
             
@@ -9346,8 +9389,16 @@ export default function BaseModule({
                 <span className="summary-value">{dailyLog.length}</span>
               </div>
               <div className="summary-item">
-                <span className="summary-label">Total Cable</span>
-                <span className="summary-value">{dailyLog.reduce((s, r) => s + (r.total_cable || 0), 0).toFixed(0)} m</span>
+                <span className="summary-label">{isLVIB ? 'Total Work' : 'Total Cable'}</span>
+                <span className="summary-value">
+                  {isLVIB
+                    ? (() => {
+                        const lv = dailyLog.reduce((s, r) => s + (String(r?.module_key || '').toUpperCase() === 'LVIB_LV' ? (r.total_cable || 0) : 0), 0);
+                        const inv = dailyLog.reduce((s, r) => s + (String(r?.module_key || '').toUpperCase() === 'LVIB_INV' ? (r.total_cable || 0) : 0), 0);
+                        return `${Number(lv).toFixed(0)} LV box, ${Number(inv).toFixed(0)} Inverter box`;
+                      })()
+                    : `${dailyLog.reduce((s, r) => s + (r.total_cable || 0), 0).toFixed(0)} m`}
+                </span>
               </div>
               <div className="summary-item">
                 <span className="summary-label">Total Workers</span>
@@ -9395,6 +9446,12 @@ export default function BaseModule({
                   const recs = [...(recordsByDate[d] || [])];
                   const dayNotes = [...(notesByDate[d] || [])].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
                   const dateLabel = new Date(d).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+                  const lvibDayLv = isLVIB
+                    ? recs.reduce((s, r) => s + (String(r?.module_key || '').toUpperCase() === 'LVIB_LV' ? (r.total_cable || 0) : 0), 0)
+                    : 0;
+                  const lvibDayInv = isLVIB
+                    ? recs.reduce((s, r) => s + (String(r?.module_key || '').toUpperCase() === 'LVIB_INV' ? (r.total_cable || 0) : 0), 0)
+                    : 0;
 
                   return (
                     <div key={d} className="history-day">
@@ -9402,6 +9459,12 @@ export default function BaseModule({
                         <span className="history-day-date">{dateLabel}</span>
                         <span className="history-day-badges">
                           {recs.length > 0 && <span className="history-day-badge">Work: {recs.length}</span>}
+                          {isLVIB && recs.length > 0 && (
+                            <>
+                              <span className="history-day-badge">LV: {Number(lvibDayLv).toFixed(0)}</span>
+                              <span className="history-day-badge">INV: {Number(lvibDayInv).toFixed(0)}</span>
+                            </>
+                          )}
                           {dayNotes.length > 0 && <span className="history-day-badge notes">Notes: {dayNotes.length}</span>}
                         </span>
                       </div>
@@ -9423,15 +9486,27 @@ export default function BaseModule({
                                   </svg>
                                   <span>{record.workers} workers</span>
                                 </div>
-                                <div className="stat stat-positive">
-                                  <span>+DC: {(record.plus_dc || 0).toFixed(0)} m</span>
-                                </div>
-                                <div className="stat stat-negative">
-                                  <span>-DC: {(record.minus_dc || 0).toFixed(0)} m</span>
-                                </div>
                                 <div className="stat stat-total">
-                                  <span>Total: {(record.total_cable || 0).toFixed(0)} m</span>
+                                  <span>
+                                    {isLVIB
+                                      ? (() => {
+                                          const k = String(record?.module_key || '').toUpperCase();
+                                          const label = k === 'LVIB_INV' ? 'Inverter box installed' : 'LV box installed';
+                                          return `Total: ${(record.total_cable || 0).toFixed(0)} ${label}`;
+                                        })()
+                                      : `Total: ${(record.total_cable || 0).toFixed(0)} m`}
+                                  </span>
                                 </div>
+                                {!isLVIB && (
+                                  <>
+                                    <div className="stat stat-positive">
+                                      <span>+DC: {(record.plus_dc || 0).toFixed(0)} m</span>
+                                    </div>
+                                    <div className="stat stat-negative">
+                                      <span>-DC: {(record.minus_dc || 0).toFixed(0)} m</span>
+                                    </div>
+                                  </>
+                                )}
                               </div>
                             </div>
                           ))}
