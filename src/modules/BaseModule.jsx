@@ -4687,15 +4687,17 @@ export default function BaseModule({
               if (isSelected) {
                 return {
                   color: '#16a34a',
-                  weight: 3.2,
+                  weight: 4.0,
+                  opacity: 1,
                   fill: true,
                   fillColor: '#22c55e',
-                  fillOpacity: 0.5
+                  fillOpacity: 0.75
                 };
               }
               return {
                 color: '#dc2626',
                 weight: 3.2,
+                opacity: 1,
                 fill: true,
                 fillColor: '#ef4444',
                 fillOpacity: 0.3
@@ -4781,8 +4783,30 @@ export default function BaseModule({
             allBounds.extend(boxLayer.getBounds());
           }
           
-          // Add text labels inside boxes
+          // Add LV/INV text labels inside boxes using the SAME rendering system/options as inv_id labels.
+          // This ensures identical zoom scaling, stroke, and optional background plate behavior.
           const boxLabel = boxType === 'lvBox' ? 'LV' : 'INV';
+          const invScale = typeof activeMode?.invIdTextScale === 'number' ? activeMode.invIdTextScale : 1;
+          const invBase = typeof activeMode?.invIdTextBaseSize === 'number' ? activeMode.invIdTextBaseSize : 19;
+          const invRefZoom = typeof activeMode?.invIdTextRefZoom === 'number' ? activeMode.invIdTextRefZoom : 20;
+          const invTextStyle = activeMode?.invIdTextStyle || '600';
+          const invMinFs = typeof activeMode?.invIdTextMinFontSize === 'number' ? activeMode.invIdTextMinFontSize : null;
+          const invMaxFs = typeof activeMode?.invIdTextMaxFontSize === 'number' ? activeMode.invIdTextMaxFontSize : null;
+          const invStrokeColor = activeMode?.invIdTextStrokeColor || 'rgba(0,0,0,0.88)';
+          const invStrokeWidthFactor =
+            typeof activeMode?.invIdTextStrokeWidthFactor === 'number' ? activeMode.invIdTextStrokeWidthFactor : 1.45;
+          const invBgColor = activeMode?.invIdTextBgColor || null;
+          const invBgPaddingX = typeof activeMode?.invIdTextBgPaddingX === 'number' ? activeMode.invIdTextBgPaddingX : 0;
+          const invBgPaddingY = typeof activeMode?.invIdTextBgPaddingY === 'number' ? activeMode.invIdTextBgPaddingY : 0;
+          const invBgStrokeColor = activeMode?.invIdTextBgStrokeColor || null;
+          const invBgStrokeWidth = typeof activeMode?.invIdTextBgStrokeWidth === 'number' ? activeMode.invIdTextBgStrokeWidth : 0;
+          const invBgCornerRadius =
+            typeof activeMode?.invIdTextBgCornerRadius === 'number' ? activeMode.invIdTextBgCornerRadius : 0;
+          const invMinTextZoom = typeof activeMode?.invIdTextMinTextZoom === 'number' ? activeMode.invIdTextMinTextZoom : null;
+          const invMinBgZoom = typeof activeMode?.invIdTextMinBgZoom === 'number' ? activeMode.invIdTextMinBgZoom : null;
+
+          const baseSize = invBase * invScale;
+          const radius = 22 * invScale;
           const features = data.features || [];
           features.forEach((feature) => {
             if (!feature.geometry) return;
@@ -4804,21 +4828,32 @@ export default function BaseModule({
               });
               center = [sumLat / coords.length, sumLng / coords.length];
             }
-            if (center) {
-              const textMarker = L.textLabel(center, {
-                text: boxLabel,
-                renderer: canvasRenderer,
-                textBaseSize: 14,
-                refZoom: 20,
-                textStyle: '700',
-                // LVIB: match other in-map labels (no orange).
-                textColor: 'rgba(255,255,255,0.98)',
-                strokeColor: 'rgba(0,0,0,0.9)',
-                strokeWidthFactor: 1.5,
-              });
-              textMarker.addTo(mapRef.current);
-              layersRef.current.push(textMarker);
-            }
+            if (!center) return;
+
+            const textMarker = L.textLabel(center, {
+              text: boxLabel,
+              renderer: canvasRenderer,
+              textBaseSize: baseSize,
+              refZoom: invRefZoom,
+              textStyle: invTextStyle,
+              textColor: 'rgba(255,255,255,0.98)',
+              textStrokeColor: invStrokeColor,
+              textStrokeWidthFactor: invStrokeWidthFactor,
+              minFontSize: invMinFs,
+              maxFontSize: invMaxFs,
+              bgColor: invBgColor,
+              bgPaddingX: invBgPaddingX,
+              bgPaddingY: invBgPaddingY,
+              bgStrokeColor: invBgStrokeColor,
+              bgStrokeWidth: invBgStrokeWidth,
+              bgCornerRadius: invBgCornerRadius,
+              minTextZoom: invMinTextZoom,
+              minBgZoom: invMinBgZoom,
+              interactive: false,
+              radius,
+            });
+            textMarker.addTo(mapRef.current);
+            layersRef.current.push(textMarker);
           });
           
           continue;
