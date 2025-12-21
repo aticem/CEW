@@ -11,20 +11,22 @@ import DCCableTestingProgressModule from './modules/DCCableTestingProgressModule
 import ModuleInstallationProgressTrackingModule from './modules/ModuleInstallationProgressTrackingModule.jsx';
 import TableInstallationProgressModule from './modules/TableInstallationProgressModule.jsx';
 import LVBoxInvBoxModule from './modules/LVBoxInvBoxModule.jsx';
+import PunchListModule from './modules/PunchListModule.jsx';
 
 const MODULES = {
-  DC: { key: 'DC', label: 'DC CABLE PULLING PROGRESS', Component: DCModule },
-  LV: { key: 'LV', label: 'LV CABLE PULLING PROGRESS', Component: LVModule },
-  MVF: { key: 'MVF', label: 'MV+FIBER PULLING PROGRESS', Component: MVFiberModule },
-  MVFT: { key: 'MVFT', label: 'MV+FIBRE_TRENCH_PROGRESS_TRACKING', Component: MVFiberTrenchProgressTrackingModule },
-  FIB: { key: 'FIB', label: 'FIBRE PULLING PROGRESS', Component: FibreModule },
-  MC4: { key: 'MC4', label: 'MC4 INSTALLATION', Component: MC4Module },
-  MVT: { key: 'MVT', label: 'MV TERMINATION PROGRESS', Component: MVTerminationModule },
-  LVTT: { key: 'LVTT', label: 'LV_TERMINATION_and_TESTING PROGRESS', Component: LVTerminationTestingModule },
-  DCCT: { key: 'DCCT', label: 'DC_CABLE_TESTING_PROGRESS', Component: DCCableTestingProgressModule },
-  MIPT: { key: 'MIPT', label: 'MODULE_INSTALLATION_PROGRES_TRACKING', Component: ModuleInstallationProgressTrackingModule },
-  TIP: { key: 'TIP', label: 'TABLE_INSTALLATION_PROGRESS', Component: TableInstallationProgressModule },
-  LVIB: { key: 'LVIB', label: 'LV_BOX_INV_BOX_INSTALLATION', Component: LVBoxInvBoxModule },
+  DC: { key: 'DC', label: 'DC Cable Pulling Progress', Component: DCModule },
+  LV: { key: 'LV', label: 'LV Cable Pulling Progress', Component: LVModule },
+  MVF: { key: 'MVF', label: 'MV+Fiber Pulling Progress', Component: MVFiberModule },
+  MVFT: { key: 'MVFT', label: 'MV+Fibre Trench Progress', Component: MVFiberTrenchProgressTrackingModule },
+  FIB: { key: 'FIB', label: 'Fibre Pulling Progress', Component: FibreModule },
+  MC4: { key: 'MC4', label: 'MC4 Installation', Component: MC4Module },
+  MVT: { key: 'MVT', label: 'MV Termination Progress', Component: MVTerminationModule },
+  LVTT: { key: 'LVTT', label: 'LV Termination & Testing', Component: LVTerminationTestingModule },
+  DCCT: { key: 'DCCT', label: 'DC Cable Testing Progress', Component: DCCableTestingProgressModule },
+  MIPT: { key: 'MIPT', label: 'Module Installation Progress', Component: ModuleInstallationProgressTrackingModule },
+  TIP: { key: 'TIP', label: 'Table Installation Progress', Component: TableInstallationProgressModule },
+  LVIB: { key: 'LVIB', label: 'LV Box & Inv Box Installation', Component: LVBoxInvBoxModule },
+  PL: { key: 'PL', label: 'Punch List', Component: PunchListModule },
 };
 
 export default function App() {
@@ -74,9 +76,9 @@ export default function App() {
                     setActiveKey(m.key);
                     setMenuOpen(false);
                   }}
-                  className={`w-full px-3 py-3 text-left text-xs font-extrabold uppercase tracking-wide ${
-                    idx === 0 ? 'border-b-2 border-slate-700' : ''
-                  } ${activeKey === m.key ? 'bg-amber-500 text-black' : 'bg-slate-900 text-slate-200 hover:bg-slate-800'}`}
+                  className={`w-full px-3 py-2.5 text-left text-[11px] font-medium tracking-wide ${
+                    idx === 0 ? 'border-b border-slate-700/50' : ''
+                  } ${activeKey === m.key ? 'bg-amber-500 text-black' : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white'}`}
                 >
                   {m.label}
               </button>

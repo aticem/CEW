@@ -496,3 +496,38 @@ export const LV_BOX_INV_BOX_INSTALLATION_PROGRESS_CONFIG = {
     },
   ],
 };
+
+export const PUNCH_LIST_MODULE_CONFIG = {
+  key: 'PL',
+  label: 'PUNCH LIST',
+  // Files live in: public/PUNCH_LIST/
+  csvFormat: null,
+  csvPath: null,
+  linkPath: '/PUNCH_LIST/link',
+  simpleCounters: true,
+  simpleCounterUnit: '',
+  stringTextVisibility: 'always',
+  stringTextToggle: true,
+  stringTextDefaultOn: true,
+  stringTextColor: 'rgba(255,255,255,0.98)',
+  stringTextBaseSize: 22,
+  stringTextStyle: '400',
+  stringTextStrokeColor: 'rgba(0,0,0,0.85)',
+  stringTextStrokeWidthFactor: 1.2,
+  stringTextMinZoom: 0,
+  stringTextMinFontSize: 14,
+  stringTextMaxFontSize: 26,
+  stringTextRefZoom: 20,
+  geojsonFiles: [
+    { url: '/PUNCH_LIST/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
+    { url: '/PUNCH_LIST/inv_id.geojson', name: 'inv_id', color: '#16a34a', fillColor: '#22c55e' },
+    {
+      url: '/PUNCH_LIST/inv_box.geojson',
+      name: 'inv_box',
+      color: '#eab308',
+      fillColor: '#facc15',
+      weight: 3,
+      fillOpacity: 0.6,
+    },
+  ],
+};
