@@ -497,6 +497,40 @@ export const LV_BOX_INV_BOX_INSTALLATION_PROGRESS_CONFIG = {
   ],
 };
 
+export const PARAMETER_AND_TABLE_EARTHING_PROGRESS_MODULE_CONFIG = {
+  key: 'PTEP',
+  label: 'PARAMETER & TABLE EARTHING PROGRESS',
+  // Files live in: public/PARAMETER_and_TABLE_EARTHING_PROGRESS/
+  csvFormat: null,
+  csvPath: null,
+  linkPath: '/PARAMETER_and_TABLE_EARTHING_PROGRESS/link',
+  simpleCounters: true, // Use simpleCounters branch (PTEP has custom rendering inside)
+  simpleCounterUnit: '',
+  // Earthing mode - special layer handling
+  earthingMode: true,
+  // Text labels visibility
+  stringTextVisibility: 'always',
+  stringTextToggle: true,
+  stringTextDefaultOn: true,
+  stringTextColor: 'rgba(250,204,21,0.98)',
+  stringTextBaseSize: 22,
+  stringTextStyle: '400',
+  stringTextStrokeColor: 'rgba(0,0,0,0.85)',
+  stringTextStrokeWidthFactor: 1.2,
+  stringTextMinZoom: 0,
+  stringTextMinFontSize: 14,
+  stringTextMaxFontSize: 26,
+  stringTextRefZoom: 20,
+  geojsonFiles: [
+    // Background layer - not selectable, just visual reference
+    { url: '/PARAMETER_and_TABLE_EARTHING_PROGRESS/earthing_full.geojson', name: 'earthing_full', color: 'rgba(255,255,255,0.26)', fillColor: 'transparent' },
+    // Parameter layer - rendered normally, not selectable
+    { url: '/PARAMETER_and_TABLE_EARTHING_PROGRESS/earthing_parameter.geojson', name: 'earthing_parameter', color: 'rgba(255,255,255,0.5)', fillColor: 'transparent' },
+    // Table-to-table layer - SELECTABLE, thick white -> green on click
+    { url: '/PARAMETER_and_TABLE_EARTHING_PROGRESS/earthing_tabletotable.geojson', name: 'earthing_tabletotable', color: '#ffffff', fillColor: 'transparent' },
+  ],
+};
+
 export const PUNCH_LIST_MODULE_CONFIG = {
   key: 'PL',
   label: 'PUNCH LIST',

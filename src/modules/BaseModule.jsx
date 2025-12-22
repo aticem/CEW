@@ -318,6 +318,8 @@ export default function BaseModule({
   const isMVT = String(activeMode?.key || '').toUpperCase() === 'MVT';
   const isLVTT = String(activeMode?.key || '').toUpperCase() === 'LVTT';
   const isPL = String(activeMode?.key || '').toUpperCase() === 'PL';
+  // PARAMETER & TABLE EARTHING PROGRESS mode
+  const isPTEP = String(activeMode?.key || '').toUpperCase() === 'PTEP' || Boolean(activeMode?.earthingMode);
   // DC Cable Testing Progress mode
   const isDCCT = String(activeMode?.key || '').toUpperCase() === 'DCCT' || Boolean(activeMode?.dcctMode);
   const isDCCTRef = useRef(isDCCT);
@@ -423,6 +425,7 @@ export default function BaseModule({
   const stringTextRendererRef = useRef(null); // dedicated canvas renderer for string_text to avoid ghosting
   const lvttInvIdRendererRef = useRef(null); // dedicated canvas renderer for LVTT inv_id labels to avoid overlap when switching modes
   const lvttTermCounterRendererRef = useRef(null); // dedicated canvas renderer for LVTT termination counters
+  const ptepTableToTableSvgRendererRef = useRef(null); // dedicated SVG renderer for PTEP table-to-table (ensures clickability under preferCanvas)
   const layersRef = useRef([]);
   const polygonIdCounter = useRef(0); // Counter for unique polygon IDs
   const polygonById = useRef({}); // uniqueId -> {layer, stringId}
@@ -1464,6 +1467,55 @@ export default function BaseModule({
       void _e;
     }
   }, [isLV, lvStorageKey, lvCompletedInvIds]);
+
+  // PTEP: table-to-table completion tracking (click lines to mark completed)
+  const ptepTodayYmd = getTodayYmd();
+  const ptepStorageKey = `cew:ptep:tabletotable:${ptepTodayYmd}`;
+  const [ptepCompletedTableToTable, setPtepCompletedTableToTable] = useState(() => new Set());
+  const ptepCompletedTableToTableRef = useRef(ptepCompletedTableToTable);
+  const [ptepTotalTableToTable, setPtepTotalTableToTable] = useState(0);
+  const ptepTableToTableByIdRef = useRef({}); // uniqueId -> featureLayer
+
+  useEffect(() => {
+    ptepCompletedTableToTableRef.current = ptepCompletedTableToTable;
+  }, [ptepCompletedTableToTable]);
+
+  // Load PTEP completions from localStorage
+  useEffect(() => {
+    if (!isPTEP) return;
+    try {
+      const raw = localStorage.getItem(ptepStorageKey);
+      const arr = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(arr)) setPtepCompletedTableToTable(new Set(arr));
+      else setPtepCompletedTableToTable(new Set());
+    } catch (_e) {
+      void _e;
+      setPtepCompletedTableToTable(new Set());
+    }
+  }, [isPTEP, ptepStorageKey]);
+
+  // Save PTEP completions to localStorage and update styles
+  useEffect(() => {
+    if (!isPTEP) return;
+    try {
+      localStorage.setItem(ptepStorageKey, JSON.stringify(Array.from(ptepCompletedTableToTable)));
+    } catch (_e) {
+      void _e;
+    }
+    // Update styles for all table-to-table features
+    const byId = ptepTableToTableByIdRef.current || {};
+    Object.keys(byId).forEach((uid) => {
+      const layer = byId[uid];
+      if (layer && typeof layer.setStyle === 'function') {
+        const isDone = ptepCompletedTableToTable.has(uid);
+        layer.setStyle({
+          color: isDone ? '#22c55e' : '#ffffff',
+          weight: 5,
+          opacity: 1,
+        });
+      }
+    });
+  }, [isPTEP, ptepStorageKey, ptepCompletedTableToTable]);
 
   // MC4: panel-end progress tracking (two ends per panel: left/right)
   const MC4_PANEL_STATES = {
@@ -6139,13 +6191,58 @@ export default function BaseModule({
         const invLabelMode = file.name === 'inv_id' && (isLV || isLVTT || activeMode?.invIdLabelMode);
         const invInteractive = (isLV || isLVTT) && file.name === 'inv_id';
         const mvfTrenchInteractive = isMVF && file.name === 'mv_trench';
+        // PTEP: only earthing_tabletotable is interactive
+        const ptepTableToTableInteractive = isPTEP && file.name === 'earthing_tabletotable';
         // MVT: we don't want table selection interactions in this mode.
         const disableInteractions = (isMVT || isLVTT) && (file.name === 'full' || file.name === 'subs');
+
+        // For PTEP earthing_tabletotable, force an SVG pane above canvas so clicks work under preferCanvas.
+        const ptepPaneName = ptepTableToTableInteractive ? 'ptepTableToTablePane' : undefined;
+        const useRenderer = ptepTableToTableInteractive
+          ? (ptepTableToTableSvgRendererRef.current || L.svg({ pane: 'ptepTableToTablePane' }))
+          : canvasRenderer;
+
         const layer = L.geoJSON(data, {
-          renderer: canvasRenderer,
-          interactive: !disableInteractions && (invInteractive || mvfTrenchInteractive),
+          pane: ptepPaneName,
+          renderer: useRenderer,
+          interactive: !disableInteractions && (invInteractive || mvfTrenchInteractive || ptepTableToTableInteractive),
+          bubblingMouseEvents: !ptepTableToTableInteractive,
           
-          style: () => {
+          style: (feature) => {
+            // PTEP: earthing_full = background only (dim)
+            if (isPTEP && file.name === 'earthing_full') {
+              return {
+                color: 'rgba(255,255,255,0.26)',
+                weight: 0.78,
+                fill: false,
+                fillOpacity: 0
+              };
+            }
+            // PTEP: earthing_parameter = rendered normally (slightly brighter)
+            if (isPTEP && file.name === 'earthing_parameter') {
+              return {
+                color: 'rgba(255,255,255,0.5)',
+                weight: 1.2,
+                fill: false,
+                fillOpacity: 0
+              };
+            }
+            // PTEP: earthing_tabletotable = thick white (or green if completed)
+            if (ptepTableToTableInteractive) {
+              // Check if this feature is already completed
+              const fid = feature?.properties?.fid ?? feature?.properties?.FID ?? feature?.properties?.id ?? feature?.id;
+              const uniqueId = `tt_${String(fid)}`;
+              const isDone = ptepCompletedTableToTableRef.current?.has(uniqueId);
+              return {
+                color: isDone ? '#22c55e' : '#ffffff',
+                weight: 5,
+                opacity: 1,
+                lineCap: 'round',
+                lineJoin: 'round',
+                fill: false,
+                fillOpacity: 0
+              };
+            }
             // LVIB mode: lv_box and inv_box with red color
             if (isLVIB && (file.name === 'lv_box' || file.name === 'inv_box')) {
               return {
@@ -6409,6 +6506,48 @@ export default function BaseModule({
           },
           
           onEachFeature: (feature, featureLayer) => {
+            // PTEP: table-to-table click handler (toggle white/green)
+            if (ptepTableToTableInteractive && featureLayer && typeof featureLayer.on === 'function') {
+              const fid = feature?.properties?.fid ?? feature?.properties?.FID ?? feature?.properties?.id ?? feature?.id;
+              const uniqueId = `tt_${String(fid)}`;
+              featureLayer._ptepUniqueId = uniqueId;
+              ptepTableToTableByIdRef.current[uniqueId] = featureLayer;
+              
+              // Ensure layer is interactive
+              if (featureLayer.options) {
+                featureLayer.options.interactive = true;
+              }
+              
+              featureLayer.on('click', (e) => {
+                try {
+                  if (e?.originalEvent) {
+                    L.DomEvent.stopPropagation(e.originalEvent);
+                    L.DomEvent.preventDefault(e.originalEvent);
+                  }
+                } catch (_e) {
+                  void _e;
+                }
+                if (noteMode) return;
+                
+                const isRightClick = e?.originalEvent?.button === 2;
+                setPtepCompletedTableToTable((prev) => {
+                  const next = new Set(prev);
+                  if (isRightClick) {
+                    // Right-click: deselect
+                    next.delete(uniqueId);
+                  } else {
+                    // Left-click: toggle
+                    if (next.has(uniqueId)) {
+                      next.delete(uniqueId);
+                    } else {
+                      next.add(uniqueId);
+                    }
+                  }
+                  return next;
+                });
+              });
+            }
+            
             // MVF: allow selecting mv_trench segments (click toggles green)
             if (mvfTrenchInteractive && featureLayer && typeof featureLayer.on === 'function') {
               const fidRaw = feature?.properties?.fid;
@@ -6507,6 +6646,11 @@ export default function BaseModule({
             }
           }
         }).addTo(mapRef.current);
+        
+        // PTEP: Count total table-to-table features
+        if (isPTEP && file.name === 'earthing_tabletotable' && data?.features?.length) {
+          setPtepTotalTableToTable(data.features.length);
+        }
         
         layersRef.current.push(layer);
         if (layer.getBounds().isValid()) {
@@ -7691,6 +7835,65 @@ export default function BaseModule({
                 mc4PushHistory(changes);
               }
             }
+          } else if (isPTEP) {
+            // PTEP MODE: Box select table-to-table features only
+            const tableToTableFeatures = ptepTableToTableByIdRef.current || {};
+            const idsInBounds = [];
+            const map = mapRef.current;
+            
+            // Check if a line feature intersects with the selection bounds
+            const lineIntersectsBounds = (layer) => {
+              if (!layer || !map) return false;
+              try {
+                const layerBounds = layer.getBounds();
+                if (!layerBounds || !bounds.intersects(layerBounds)) return false;
+                
+                // Get line coordinates
+                let coords = null;
+                if (typeof layer.getLatLngs === 'function') {
+                  coords = layer.getLatLngs();
+                }
+                if (!coords) return false;
+                
+                // Flatten nested arrays if needed
+                while (Array.isArray(coords) && coords.length && Array.isArray(coords[0]) && !coords[0].lat) {
+                  coords = coords.flat();
+                }
+                
+                // Check if any point is within bounds
+                for (const ll of coords) {
+                  if (ll && ll.lat != null && ll.lng != null) {
+                    if (bounds.contains(ll)) return true;
+                  }
+                }
+                return false;
+              } catch (_e) {
+                void _e;
+                return false;
+              }
+            };
+            
+            Object.keys(tableToTableFeatures).forEach((uniqueId) => {
+              const layer = tableToTableFeatures[uniqueId];
+              if (!layer) return;
+              if (lineIntersectsBounds(layer)) {
+                idsInBounds.push(uniqueId);
+              }
+            });
+            
+            if (idsInBounds.length > 0) {
+              setPtepCompletedTableToTable((prev) => {
+                const next = new Set(prev);
+                if (isRightClick) {
+                  // Right-click: deselect all in box
+                  idsInBounds.forEach((id) => next.delete(id));
+                } else {
+                  // Left-click: select all in box
+                  idsInBounds.forEach((id) => next.add(id));
+                }
+                return next;
+              });
+            }
           } else if (isLV) {
           // LV MODE: Box select inv_id labels (daily completion)
             const labels = lvInvLabelByIdRef.current || {};
@@ -8512,6 +8715,21 @@ export default function BaseModule({
       fadeAnimation: false,
     });
     setMapReady(true);
+
+    // PTEP: dedicated SVG pane/renderer for interactive table-to-table layer.
+    // Map is preferCanvas:true, so we must explicitly opt into SVG for reliable per-feature clicks.
+    try {
+      const paneName = 'ptepTableToTablePane';
+      if (!mapRef.current.getPane(paneName)) {
+        const pane = mapRef.current.createPane(paneName);
+        pane.style.zIndex = '440'; // above canvas drawings, below stringTextPane(450)
+        pane.style.pointerEvents = 'auto';
+      }
+      ptepTableToTableSvgRendererRef.current = L.svg({ pane: paneName });
+    } catch (_e) {
+      void _e;
+      ptepTableToTableSvgRendererRef.current = null;
+    }
 
     // Dedicated canvas renderer + pane for string_text labels (prevents ghosting when hiding/showing)
     try {
@@ -9557,6 +9775,34 @@ export default function BaseModule({
                             <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
                               <span className="text-xs font-bold text-slate-200">Remaining</span>
                               <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingTotal}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    ) : isPTEP ? (
+                      <>
+                        {/* PTEP: TableToTable counters */}
+                        <div className="flex items-center gap-3 self-center">
+                          <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
+                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                              <span className="text-xs font-bold text-slate-200">TableToTable - Total</span>
+                              <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{ptepTotalTableToTable}</span>
+                            </div>
+                          </div>
+
+                          <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
+                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                              <span className="text-xs font-bold text-emerald-400">Completed</span>
+                              <span className="text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap">
+                                {ptepCompletedTableToTable.size}, {ptepTotalTableToTable > 0 ? ((ptepCompletedTableToTable.size / ptepTotalTableToTable) * 100).toFixed(2) : '0.00'}%
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
+                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                              <span className="text-xs font-bold text-slate-200">Remaining</span>
+                              <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{Math.max(0, ptepTotalTableToTable - ptepCompletedTableToTable.size)}</span>
                             </div>
                           </div>
                         </div>
