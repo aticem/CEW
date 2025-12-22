@@ -501,6 +501,7 @@ export const PUNCH_LIST_MODULE_CONFIG = {
   key: 'PL',
   label: 'PUNCH LIST',
   // Files live in: public/PUNCH_LIST/
+  basePath: '/PUNCH_LIST',
   csvFormat: null,
   csvPath: null,
   linkPath: '/PUNCH_LIST/link',

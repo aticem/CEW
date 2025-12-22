@@ -314,11 +314,10 @@ export default function BaseModule({
   const isLV = String(activeMode?.key || '').toUpperCase() === 'LV';
   // Treat any module with mvf-style CSV/logic as MVF-mode (e.g., MV + FIBRE modules).
   const isMVF = String(activeMode?.csvFormat || '').toLowerCase() === 'mvf';
-  // MV+FIBRE_TRENCH (GeoJSON-only trench measurement)
-  const isMVFT = String(activeMode?.key || '').toUpperCase() === 'MVFT';
   const isMC4 = String(activeMode?.key || '').toUpperCase() === 'MC4';
   const isMVT = String(activeMode?.key || '').toUpperCase() === 'MVT';
   const isLVTT = String(activeMode?.key || '').toUpperCase() === 'LVTT';
+  const isPL = String(activeMode?.key || '').toUpperCase() === 'PL';
   // DC Cable Testing Progress mode
   const isDCCT = String(activeMode?.key || '').toUpperCase() === 'DCCT' || Boolean(activeMode?.dcctMode);
   const isDCCTRef = useRef(isDCCT);
@@ -906,14 +905,6 @@ export default function BaseModule({
   const mvfTrenchLenByIdRef = useRef({}); // id -> meters
   const [mvfTrenchTotalMeters, setMvfTrenchTotalMeters] = useState(0);
   const mvfTrenchEdgeIndexRef = useRef(new Map()); // "lat,lng|lat,lng" -> { fid, lineIndex, startM, endM }
-
-  // MVFT: mv_trench selection via box (store selected PART geometries inside the selection rectangle)
-  const mvftTrenchByIdRef = useRef({}); // id -> L.Path
-  const mvftTrenchLenByIdRef = useRef({}); // id -> meters (per feature, for total)
-  const [mvftTrenchTotalMeters, setMvftTrenchTotalMeters] = useState(0);
-  const [mvftSelectedTrenchParts, setMvftSelectedTrenchParts] = useState([]); // [{id, fid, lineIndex, startM, endM, coords, meters}]
-  const mvftSelectedTrenchPartsRef = useRef(mvftSelectedTrenchParts);
-  const mvftTrenchSelectedLayerRef = useRef(null); // L.LayerGroup
   // MVF: partial trench completion via selection box (store selected/committed PART geometries)
   const [mvfSelectedTrenchParts, setMvfSelectedTrenchParts] = useState([]); // [{id, fid, coords:[[lat,lng],...], meters}]
   const [mvfCommittedTrenchParts, setMvfCommittedTrenchParts] = useState([]); // same shape, locked
@@ -972,8 +963,16 @@ export default function BaseModule({
   const [historySortBy, setHistorySortBy] = useState('date'); // 'date', 'workers', 'cable'
   const [historySortOrder, setHistorySortOrder] = useState('desc'); // 'asc', 'desc'
   
-  // Note Mode state
-  const [noteMode, setNoteMode] = useState(false);
+  // Note Mode state - PUNCH_LIST always starts in punch mode
+  const [noteMode, setNoteMode] = useState(isPL);
+  
+  // PUNCH_LIST: Ensure punch mode is always active
+  useEffect(() => {
+    if (isPL && !noteMode) {
+      setNoteMode(true);
+    }
+  }, [isPL, noteMode]);
+  
   const initialNotes = (() => {
     const saved = localStorage.getItem('cew_notes');
     return saved ? JSON.parse(saved) : [];
@@ -987,6 +986,330 @@ export default function BaseModule({
   const canUndoNotes = notesState.past.length > 0;
   const canRedoNotes = notesState.future.length > 0;
   const NOTES_HISTORY_LIMIT = 50;
+
+  // ─────────────────────────────────────────────────────────────────
+  // PUNCH LIST: Contractor (Taşeron) Management + Isometric View
+  // ─────────────────────────────────────────────────────────────────
+  const PL_CONTRACTORS_KEY = 'cew_pl_contractors';
+  const PL_PUNCHES_KEY = 'cew_pl_punches';
+  // Green (#22c55e) is reserved for completed punches - not available for contractors
+  // 8 distinct, easily distinguishable colors (no green/teal tones)
+  const DEFAULT_PUNCH_COLORS = [
+    '#ef4444', // Red
+    '#f97316', // Orange
+    '#eab308', // Yellow
+    '#3b82f6', // Blue
+    '#8b5cf6', // Purple
+    '#ec4899', // Pink
+    '#06b6d4', // Cyan
+    '#78716c', // Stone/Gray
+  ];
+  
+  // Special color for completed punches
+  const PUNCH_COMPLETED_COLOR = '#22c55e';
+
+  // Contractors: { id, name, color }
+  const [plContractors, setPlContractors] = useState(() => {
+    try {
+      const saved = localStorage.getItem(PL_CONTRACTORS_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch (_e) {
+      return [];
+    }
+  });
+
+  // Punch points: { id, lat, lng, contractorId, text, photoDataUrl, photoName, tableId?, createdAt, punchNumber }
+  const [plPunches, setPlPunches] = useState(() => {
+    try {
+      const saved = localStorage.getItem(PL_PUNCHES_KEY);
+      if (!saved) return [];
+      const punches = JSON.parse(saved);
+      // Ensure all punches have a punchNumber (migrate old punches)
+      let maxNum = 0;
+      punches.forEach(p => {
+        if (p.punchNumber) maxNum = Math.max(maxNum, p.punchNumber);
+      });
+      // Assign numbers to punches without one
+      punches.forEach((p) => {
+        if (!p.punchNumber) {
+          maxNum++;
+          p.punchNumber = maxNum;
+        }
+      });
+      return punches;
+    } catch (_e) {
+      return [];
+    }
+  });
+  
+  // Punch counter for permanent numbering - always starts from max existing punchNumber
+  const PL_COUNTER_KEY = 'punch_list_counter';
+  const [plPunchCounter, setPlPunchCounter] = useState(() => {
+    try {
+      // Always calculate from existing punches to ensure continuity
+      const savedPunches = localStorage.getItem(PL_PUNCHES_KEY);
+      if (savedPunches) {
+        const punches = JSON.parse(savedPunches);
+        const maxNum = Math.max(0, ...punches.map(p => p.punchNumber || 0));
+        return maxNum;
+      }
+      return 0;
+    } catch (_e) {
+      return 0;
+    }
+  });
+  
+  // Ref to track current counter value for async handlers
+  const plPunchCounterRef = useRef(plPunchCounter);
+  
+  // Keep counter ref in sync with state
+  useEffect(() => {
+    plPunchCounterRef.current = plPunchCounter;
+  }, [plPunchCounter]);
+  
+  // Persist punch counter
+  useEffect(() => {
+    try {
+      localStorage.setItem(PL_COUNTER_KEY, String(plPunchCounter));
+    } catch (_e) {
+      void _e;
+    }
+  }, [plPunchCounter]);
+
+  // Currently selected contractor for new punches
+  const [plSelectedContractorId, setPlSelectedContractorId] = useState(null);
+  const plSelectedContractorIdRef = useRef(null); // Ref to track selected contractor for async handlers
+  
+  // Keep contractor ref in sync with state
+  useEffect(() => {
+    plSelectedContractorIdRef.current = plSelectedContractorId;
+  }, [plSelectedContractorId]);
+
+  // Contractor management dropdown state
+  const [plContractorDropdownOpen, setPlContractorDropdownOpen] = useState(false);
+  const plContractorDropdownOpenRef = useRef(false); // Ref to track dropdown state for async handlers
+  const [plNewContractorName, setPlNewContractorName] = useState('');
+  const [plNewContractorColor, setPlNewContractorColor] = useState(DEFAULT_PUNCH_COLORS[0]);
+  const [plShowAddContractorForm, setPlShowAddContractorForm] = useState(false); // Show add form when contractors exist
+  
+  // Ref to capture hamburger menu state at mousedown time (before App.jsx closes it)
+  const plHamburgerWasOpenOnMouseDownRef = useRef(false);
+  
+  // Contractor editing state - must be declared before useEffect that references it
+  const [plEditingContractor, setPlEditingContractor] = useState(null); // contractor being edited
+  const [plEditContractorName, setPlEditContractorName] = useState('');
+  const [plEditContractorColor, setPlEditContractorColor] = useState('');
+  
+  // Helper to get first available (unused) color
+  const getFirstAvailableColor = useCallback(() => {
+    const usedColors = new Set(plContractors.map(c => c.color));
+    return DEFAULT_PUNCH_COLORS.find(clr => !usedColors.has(clr)) || DEFAULT_PUNCH_COLORS[0];
+  }, [plContractors]);
+  
+  // Auto-select first available color when dropdown opens
+  useEffect(() => {
+    if (plContractorDropdownOpen && !plEditingContractor) {
+      setPlNewContractorColor(getFirstAvailableColor());
+    }
+  }, [plContractorDropdownOpen, plEditingContractor, getFirstAvailableColor]);
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    plContractorDropdownOpenRef.current = plContractorDropdownOpen;
+  }, [plContractorDropdownOpen]);
+
+  // Isometric view state (when clicking a table)
+  const [plIsometricTableId, setPlIsometricTableId] = useState(null); // tableId being viewed
+  const [plIsometricOpen, setPlIsometricOpen] = useState(false);
+
+  // Punch editing popup
+  const [plEditingPunch, setPlEditingPunch] = useState(null); // punch object being edited
+  const [plPunchText, setPlPunchText] = useState('');
+  const [plPunchContractorId, setPlPunchContractorId] = useState(null);
+  const [plPunchPhotoDataUrl, setPlPunchPhotoDataUrl] = useState(null);
+  const [plPunchPhotoName, setPlPunchPhotoName] = useState('');
+  const [plPopupPosition, setPlPopupPosition] = useState(null); // {x, y} screen coords for dynamic positioning
+  const plPunchPhotoInputRef = useRef(null);
+  const plPunchMarkersRef = useRef({}); // id -> marker
+  const plIsoInnerRef = useRef(null); // ref for isometric inner container (for fit button)
+  
+  // Selected punches (for box selection and deletion)
+  const [plSelectedPunches, setPlSelectedPunches] = useState(new Set());
+  
+  // Drag state for moving punches
+  const plDraggingPunchRef = useRef(null); // { punchId, startLatLng, marker }
+
+  // Persist contractors
+  useEffect(() => {
+    try {
+      localStorage.setItem(PL_CONTRACTORS_KEY, JSON.stringify(plContractors));
+    } catch (_e) {
+      void _e;
+    }
+  }, [plContractors]);
+
+  // Persist punches
+  useEffect(() => {
+    try {
+      localStorage.setItem(PL_PUNCHES_KEY, JSON.stringify(plPunches));
+    } catch (_e) {
+      void _e;
+    }
+  }, [plPunches]);
+
+  // Add contractor
+  const plAddContractor = useCallback((name, color) => {
+    if (!name?.trim()) return null;
+    const id = `contractor_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    // Always uppercase contractor names
+    const newC = { id, name: name.trim().toUpperCase(), color: color || DEFAULT_PUNCH_COLORS[0] };
+    setPlContractors(prev => [...prev, newC]);
+    return newC;
+  }, []);
+
+  // Remove contractor
+  const plRemoveContractor = useCallback((contractorId) => {
+    setPlContractors(prev => prev.filter(c => c.id !== contractorId));
+  }, []);
+
+  // Update contractor (name and/or color) - always uppercase names
+  const plUpdateContractor = useCallback((contractorId, name, color) => {
+    setPlContractors(prev => prev.map(c => 
+      c.id === contractorId 
+        ? { ...c, name: (name?.trim() || c.name).toUpperCase(), color: color || c.color }
+        : c
+    ));
+  }, []);
+
+  // Get contractor by ID
+  const plGetContractor = useCallback((contractorId) => {
+    return plContractors.find(c => c.id === contractorId) || null;
+  }, [plContractors]);
+
+  // Create punch point (no popup on create - user clicks on dot to edit)
+  // Returns null if no contractor selected (caller should show warning)
+  const plCreatePunch = useCallback((latlng, tableId = null) => {
+    // Must have contractor selected - use ref for current value
+    const contractorId = plSelectedContractorIdRef.current;
+    if (!contractorId) {
+      return null; // Signal that punch cannot be created
+    }
+    // Get next punch number using ref (always current) and increment both ref and state
+    const nextNumber = plPunchCounterRef.current + 1;
+    plPunchCounterRef.current = nextNumber; // Update ref immediately for next call
+    setPlPunchCounter(nextNumber); // Update state for persistence
+    
+    const punch = {
+      id: `punch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      lat: latlng.lat,
+      lng: latlng.lng,
+      contractorId: contractorId,
+      text: '',
+      photoDataUrl: null,
+      photoName: '',
+      tableId: tableId || null,
+      createdAt: new Date().toISOString(),
+      punchNumber: nextNumber // Permanent number - never changes even if others are deleted
+    };
+    setPlPunches(prev => [...prev, punch]);
+    // Don't open popup - user clicks on dot to edit
+    return punch;
+  }, []); // No dependencies - uses refs for current values
+  
+  // Move punch to new location
+  const plMovePunch = useCallback((punchId, newLatLng) => {
+    setPlPunches(prev => prev.map(p =>
+      p.id === punchId
+        ? { ...p, lat: newLatLng.lat, lng: newLatLng.lng }
+        : p
+    ));
+  }, []);
+  
+  // Delete multiple punches (for selection delete)
+  const plDeleteSelectedPunches = useCallback(() => {
+    if (plSelectedPunches.size === 0) return;
+    const count = plSelectedPunches.size;
+    if (!window.confirm(`Are you sure you want to delete ${count} selected punch item${count > 1 ? 's' : ''}?`)) return;
+    setPlPunches(prev => prev.filter(p => !plSelectedPunches.has(p.id)));
+    if (plEditingPunch && plSelectedPunches.has(plEditingPunch.id)) {
+      setPlEditingPunch(null);
+    }
+    setPlSelectedPunches(new Set());
+  }, [plSelectedPunches, plEditingPunch]);
+
+  // Save punch
+  const plSavePunch = useCallback(() => {
+    if (!plEditingPunch) return;
+    setPlPunches(prev => prev.map(p =>
+      p.id === plEditingPunch.id
+        ? { ...p, text: plPunchText, contractorId: plPunchContractorId, photoDataUrl: plPunchPhotoDataUrl, photoName: plPunchPhotoName }
+        : p
+    ));
+    setPlEditingPunch(null);
+    setPlPunchText('');
+    setPlPunchContractorId(null);
+    setPlPunchPhotoDataUrl(null);
+    setPlPunchPhotoName('');
+  }, [plEditingPunch, plPunchText, plPunchContractorId, plPunchPhotoDataUrl, plPunchPhotoName]);
+
+  // Delete punch
+  const plDeletePunch = useCallback((punchId) => {
+    if (!window.confirm('Are you sure you want to delete this punch item?')) return;
+    setPlPunches(prev => prev.filter(p => p.id !== punchId));
+    if (plEditingPunch?.id === punchId) {
+      setPlEditingPunch(null);
+    }
+  }, [plEditingPunch]);
+  
+  // Mark punch as completed (done)
+  const plMarkPunchCompleted = useCallback((punchId) => {
+    if (!window.confirm('Are you sure you want to mark this punch as completed?')) return;
+    setPlPunches(prev => prev.map(p =>
+      p.id === punchId ? { ...p, completed: true, completedAt: new Date().toISOString() } : p
+    ));
+    // Close popup if this punch is being edited
+    if (plEditingPunch?.id === punchId) {
+      setPlEditingPunch(null);
+      setPlPunchText('');
+      setPlPunchContractorId(null);
+      setPlPunchPhotoDataUrl(null);
+      setPlPunchPhotoName('');
+    }
+  }, [plEditingPunch]);
+
+  // Mark punch as uncompleted
+  const plMarkPunchUncompleted = useCallback((punchId) => {
+    if (!window.confirm('Are you sure you want to mark this punch as incomplete?')) return;
+    setPlPunches(prev => prev.map(p =>
+      p.id === punchId ? { ...p, completed: false, completedAt: null } : p
+    ));
+  }, []);
+
+  // Photo lightbox state for enlarged view
+  const [plPhotoLightbox, setPlPhotoLightbox] = useState(null); // { url, name, x, y }
+
+  // Handle punch photo selection
+  const handlePlPunchPhotoSelected = useCallback((file) => {
+    if (!file) return;
+    if (!file.type?.startsWith('image/')) {
+      alert('Please select an image file.');
+      return;
+    }
+    const maxBytes = 1.5 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      alert('Image is too large. Please select an image under 1.5MB.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : null;
+      if (dataUrl) {
+        setPlPunchPhotoDataUrl(dataUrl);
+        setPlPunchPhotoName(file.name || '');
+      }
+    };
+    reader.readAsDataURL(file);
+  }, []);
 
   // ─────────────────────────────────────────────────────────────
   // GLOBAL UNDO/REDO (modules + sub-modes)
@@ -1104,6 +1427,7 @@ export default function BaseModule({
   const notePhotoInputRef = useRef(null);
   const noteMarkersRef = useRef({}); // id -> marker
   const markerClickedRef = useRef(false); // Track if a marker was just clicked
+  const polygonClickedRef = useRef(false); // Track if a polygon click was already handled by layer events
 
   // LV: inv_id daily completion tracking (click inv_id labels to mark completed for today)
   const getTodayYmd = () => new Date().toISOString().split('T')[0];
@@ -1561,10 +1885,6 @@ export default function BaseModule({
   }, [mvfSelectedTrenchIds]);
 
   useEffect(() => {
-    mvftSelectedTrenchPartsRef.current = mvftSelectedTrenchParts;
-  }, [mvftSelectedTrenchParts]);
-
-  useEffect(() => {
     mvfCommittedTrenchIdsRef.current = mvfCommittedTrenchIds;
   }, [mvfCommittedTrenchIds]);
 
@@ -1702,59 +2022,6 @@ export default function BaseModule({
     });
     mvfPrevSelectedTrenchRef.current = new Set();
   }, [isMVF]);
-
-  // MVFT: keep base mv_trench geometry always WHITE; completed portion is drawn via green overlays.
-  useEffect(() => {
-    if (!isMVFT) return;
-    const baseStyle = {
-      color: 'rgba(255,255,255,0.85)',
-      weight: 1.25,
-      opacity: 1.0,
-      lineJoin: 'round',
-      lineCap: 'round',
-      fill: false,
-      fillOpacity: 0,
-    };
-    const byId = mvftTrenchByIdRef.current || {};
-    Object.keys(byId).forEach((id) => {
-      const layer = byId[id];
-      if (layer && typeof layer.setStyle === 'function') layer.setStyle(baseStyle);
-    });
-  }, [isMVFT]);
-
-  // MVFT: render selected trench PART overlays.
-  useEffect(() => {
-    const selectedLayer = mvftTrenchSelectedLayerRef.current;
-    if (!selectedLayer) return;
-
-    if (!isMVFT) {
-      try { selectedLayer.clearLayers(); } catch (_e) { void _e; }
-      return;
-    }
-
-    const map = mapRef.current;
-    if (!map) return;
-
-    try { selectedLayer.clearLayers(); } catch (_e) { void _e; }
-
-    (mvftSelectedTrenchParts || []).forEach((p) => {
-      if (!p?.coords || p.coords.length < 2) return;
-      const line = L.polyline(p.coords, { color: '#00e676', weight: 6.4, opacity: 1.0, interactive: true });
-      line._mvftTrenchPartId = p.id;
-      line.on('contextmenu', (evt) => {
-        try {
-          if (evt?.originalEvent) {
-            L.DomEvent.stopPropagation(evt.originalEvent);
-            L.DomEvent.preventDefault(evt.originalEvent);
-          }
-        } catch (_e) {
-          void _e;
-        }
-        setMvftSelectedTrenchParts((prev) => (prev || []).filter((x) => x?.id !== p.id));
-      });
-      selectedLayer.addLayer(line);
-    });
-  }, [isMVFT, mvftSelectedTrenchParts]);
 
   // MC4: render panel end-status markers (blue=mc4, green=terminated)
   useEffect(() => {
@@ -3343,19 +3610,7 @@ export default function BaseModule({
   }, [effectiveStringTextVisibility, scheduleStringTextLabelUpdate]);
   
   // Hooks for daily log and export
-  const { dailyLog: moduleDailyLog, addRecord: addModuleRecord } = useDailyLog(activeMode?.key || 'DC');
-  const { dailyLog: lvibLvDailyLog, addRecord: addLvibLvRecord } = useDailyLog('LVIB_LV');
-  const { dailyLog: lvibInvDailyLog, addRecord: addLvibInvRecord } = useDailyLog('LVIB_INV');
-
-  const lvibActiveKey = String(lvibSubMode || 'lvBox') === 'invBox' ? 'LVIB_INV' : 'LVIB_LV';
-  const lvibActiveLabel = String(lvibSubMode || 'lvBox') === 'invBox' ? 'Inverter Box Installation' : 'LV Box Installation';
-  const lvibActiveUnit = String(lvibSubMode || 'lvBox') === 'invBox' ? 'Inverter box installed' : 'LV box installed';
-  const lvibAllDailyLog = [...(lvibLvDailyLog || []), ...(lvibInvDailyLog || [])];
-
-  const dailyLog = isLVIB ? lvibAllDailyLog : moduleDailyLog;
-  const addRecord = isLVIB
-    ? (lvibActiveKey === 'LVIB_INV' ? addLvibInvRecord : addLvibLvRecord)
-    : addModuleRecord;
+  const { dailyLog, addRecord } = useDailyLog(activeMode?.key || 'DC');
   const { exportToExcel } = useChartExport();
   
   // Save notes to localStorage
@@ -3435,8 +3690,15 @@ export default function BaseModule({
       }
       
       marker.on('click', (e) => {
-        e.originalEvent?.stopPropagation();
-        L.DomEvent.stopPropagation(e);
+        try {
+          const oe = e?.originalEvent;
+          if (oe) {
+            L.DomEvent.stopPropagation(oe);
+            L.DomEvent.preventDefault(oe);
+          }
+        } catch (_e) {
+          void _e;
+        }
         markerClickedRef.current = true;
         
         // Open popup immediately when marker is clicked
@@ -3454,14 +3716,354 @@ export default function BaseModule({
       });
       
       marker.on('mousedown', (e) => {
-        e.originalEvent?.stopPropagation();
-        L.DomEvent.stopPropagation(e);
+        try {
+          const oe = e?.originalEvent;
+          if (oe) {
+            L.DomEvent.stopPropagation(oe);
+            L.DomEvent.preventDefault(oe);
+          }
+        } catch (_e) {
+          void _e;
+        }
       });
       
       marker.addTo(mapRef.current);
       noteMarkersRef.current[note.id] = marker;
     });
   }, [notes, selectedNotes, noteMode]);
+
+  // ─────────────────────────────────────────────────────────────────
+  // PUNCH LIST: Render punch markers on map (contractor-colored)
+  // Including isometric punches placed randomly inside their table polygon
+  // ─────────────────────────────────────────────────────────────────
+  // Store stable random positions for isometric punches
+  const plIsoPunchPositionsRef = useRef({}); // punchId -> {lat, lng}
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+    if (!isPL) {
+      // Not PUNCH_LIST mode: clear any punch markers
+      Object.values(plPunchMarkersRef.current).forEach(m => m.remove());
+      plPunchMarkersRef.current = {};
+      return;
+    }
+
+    const escapeHtml = (s) =>
+      String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+
+    // Helper: Generate random point inside polygon bounds with margin
+    const getRandomPointInPolygonBounds = (layer, seed) => {
+      try {
+        const bounds = layer.getBounds();
+        if (!bounds) return null;
+        const sw = bounds.getSouthWest();
+        const ne = bounds.getNorthEast();
+        // Add margin (10% inward from edges)
+        const latRange = ne.lat - sw.lat;
+        const lngRange = ne.lng - sw.lng;
+        const margin = 0.15;
+        const minLat = sw.lat + latRange * margin;
+        const maxLat = ne.lat - latRange * margin;
+        const minLng = sw.lng + lngRange * margin;
+        const maxLng = ne.lng - lngRange * margin;
+        // Use seed for pseudo-random but stable position
+        const seededRandom = (s) => {
+          const x = Math.sin(s) * 10000;
+          return x - Math.floor(x);
+        };
+        const lat = minLat + seededRandom(seed) * (maxLat - minLat);
+        const lng = minLng + seededRandom(seed * 2 + 1) * (maxLng - minLng);
+        return { lat, lng };
+      } catch (_e) {
+        return null;
+      }
+    };
+
+    // Build tableId -> layer lookup
+    const tableIdToLayer = {};
+    Object.entries(polygonById.current).forEach(([uniqueId, info]) => {
+      if (info?.layer?.feature?.properties?.tableId) {
+        const tableId = info.layer.feature.properties.tableId;
+        tableIdToLayer[tableId] = info.layer;
+      }
+    });
+
+    // Clear existing punch markers
+    Object.values(plPunchMarkersRef.current).forEach(m => m.remove());
+    plPunchMarkersRef.current = {};
+
+    // Create markers for all punch points
+    plPunches.forEach((punch, punchIndex) => {
+      const contractor = plGetContractor(punch.contractorId);
+      // Use green for completed punches, otherwise contractor color
+      const color = punch.completed ? PUNCH_COMPLETED_COLOR : (contractor?.color || '#888888');
+
+      // Determine lat/lng: if isometric punch (lat=0, lng=0, has tableId), use random point in table polygon
+      let markerLat = punch.lat;
+      let markerLng = punch.lng;
+
+      const isIsoPunch = punch.tableId && punch.isoX != null && punch.isoY != null && punch.lat === 0 && punch.lng === 0;
+      if (isIsoPunch) {
+        // Check if we already have a stable position for this punch
+        if (plIsoPunchPositionsRef.current[punch.id]) {
+          const pos = plIsoPunchPositionsRef.current[punch.id];
+          markerLat = pos.lat;
+          markerLng = pos.lng;
+        } else {
+          // Generate new random position inside table polygon
+          const tableLayer = tableIdToLayer[punch.tableId];
+          if (tableLayer) {
+            // Use punch id hash as seed for stable random position
+            let seed = 0;
+            for (let i = 0; i < punch.id.length; i++) {
+              seed = ((seed << 5) - seed) + punch.id.charCodeAt(i);
+              seed = seed & seed;
+            }
+            const randomPos = getRandomPointInPolygonBounds(tableLayer, seed);
+            if (randomPos) {
+              markerLat = randomPos.lat;
+              markerLng = randomPos.lng;
+              plIsoPunchPositionsRef.current[punch.id] = randomPos;
+            } else {
+              // Fallback: use table center
+              try {
+                const center = tableLayer.getBounds().getCenter();
+                markerLat = center.lat;
+                markerLng = center.lng;
+                plIsoPunchPositionsRef.current[punch.id] = { lat: markerLat, lng: markerLng };
+              } catch (_e) {
+                return; // Skip this punch if we can't place it
+              }
+            }
+          } else {
+            return; // Skip: no table layer found
+          }
+        }
+      }
+
+      // Skip if no valid position
+      if (!markerLat || !markerLng) return;
+
+      const isSelected = plSelectedPunches.has(punch.id);
+      const isEditing = plEditingPunch?.id === punch.id;
+      // Use permanent punch number (never changes even when other punches deleted)
+      const punchNumber = punch.punchNumber || (punchIndex + 1);
+      const dotIcon = L.divIcon({
+        className: 'custom-punch-pin',
+        html: `
+          <div class="punch-dot-hit ${isSelected ? 'selected' : ''} ${isEditing ? 'editing' : ''}" style="--punch-color: ${color};">
+            <div class="punch-dot-core" style="background:${color};${isSelected ? 'box-shadow: 0 0 0 4px rgba(255,255,255,0.6), 0 0 12px rgba(255,255,255,0.4);' : ''}"></div>
+            <span class="punch-number">${punchNumber}</span>
+          </div>
+        `,
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+        popupAnchor: [0, -9]
+      });
+
+      const marker = L.marker([markerLat, markerLng], {
+        icon: dotIcon,
+        interactive: true,
+        riseOnHover: true,
+        draggable: false // We handle drag manually for better control
+      });
+
+      // Tooltip
+      const hasText = Boolean(punch.text?.trim());
+      const hasPhoto = Boolean(punch.photoDataUrl);
+      if (hasText || hasPhoto || contractor || punch.tableId) {
+        let tooltipContent = '';
+        // Show tableId for isometric punches
+        if (punch.tableId) {
+          tooltipContent += `<span style="color:#fbbf24;font-size:10px">[${escapeHtml(punch.tableId)}]</span> `;
+        }
+        if (contractor) {
+          tooltipContent += `<strong style="color:${color}">[${escapeHtml(contractor.name)}]</strong>`;
+        }
+        if (hasText) {
+          const compact = punch.text.replace(/\s+/g, ' ').trim();
+          const snippet = compact.length > 60 ? `${compact.slice(0, 60)}…` : compact;
+          tooltipContent += (tooltipContent ? ' ' : '') + escapeHtml(snippet);
+        }
+        if (!tooltipContent && hasPhoto) {
+          tooltipContent = 'Fotoğraf var';
+        }
+        if (tooltipContent) {
+          marker.bindTooltip(tooltipContent, {
+            direction: 'top',
+            opacity: 0.98,
+            className: 'punch-tooltip',
+            offset: [0, -9],
+            sticky: false
+          });
+          marker.on('mouseover', () => {
+            if (!plDraggingPunchRef.current) marker.openTooltip();
+          });
+          marker.on('mouseout', () => marker.closeTooltip());
+        }
+      }
+
+      // Variables for drag detection
+      let mouseDownTime = 0;
+      let mouseDownPos = null;
+      let isDragging = false;
+      const DRAG_THRESHOLD = 150; // ms to start drag
+      const MOVE_THRESHOLD = 5; // pixels to detect movement
+
+      // Mousedown: start potential drag
+      marker.on('mousedown', (e) => {
+        try {
+          const oe = e?.originalEvent;
+          if (oe) {
+            L.DomEvent.stopPropagation(oe);
+            L.DomEvent.preventDefault(oe);
+          }
+          // Only left click for drag
+          if (oe?.button !== 0) return;
+          
+          mouseDownTime = Date.now();
+          mouseDownPos = { x: oe.clientX, y: oe.clientY };
+          isDragging = false;
+          
+          // Start drag after threshold
+          const dragStartTimer = setTimeout(() => {
+            if (mouseDownPos) {
+              isDragging = true;
+              plDraggingPunchRef.current = {
+                punchId: punch.id,
+                marker: marker,
+                startLatLng: marker.getLatLng()
+              };
+              marker.closeTooltip?.();
+              // Visual feedback
+              marker.getElement()?.classList.add('dragging');
+            }
+          }, DRAG_THRESHOLD);
+          
+          // Store timer ref for cleanup
+          marker._dragStartTimer = dragStartTimer;
+        } catch (_e) {
+          void _e;
+        }
+      });
+
+      // Click: select or open edit (if not dragging)
+      marker.on('click', (e) => {
+        try {
+          const oe = e?.originalEvent;
+          if (oe) {
+            L.DomEvent.stopPropagation(oe);
+            L.DomEvent.preventDefault(oe);
+          }
+        } catch (_e) {
+          void _e;
+        }
+        
+        // Clear drag timer
+        if (marker._dragStartTimer) {
+          clearTimeout(marker._dragStartTimer);
+          marker._dragStartTimer = null;
+        }
+        
+        // If we were dragging, don't process click
+        if (isDragging || plDraggingPunchRef.current) {
+          isDragging = false;
+          return;
+        }
+        
+        markerClickedRef.current = true;
+        marker.closeTooltip?.();
+        
+        // Shift+click: toggle selection
+        const shiftKey = e?.originalEvent?.shiftKey;
+        if (shiftKey) {
+          setPlSelectedPunches(prev => {
+            const next = new Set(prev);
+            if (next.has(punch.id)) {
+              next.delete(punch.id);
+            } else {
+              next.add(punch.id);
+            }
+            return next;
+          });
+        } else {
+          // Normal click: if table punch, open isometric; else open edit popup
+          if (punch.tableId) {
+            setPlIsometricTableId(punch.tableId);
+            setPlIsometricOpen(true);
+          } else {
+            // No table - open edit popup directly
+            // Get screen position from click event for dynamic popup positioning
+            const clickX = e?.originalEvent?.clientX || window.innerWidth / 2;
+            const clickY = e?.originalEvent?.clientY || window.innerHeight / 2;
+            setPlPopupPosition({ x: clickX, y: clickY });
+            setPlEditingPunch(punch);
+            setPlPunchText(punch.text || '');
+            setPlPunchContractorId(punch.contractorId);
+            setPlPunchPhotoDataUrl(punch.photoDataUrl || null);
+            setPlPunchPhotoName(punch.photoName || '');
+          }
+        }
+        
+        setTimeout(() => {
+          markerClickedRef.current = false;
+        }, 200);
+      });
+
+      marker.addTo(mapRef.current);
+      plPunchMarkersRef.current[punch.id] = marker;
+    });
+  }, [isPL, plPunches, plContractors, plGetContractor, plSelectedPunches, plEditingPunch]);
+  
+  // Handle punch drag - global mousemove and mouseup
+  useEffect(() => {
+    if (!isPL) return;
+    
+    const handleMouseMove = (e) => {
+      if (!plDraggingPunchRef.current) return;
+      const { marker } = plDraggingPunchRef.current;
+      if (!marker || !mapRef.current) return;
+      
+      try {
+        const newLatLng = mapRef.current.mouseEventToLatLng(e);
+        marker.setLatLng(newLatLng);
+      } catch (_e) {
+        void _e;
+      }
+    };
+    
+    const handleMouseUp = (e) => {
+      if (!plDraggingPunchRef.current) return;
+      const { punchId, marker, startLatLng } = plDraggingPunchRef.current;
+      
+      try {
+        marker.getElement()?.classList.remove('dragging');
+        const newLatLng = marker.getLatLng();
+        
+        // Only update if actually moved
+        if (newLatLng.lat !== startLatLng.lat || newLatLng.lng !== startLatLng.lng) {
+          plMovePunch(punchId, newLatLng);
+        }
+      } catch (_e) {
+        void _e;
+      }
+      
+      plDraggingPunchRef.current = null;
+    };
+    
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isPL, plMovePunch]);
   
   // Handle Delete key for selected notes, Escape to close popup, and Ctrl+Z / Ctrl+Y for undo/redo (notes)
   useEffect(() => {
@@ -3497,17 +4099,29 @@ export default function BaseModule({
         setNoteDate('');
         setNotePhotoDataUrl(null);
         setNotePhotoName('');
+        // Also clear punch selection
+        if (isPL) {
+          setPlSelectedPunches(new Set());
+        }
       }
-      if (e.key === 'Delete' && noteMode && selectedNotes.size > 0) {
+      
+      // Delete selected notes
+      if (e.key === 'Delete' && noteMode && selectedNotes.size > 0 && !isPL) {
         const toDelete = new Set(selectedNotes);
         setNotes(prev => prev.filter(n => !toDelete.has(n.id)));
         setSelectedNotes(new Set());
+      }
+      
+      // Delete selected punches (PUNCH_LIST mode)
+      if (e.key === 'Delete' && isPL && noteMode && plSelectedPunches.size > 0) {
+        e.preventDefault();
+        plDeleteSelectedPunches();
       }
     };
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [noteMode, selectedNotes, globalUndo, globalRedo, setNotes]);
+  }, [noteMode, selectedNotes, globalUndo, globalRedo, setNotes, isPL, plSelectedPunches, plDeleteSelectedPunches]);
   
   // Create new note at click position (no popup on create)
   const createNote = (latlng) => {
@@ -3924,6 +4538,7 @@ export default function BaseModule({
       const polygonInfo = polygonById.current[polygonId];
       if (polygonInfo && polygonInfo.layer && polygonInfo.layer.setStyle) {
         const isSelected = currentSelected.has(polygonId);
+        const keepFillForHover = !!isPL;
         // IMPORTANT: when unselecting, restore the exact base style used by the layer
         // so it doesn't appear "whiter" after toggling.
         polygonInfo.layer.setStyle(
@@ -3931,22 +4546,31 @@ export default function BaseModule({
             ? {
                 color: '#22c55e',
                 weight: 2,
-                fill: false,
+                fill: keepFillForHover,
                 fillOpacity: 0
               }
             : {
                 color: 'rgba(255,255,255,0.35)',
                 weight: 1.05,
-                fill: false,
+                fill: keepFillForHover,
                 fillOpacity: 0
               }
         );
+
+        // PUNCH_LIST: never allow selection updates to disable hover interactivity.
+        if (isPL) {
+          try {
+            polygonInfo.layer.options.interactive = true;
+          } catch (_e) {
+            void _e;
+          }
+        }
       }
     });
     
     // Save current selection for next comparison
     prevSelectedRef.current = new Set(currentSelected);
-  }, [isDCCT, selectedPolygons]);
+  }, [isDCCT, isPL, selectedPolygons]);
 
   // DCCT: color full-table polygon outlines based on CSV test result (same tone as ID labels).
   useEffect(() => {
@@ -4075,19 +4699,6 @@ export default function BaseModule({
     mvfPrevSelectedTrenchRef.current = new Set();
     setMvfSelectedTrenchIds(new Set());
     setMvfSelectedTrenchParts([]);
-
-    // MVFT: clear trench state on reload
-    mvftTrenchByIdRef.current = {};
-    mvftTrenchLenByIdRef.current = {};
-    setMvftTrenchTotalMeters(0);
-    setMvftSelectedTrenchParts([]);
-    if (isMVFT) {
-      // MVFT totals come from mv_trench length, not CSV.
-      setTotalPlus(0);
-      setTotalMinus(0);
-      setCompletedPlus(0);
-      setCompletedMinus(0);
-    }
     
     const allBounds = L.latLngBounds();
     let totalFeatures = 0;
@@ -4178,62 +4789,6 @@ export default function BaseModule({
           }
         }
 
-        // MVFT: compute total trench length (meters) from mv_trench
-        if (isMVFT && file.name === 'mv_trench' && Array.isArray(data?.features)) {
-          try {
-            const makeId = (feature) => {
-              const fidRaw = feature?.properties?.fid ?? feature?.properties?.FID ?? feature?.properties?.id ?? feature?.id;
-              if (fidRaw != null) return `mvft_trench_${String(fidRaw)}`;
-              try {
-                const coords = feature?.geometry?.coordinates;
-                const head = Array.isArray(coords) ? JSON.stringify(coords).slice(0, 160) : '';
-                return `mvft_trench_geom_${head.length}_${head}`;
-              } catch {
-                return 'mvft_trench_geom_unknown';
-              }
-            };
-
-            const metersOfLine = (coords) => {
-              if (!Array.isArray(coords) || coords.length < 2) return 0;
-              let sum = 0;
-              for (let i = 0; i < coords.length - 1; i++) {
-                const a = coords[i];
-                const b = coords[i + 1];
-                const lng1 = a?.[0];
-                const lat1 = a?.[1];
-                const lng2 = b?.[0];
-                const lat2 = b?.[1];
-                if (typeof lat1 !== 'number' || typeof lng1 !== 'number' || typeof lat2 !== 'number' || typeof lng2 !== 'number') continue;
-                sum += L.latLng(lat1, lng1).distanceTo(L.latLng(lat2, lng2));
-              }
-              return sum;
-            };
-
-            let totalM = 0;
-            const lenById = {};
-            for (const f of data.features) {
-              const g = f?.geometry;
-              if (!g) continue;
-              const id = makeId(f);
-              let m = 0;
-              if (g.type === 'LineString') m = metersOfLine(g.coordinates);
-              else if (g.type === 'MultiLineString') m = (g.coordinates || []).reduce((s, c) => s + metersOfLine(c), 0);
-              if (Number.isFinite(m) && m > 0) {
-                lenById[id] = m;
-                totalM += m;
-              }
-            }
-            mvftTrenchLenByIdRef.current = lenById;
-            setMvftTrenchTotalMeters(totalM);
-            setTotalPlus(totalM);
-            setTotalMinus(0);
-          } catch (_e) {
-            void _e;
-            mvftTrenchLenByIdRef.current = {};
-            setMvftTrenchTotalMeters(0);
-          }
-        }
-
         // Special handling for string_text - store points and render lazily for performance
         if (file.name === 'string_text') {
           const stringLayer = L.layerGroup();
@@ -4307,6 +4862,505 @@ export default function BaseModule({
         
         // Special handling for full.geojson - tables will be selectable (MultiPolygon)
         if (file.name === 'full') {
+          // PUNCH_LIST: if full layer is backed by full_plot.geojson (LineString segments),
+          // build table polygons in-memory so selections work per-table (click + selection box).
+          if (isPL) {
+            const hasLines = (data?.features || []).some((f) => f?.geometry?.type === 'LineString');
+            if (hasLines) {
+              try {
+                const rawLines = (data?.features || []).filter(
+                  (f) => f?.geometry?.type === 'LineString' && Array.isArray(f?.geometry?.coordinates) && f.geometry.coordinates.length >= 2
+                );
+
+                const quantile = (arr, q) => {
+                  const a = (arr || []).filter((n) => typeof n === 'number' && Number.isFinite(n));
+                  if (a.length === 0) return 0;
+                  a.sort((x, y) => x - y);
+                  const i = (a.length - 1) * q;
+                  const lo = Math.floor(i);
+                  const hi = Math.ceil(i);
+                  if (lo === hi) return a[lo];
+                  const t = i - lo;
+                  return a[lo] * (1 - t) + a[hi] * t;
+                };
+
+                const plotCodeOfLayer = (layer) => {
+                  const match = String(layer || '').match(/plot([A-G])_(east|west)/i);
+                  if (!match) return 'XX';
+                  const letter = String(match[1] || '').toUpperCase();
+                  const dir = String(match[2] || '').toLowerCase() === 'east' ? 'E' : 'W';
+                  return `${letter}${dir}`;
+                };
+
+                const slopeFromLineSegments = (layerLines) => {
+                  // Axial mean angle (0..pi) using doubled-angle trick.
+                  let sumC = 0;
+                  let sumS = 0;
+                  for (const ln of layerLines || []) {
+                    const coords = ln?.geometry?.coordinates;
+                    if (!Array.isArray(coords) || coords.length < 2) continue;
+                    const a = coords[0];
+                    const b = coords[coords.length - 1];
+                    const dx = Number(b?.[0]) - Number(a?.[0]);
+                    const dy = Number(b?.[1]) - Number(a?.[1]);
+                    if (!Number.isFinite(dx) || !Number.isFinite(dy)) continue;
+                    const w = Math.hypot(dx, dy);
+                    if (!Number.isFinite(w) || w <= 0) continue;
+                    const ang = Math.atan2(dy, dx);
+                    const angAxial = ((ang % Math.PI) + Math.PI) % Math.PI;
+                    sumC += Math.cos(2 * angAxial) * w;
+                    sumS += Math.sin(2 * angAxial) * w;
+                  }
+                  const mean = 0.5 * Math.atan2(sumS, sumC);
+                  const slope = Math.tan(mean);
+                  return Number.isFinite(slope) ? slope : 0;
+                };
+
+                const coordKey = (c) => {
+                  const x = Number(c?.[0]);
+                  const y = Number(c?.[1]);
+                  if (!Number.isFinite(x) || !Number.isFinite(y)) return '';
+                  return `${x.toFixed(9)},${y.toFixed(9)}`;
+                };
+
+                const byLayer = new Map();
+                for (const line of rawLines) {
+                  const layer = String(line?.properties?.layer || '');
+                  if (!layer) continue;
+                  if (!byLayer.has(layer)) byLayer.set(layer, []);
+                  byLayer.get(layer).push(line);
+                }
+
+                const polygonFeatures = [];
+
+                // If some segments can't be polygonized, keep them as non-interactive lines
+                // (prevents "missing" tables in plots like plotC).
+                const residualLineFeatures = [];
+
+                for (const [layer, layerLines] of byLayer.entries()) {
+                  const endpointToIdx = new Map();
+                  const used = new Array(layerLines.length).fill(false);
+                  const blocked = new Array(layerLines.length).fill(false);
+
+                  const pushEndpoint = (k, idx) => {
+                    if (!k) return;
+                    const arr = endpointToIdx.get(k);
+                    if (arr) arr.push(idx);
+                    else endpointToIdx.set(k, [idx]);
+                  };
+
+                  for (let i = 0; i < layerLines.length; i++) {
+                    const coords = layerLines[i]?.geometry?.coordinates;
+                    const a = coords?.[0];
+                    const b = coords?.[coords.length - 1];
+                    pushEndpoint(coordKey(a), i);
+                    pushEndpoint(coordKey(b), i);
+                  }
+
+                  for (let i = 0; i < layerLines.length; i++) {
+                    if (used[i] || blocked[i]) continue;
+                    const coords0 = layerLines[i]?.geometry?.coordinates;
+                    const a0 = coords0?.[0];
+                    const b0 = coords0?.[coords0.length - 1];
+                    const startKey = coordKey(a0);
+                    let lastKey = coordKey(b0);
+                    if (!startKey || !lastKey) {
+                      used[i] = true;
+                      continue;
+                    }
+
+                    const ring = [
+                      [a0[0], a0[1]],
+                      [b0[0], b0[1]],
+                    ];
+                    const attemptIdx = [i];
+                    used[i] = true;
+
+                    let safety = layerLines.length + 5;
+                    while (lastKey !== startKey && safety-- > 0) {
+                      const candidates = endpointToIdx.get(lastKey) || [];
+                      let nextIdx = -1;
+                      let bestCos = -Infinity;
+                      const prev = ring[ring.length - 2];
+                      const cur = ring[ring.length - 1];
+                      const prevDx = Number(cur?.[0]) - Number(prev?.[0]);
+                      const prevDy = Number(cur?.[1]) - Number(prev?.[1]);
+                      const prevLen = Math.hypot(prevDx, prevDy) || 1;
+
+                      for (const cIdx of candidates) {
+                        if (used[cIdx] || blocked[cIdx]) continue;
+                        const coordsN = layerLines[cIdx]?.geometry?.coordinates;
+                        const aN = coordsN?.[0];
+                        const bN = coordsN?.[coordsN.length - 1];
+                        const aK = coordKey(aN);
+                        const bK = coordKey(bN);
+                        if (!aK || !bK) continue;
+
+                        let nextPt = null;
+                        if (aK === lastKey) nextPt = bN;
+                        else if (bK === lastKey) nextPt = aN;
+                        else continue;
+
+                        const candDx = Number(nextPt?.[0]) - Number(cur?.[0]);
+                        const candDy = Number(nextPt?.[1]) - Number(cur?.[1]);
+                        const candLen = Math.hypot(candDx, candDy);
+                        if (!Number.isFinite(candLen) || candLen <= 0) continue;
+
+                        const cos = (prevDx * candDx + prevDy * candDy) / (prevLen * candLen);
+                        // avoid immediate backtrack
+                        if (cos < -0.99) continue;
+                        if (cos > bestCos) {
+                          bestCos = cos;
+                          nextIdx = cIdx;
+                        }
+                      }
+                      if (nextIdx < 0) break;
+
+                      const coordsN = layerLines[nextIdx]?.geometry?.coordinates;
+                      const aN = coordsN?.[0];
+                      const bN = coordsN?.[coordsN.length - 1];
+                      const aK = coordKey(aN);
+                      const bK = coordKey(bN);
+                      if (!aK || !bK) {
+                        // do not consume the segment; mark start as blocked and retry later
+                        break;
+                      }
+
+                      if (aK === lastKey) {
+                        ring.push([bN[0], bN[1]]);
+                        lastKey = bK;
+                      } else if (bK === lastKey) {
+                        ring.push([aN[0], aN[1]]);
+                        lastKey = aK;
+                      } else {
+                        // shouldn't happen; abort this attempt without consuming segments
+                        break;
+                      }
+                      used[nextIdx] = true;
+                      attemptIdx.push(nextIdx);
+                    }
+
+                    if (lastKey === startKey && ring.length >= 4) {
+                      const first = ring[0];
+                      const last = ring[ring.length - 1];
+                      if (!last || last[0] !== first[0] || last[1] !== first[1]) {
+                        ring.push([first[0], first[1]]);
+                      }
+
+                      // Simple centroid (average of vertices). Good enough for ordering.
+                      let cx = 0;
+                      let cy = 0;
+                      const n = Math.max(1, ring.length - 1);
+                      for (let k = 0; k < ring.length - 1; k++) {
+                        cx += Number(ring[k][0]) || 0;
+                        cy += Number(ring[k][1]) || 0;
+                      }
+                      cx /= n;
+                      cy /= n;
+
+                      polygonFeatures.push({
+                        type: 'Feature',
+                        properties: {
+                          ...(layerLines[i]?.properties || {}),
+                          layer,
+                          __pl_cx: cx,
+                          __pl_cy: cy,
+                        },
+                        geometry: {
+                          type: 'Polygon',
+                          coordinates: [ring],
+                        },
+                      });
+                    } else {
+                      // Failed to close a ring; release segments so they can be used by another start.
+                      // Block this start edge to avoid retry loops.
+                      for (const idx of attemptIdx) used[idx] = false;
+                      blocked[i] = true;
+                    }
+                  }
+
+                  // Second pass (PL): polygonize any remaining segments by connected-components + convex hull.
+                  // This recovers tables whose edges don't chain cleanly (common in plotC).
+                  try {
+                    const PREC = 8;
+                    const keyOfXY = (x, y) => {
+                      const xx = Number(x);
+                      const yy = Number(y);
+                      if (!Number.isFinite(xx) || !Number.isFinite(yy)) return '';
+                      return `${xx.toFixed(PREC)},${yy.toFixed(PREC)}`;
+                    };
+
+                    const pointAgg = new Map(); // key -> {sx, sy, n}
+                    const edgeEnds = new Array(layerLines.length); // idx -> {aK,bK}
+                    const addPt = (k, x, y) => {
+                      if (!k) return;
+                      const cur = pointAgg.get(k);
+                      if (cur) {
+                        cur.sx += x;
+                        cur.sy += y;
+                        cur.n += 1;
+                      } else {
+                        pointAgg.set(k, { sx: x, sy: y, n: 1 });
+                      }
+                    };
+
+                    for (let i = 0; i < layerLines.length; i++) {
+                      const coords = layerLines[i]?.geometry?.coordinates;
+                      if (!Array.isArray(coords) || coords.length < 2) continue;
+                      const a = coords[0];
+                      const b = coords[coords.length - 1];
+                      const ax = Number(a?.[0]);
+                      const ay = Number(a?.[1]);
+                      const bx = Number(b?.[0]);
+                      const by = Number(b?.[1]);
+                      if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) continue;
+                      const aK = keyOfXY(ax, ay);
+                      const bK = keyOfXY(bx, by);
+                      edgeEnds[i] = { aK, bK };
+                      addPt(aK, ax, ay);
+                      addPt(bK, bx, by);
+                    }
+
+                    const pointOfKey = (k) => {
+                      const agg = pointAgg.get(k);
+                      if (!agg || !agg.n) return null;
+                      return { x: agg.sx / agg.n, y: agg.sy / agg.n };
+                    };
+
+                    const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+                    const convexHull = (pts) => {
+                      const p = (pts || []).filter(Boolean);
+                      if (p.length < 3) return [];
+                      p.sort((u, v) => (u.x === v.x ? u.y - v.y : u.x - v.x));
+                      const lower = [];
+                      for (const pt of p) {
+                        while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], pt) <= 0) {
+                          lower.pop();
+                        }
+                        lower.push(pt);
+                      }
+                      const upper = [];
+                      for (let i = p.length - 1; i >= 0; i--) {
+                        const pt = p[i];
+                        while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], pt) <= 0) {
+                          upper.pop();
+                        }
+                        upper.push(pt);
+                      }
+                      upper.pop();
+                      lower.pop();
+                      return lower.concat(upper);
+                    };
+
+                    const adj = new Map(); // nodeKey -> edgeIdx[]
+                    const addAdj = (k, idx) => {
+                      if (!k) return;
+                      const arr = adj.get(k);
+                      if (arr) arr.push(idx);
+                      else adj.set(k, [idx]);
+                    };
+
+                    for (let i = 0; i < layerLines.length; i++) {
+                      if (used[i]) continue;
+                      const ends = edgeEnds[i];
+                      if (!ends?.aK || !ends?.bK) continue;
+                      addAdj(ends.aK, i);
+                      addAdj(ends.bK, i);
+                    }
+
+                    const visitedEdge = new Set();
+                    for (let i = 0; i < layerLines.length; i++) {
+                      if (used[i] || visitedEdge.has(i)) continue;
+                      const ends0 = edgeEnds[i];
+                      if (!ends0?.aK || !ends0?.bK) continue;
+
+                      // BFS edges via node adjacency
+                      const queue = [i];
+                      const compEdges = [];
+                      const compNodes = new Set();
+                      while (queue.length) {
+                        const eIdx = queue.pop();
+                        if (eIdx == null || visitedEdge.has(eIdx) || used[eIdx]) continue;
+                        visitedEdge.add(eIdx);
+                        const ends = edgeEnds[eIdx];
+                        if (!ends?.aK || !ends?.bK) continue;
+                        compEdges.push(eIdx);
+                        compNodes.add(ends.aK);
+                        compNodes.add(ends.bK);
+                        const neighA = adj.get(ends.aK) || [];
+                        const neighB = adj.get(ends.bK) || [];
+                        for (const nIdx of neighA) if (!visitedEdge.has(nIdx) && !used[nIdx]) queue.push(nIdx);
+                        for (const nIdx of neighB) if (!visitedEdge.has(nIdx) && !used[nIdx]) queue.push(nIdx);
+                      }
+
+                      // Heuristic: tables are small components (a few segments)
+                      if (compEdges.length < 3 || compEdges.length > 16) continue;
+
+                      const pts = Array.from(compNodes)
+                        .map(pointOfKey)
+                        .filter(Boolean);
+
+                      if (pts.length < 3) continue;
+                      const hull = convexHull(pts);
+                      if (!hull || hull.length < 3) continue;
+
+                      const ring = hull.map((p) => [p.x, p.y]);
+                      ring.push([ring[0][0], ring[0][1]]);
+
+                      // centroid for ordering
+                      let cx = 0;
+                      let cy = 0;
+                      const n = Math.max(1, ring.length - 1);
+                      for (let k = 0; k < ring.length - 1; k++) {
+                        cx += Number(ring[k][0]) || 0;
+                        cy += Number(ring[k][1]) || 0;
+                      }
+                      cx /= n;
+                      cy /= n;
+
+                      polygonFeatures.push({
+                        type: 'Feature',
+                        properties: {
+                          ...(layerLines[compEdges[0]]?.properties || {}),
+                          layer,
+                          __pl_cx: cx,
+                          __pl_cy: cy,
+                        },
+                        geometry: {
+                          type: 'Polygon',
+                          coordinates: [ring],
+                        },
+                      });
+
+                      // consume these edges
+                      for (const eIdx of compEdges) used[eIdx] = true;
+                    }
+                  } catch (_e) {
+                    void _e;
+                  }
+
+                  // Add any remaining segments as residual lines (non-interactive)
+                  for (let i = 0; i < layerLines.length; i++) {
+                    if (used[i]) continue;
+                    residualLineFeatures.push({
+                      type: 'Feature',
+                      properties: {
+                        ...(layerLines[i]?.properties || {}),
+                        layer,
+                        __pl_residualLine: true,
+                      },
+                      geometry: layerLines[i]?.geometry,
+                    });
+                  }
+                }
+
+                // Assign deterministic table IDs for Punch List:
+                // - group by plot layer
+                // - rows: north->south
+                // - columns: screen right->left
+                const byPlotPolys = new Map();
+                for (const f of polygonFeatures) {
+                  const layer = String(f?.properties?.layer || '');
+                  if (!layer) continue;
+                  if (!byPlotPolys.has(layer)) byPlotPolys.set(layer, []);
+                  byPlotPolys.get(layer).push(f);
+                }
+
+                const ORDER_ZOOM = 20;
+                for (const [layer, feats] of byPlotPolys.entries()) {
+                  const plotCode = plotCodeOfLayer(layer);
+                  const layerLines = byLayer.get(layer) || [];
+                  const slope = slopeFromLineSegments(layerLines);
+
+                  const items = feats
+                    .map((f) => {
+                      const cx = Number(f?.properties?.__pl_cx);
+                      const cy = Number(f?.properties?.__pl_cy);
+                      if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
+                      const b = cy - slope * cx;
+                      const pt = L.CRS.EPSG3857.latLngToPoint(L.latLng(cy, cx), ORDER_ZOOM);
+                      return {
+                        feature: f,
+                        cx,
+                        cy,
+                        b,
+                        sx: Number(pt?.x) || 0,
+                        sy: Number(pt?.y) || 0,
+                      };
+                    })
+                    .filter(Boolean);
+
+                  if (items.length === 0) continue;
+                  items.sort((a, b) => b.b - a.b);
+
+                  const gaps = [];
+                  for (let i = 1; i < items.length; i++) {
+                    gaps.push(items[i - 1].b - items[i].b);
+                  }
+                  const gapMed = quantile(gaps, 0.5);
+                  // Empirically stable for this dataset: median gap is intra-row;
+                  // row breaks are much larger when slope is derived from segment orientations.
+                  const rowGapThreshold = Math.max(1e-6, gapMed * 8);
+
+                  const rows = [];
+                  let current = [items[0]];
+                  for (let i = 1; i < items.length; i++) {
+                    const g = items[i - 1].b - items[i].b;
+                    if (g > rowGapThreshold) {
+                      rows.push(current);
+                      current = [items[i]];
+                    } else {
+                      current.push(items[i]);
+                    }
+                  }
+                  rows.push(current);
+
+                  // Order rows north->south by average screen Y (smaller = more north)
+                  rows.sort((ra, rb) => {
+                    const ay = ra.reduce((s, it) => s + it.sy, 0) / Math.max(1, ra.length);
+                    const byy = rb.reduce((s, it) => s + it.sy, 0) / Math.max(1, rb.length);
+                    return ay - byy;
+                  });
+
+                  rows.forEach((rowItems, rowIdx) => {
+                    // Columns: numbering direction depends on plot side.
+                    // Screen right = west.
+                    // - *_west: start from screen right (west) => right->left
+                    // - *_east: start from screen left (east) => left->right
+                    const isEastPlot = /_east$/i.test(String(layer || ''));
+                    rowItems.sort((a, b) => (isEastPlot ? a.sx - b.sx : b.sx - a.sx));
+                    rowItems.forEach((it, colIdx) => {
+                      it.feature.properties.tableId = `${plotCode}${rowIdx + 1}-${colIdx + 1}`;
+                      it.feature.properties.row = rowIdx + 1;
+                      it.feature.properties.col = colIdx + 1;
+                    });
+                  });
+                }
+
+                // Strip internal helper props
+                for (const f of polygonFeatures) {
+                  if (f?.properties) {
+                    delete f.properties.__pl_cx;
+                    delete f.properties.__pl_cy;
+                  }
+                }
+
+                // Only swap in polygons if conversion looks successful; otherwise keep lines
+                // so we don't accidentally drop most tables from the map.
+                const minExpected = Math.max(50, Math.floor(rawLines.length / 8));
+                if (polygonFeatures.length >= minExpected) {
+                  data = {
+                    ...data,
+                    type: 'FeatureCollection',
+                    features: [...polygonFeatures, ...residualLineFeatures],
+                  };
+                }
+              } catch (_e) {
+                void _e;
+              }
+            }
+          }
+
           // TABLE_INSTALLATION_PROGRESS: count tables (2 panels = 1 table)
           if (isTIP) {
             const threshold = activeMode?.tableAreaThreshold || 50; // m²
@@ -4465,26 +5519,6 @@ export default function BaseModule({
             continue;
           }
 
-          // MVFT: tables (full.geojson) must NOT be selectable; only mv_trench is selectable
-          if (isMVFT) {
-            const fullLayer = L.geoJSON(data, {
-              renderer: canvasRenderer,
-              interactive: false,
-              style: () => ({
-                color: 'rgba(255,255,255,0.35)',
-                weight: 1.05,
-                fill: false,
-                fillOpacity: 0,
-              }),
-            });
-            fullLayer.addTo(mapRef.current);
-            layersRef.current.push(fullLayer);
-            if (fullLayer.getBounds().isValid()) {
-              allBounds.extend(fullLayer.getBounds());
-            }
-            continue;
-          }
-
           // TIP: Track feature index for panel pairing
           let tipFeatureIndex = 0;
           const tipFeatureToPolygonId = new Map(); // featureIndex -> polygonId
@@ -4493,10 +5527,12 @@ export default function BaseModule({
             renderer: canvasRenderer,
             interactive: true,
             
+            // PL needs a filled (but invisible) hit-area so hover works over the whole table,
+            // even after selection/unselection style updates.
             style: () => ({
               color: 'rgba(255,255,255,0.35)',
               weight: 1.05,
-              fill: false,
+              fill: !!isPL,
               fillOpacity: 0,
             }),
             
@@ -4507,6 +5543,50 @@ export default function BaseModule({
               const isLine = gType === 'LineString';
               // MC4 panel logic only applies to polygons (panels). DC selection can include other shapes.
               if (!gType || (!isPoly && !(isLine && !isMC4))) return;
+
+              // PUNCH_LIST: residual lines are only a visual fallback (never selectable)
+              if (isPL && isLine) {
+                try {
+                  featureLayer.options.interactive = false;
+                } catch (_e) {
+                  void _e;
+                }
+                return;
+              }
+
+              // PUNCH_LIST: show deterministic table ID on hover
+              if (isPL && isPoly) {
+                const tableId = String(feature?.properties?.tableId || '');
+                if (tableId) {
+                  try {
+                    featureLayer.bindTooltip(tableId, {
+                      permanent: false,
+                      sticky: true,
+                      direction: 'top',
+                      opacity: 0.95,
+                      className: 'punch-list-tooltip',
+                    });
+
+                    // Be explicit: keep tooltip hover behavior stable even if other handlers run.
+                    featureLayer.on('mouseover', () => {
+                      try {
+                        featureLayer.openTooltip();
+                      } catch (_e) {
+                        void _e;
+                      }
+                    });
+                    featureLayer.on('mouseout', () => {
+                      try {
+                        featureLayer.closeTooltip();
+                      } catch (_e) {
+                        void _e;
+                      }
+                    });
+                  } catch (_e) {
+                    void _e;
+                  }
+                }
+              }
 
               // Assign unique ID to this panel/polygon
               const uniqueId = `polygon_${polygonIdCounter.current++}`;
@@ -4673,12 +5753,11 @@ export default function BaseModule({
               if (isDCCT && isPoly) {
                 featureLayer.on('click', (e) => {
                   // Stop all propagation to prevent double-firing
-                  L.DomEvent.stop(e);
                   try {
-                    if (e?.originalEvent) {
-                      e.originalEvent.stopPropagation();
-                      e.originalEvent.stopImmediatePropagation();
-                      e.originalEvent.preventDefault();
+                    const oe = e?.originalEvent;
+                    if (oe) {
+                      L.DomEvent.stop(oe);
+                      oe.stopImmediatePropagation?.();
                     }
                   } catch (_e) {
                     void _e;
@@ -4705,7 +5784,27 @@ export default function BaseModule({
               }
 
               featureLayer.on('click', (e) => {
-                L.DomEvent.stopPropagation(e);
+                try {
+                  const oe = e?.originalEvent;
+                  if (oe) {
+                    L.DomEvent.stopPropagation(oe);
+                    L.DomEvent.preventDefault(oe);
+                  }
+                } catch (_e) {
+                  void _e;
+                }
+                polygonClickedRef.current = true;
+
+                // PUNCH_LIST MODE: clicking a table always opens isometric view
+                if (isPL) {
+                  const tableId = featureLayer.feature?.properties?.tableId;
+                  if (tableId) {
+                    setPlIsometricTableId(tableId);
+                    setPlIsometricOpen(true);
+                  }
+                  return;
+                }
+
                 if (noteMode) return;
                 const polygonId = featureLayer._uniquePolygonId;
                 if (polygonId) {
@@ -4762,7 +5861,15 @@ export default function BaseModule({
               });
               
               featureLayer.on('contextmenu', (e) => {
-                L.DomEvent.stopPropagation(e);
+                try {
+                  const oe = e?.originalEvent;
+                  if (oe) {
+                    L.DomEvent.stopPropagation(oe);
+                    L.DomEvent.preventDefault(oe);
+                  }
+                } catch (_e) {
+                  void _e;
+                }
                 if (noteMode) return;
                 const polygonId = featureLayer._uniquePolygonId;
                 if (polygonId) {
@@ -4854,25 +5961,21 @@ export default function BaseModule({
               
               if (isSelected) {
                 return {
-                  color: '#166534',
-                  weight: 3.6,
+                  color: '#16a34a',
+                  weight: 4.0,
                   opacity: 1,
-                  lineJoin: 'round',
-                  lineCap: 'round',
                   fill: true,
                   fillColor: '#22c55e',
-                  fillOpacity: 0.78
+                  fillOpacity: 0.75
                 };
               }
               return {
-                color: '#991b1b',
-                weight: 3.0,
-                opacity: 0.98,
-                lineJoin: 'round',
-                lineCap: 'round',
+                color: '#dc2626',
+                weight: 3.2,
+                opacity: 1,
                 fill: true,
                 fillColor: '#ef4444',
-                fillOpacity: 0.55
+                fillOpacity: 0.3
               };
             },
             onEachFeature: (feature, featureLayer) => {
@@ -4955,19 +6058,30 @@ export default function BaseModule({
             allBounds.extend(boxLayer.getBounds());
           }
           
-          // Add LV/INV text labels inside boxes using smaller, lighter styling
-          // so they fit inside the boxes without overflowing.
+          // Add LV/INV text labels inside boxes using the SAME rendering system/options as inv_id labels.
+          // This ensures identical zoom scaling, stroke, and optional background plate behavior.
           const boxLabel = boxType === 'lvBox' ? 'LV' : 'INV';
-          // Use dedicated box label config (smaller than inv_id labels)
-          const boxBaseSize = typeof activeMode?.boxLabelTextBaseSize === 'number' ? activeMode.boxLabelTextBaseSize : 6;
-          const boxRefZoom = typeof activeMode?.boxLabelTextRefZoom === 'number' ? activeMode.boxLabelTextRefZoom : 20;
-          const boxTextStyle = activeMode?.boxLabelTextStyle || '400';
-          const boxMinFs = typeof activeMode?.boxLabelTextMinFontSize === 'number' ? activeMode.boxLabelTextMinFontSize : 4;
-          const boxMaxFs = typeof activeMode?.boxLabelTextMaxFontSize === 'number' ? activeMode.boxLabelTextMaxFontSize : 10;
-          const boxStrokeColor = activeMode?.boxLabelTextStrokeColor || 'rgba(0,0,0,0.7)';
-          const boxStrokeWidthFactor =
-            typeof activeMode?.boxLabelTextStrokeWidthFactor === 'number' ? activeMode.boxLabelTextStrokeWidthFactor : 0.8;
+          const invScale = typeof activeMode?.invIdTextScale === 'number' ? activeMode.invIdTextScale : 1;
+          const invBase = typeof activeMode?.invIdTextBaseSize === 'number' ? activeMode.invIdTextBaseSize : 19;
+          const invRefZoom = typeof activeMode?.invIdTextRefZoom === 'number' ? activeMode.invIdTextRefZoom : 20;
+          const invTextStyle = activeMode?.invIdTextStyle || '600';
+          const invMinFs = typeof activeMode?.invIdTextMinFontSize === 'number' ? activeMode.invIdTextMinFontSize : null;
+          const invMaxFs = typeof activeMode?.invIdTextMaxFontSize === 'number' ? activeMode.invIdTextMaxFontSize : null;
+          const invStrokeColor = activeMode?.invIdTextStrokeColor || 'rgba(0,0,0,0.88)';
+          const invStrokeWidthFactor =
+            typeof activeMode?.invIdTextStrokeWidthFactor === 'number' ? activeMode.invIdTextStrokeWidthFactor : 1.45;
+          const invBgColor = activeMode?.invIdTextBgColor || null;
+          const invBgPaddingX = typeof activeMode?.invIdTextBgPaddingX === 'number' ? activeMode.invIdTextBgPaddingX : 0;
+          const invBgPaddingY = typeof activeMode?.invIdTextBgPaddingY === 'number' ? activeMode.invIdTextBgPaddingY : 0;
+          const invBgStrokeColor = activeMode?.invIdTextBgStrokeColor || null;
+          const invBgStrokeWidth = typeof activeMode?.invIdTextBgStrokeWidth === 'number' ? activeMode.invIdTextBgStrokeWidth : 0;
+          const invBgCornerRadius =
+            typeof activeMode?.invIdTextBgCornerRadius === 'number' ? activeMode.invIdTextBgCornerRadius : 0;
+          const invMinTextZoom = typeof activeMode?.invIdTextMinTextZoom === 'number' ? activeMode.invIdTextMinTextZoom : null;
+          const invMinBgZoom = typeof activeMode?.invIdTextMinBgZoom === 'number' ? activeMode.invIdTextMinBgZoom : null;
 
+          const baseSize = invBase * invScale;
+          const radius = 22 * invScale;
           const features = data.features || [];
           features.forEach((feature) => {
             if (!feature.geometry) return;
@@ -4988,32 +6102,30 @@ export default function BaseModule({
                 sumLng += lng;
               });
               center = [sumLat / coords.length, sumLng / coords.length];
-            } else if (feature.geometry.type === 'LineString' && feature.geometry.coordinates?.length > 0) {
-              // LineString boxes: compute center from all coordinates
-              const coords = feature.geometry.coordinates;
-              let sumLat = 0, sumLng = 0;
-              coords.forEach(([lng, lat]) => {
-                sumLat += lat;
-                sumLng += lng;
-              });
-              center = [sumLat / coords.length, sumLng / coords.length];
             }
             if (!center) return;
 
             const textMarker = L.textLabel(center, {
               text: boxLabel,
               renderer: canvasRenderer,
-              textBaseSize: boxBaseSize,
-              refZoom: boxRefZoom,
-              textStyle: boxTextStyle,
-              textColor: 'rgba(255,255,255,0.95)',
-              textStrokeColor: boxStrokeColor,
-              textStrokeWidthFactor: boxStrokeWidthFactor,
-              minFontSize: boxMinFs,
-              maxFontSize: boxMaxFs,
-              bgColor: null,
+              textBaseSize: baseSize,
+              refZoom: invRefZoom,
+              textStyle: invTextStyle,
+              textColor: 'rgba(250,204,21,0.98)', // Yellow - visible on red boxes
+              textStrokeColor: invStrokeColor,
+              textStrokeWidthFactor: invStrokeWidthFactor,
+              minFontSize: invMinFs,
+              maxFontSize: invMaxFs,
+              bgColor: invBgColor,
+              bgPaddingX: invBgPaddingX,
+              bgPaddingY: invBgPaddingY,
+              bgStrokeColor: invBgStrokeColor,
+              bgStrokeWidth: invBgStrokeWidth,
+              bgCornerRadius: invBgCornerRadius,
+              minTextZoom: invMinTextZoom,
+              minBgZoom: invMinBgZoom,
               interactive: false,
-              radius: 0,
+              radius,
             });
             textMarker.addTo(mapRef.current);
             layersRef.current.push(textMarker);
@@ -5027,14 +6139,13 @@ export default function BaseModule({
         const invLabelMode = file.name === 'inv_id' && (isLV || isLVTT || activeMode?.invIdLabelMode);
         const invInteractive = (isLV || isLVTT) && file.name === 'inv_id';
         const mvfTrenchInteractive = isMVF && file.name === 'mv_trench';
-        const mvftTrenchInteractive = isMVFT && file.name === 'mv_trench';
         // MVT: we don't want table selection interactions in this mode.
         const disableInteractions = (isMVT || isLVTT) && (file.name === 'full' || file.name === 'subs');
         const layer = L.geoJSON(data, {
           renderer: canvasRenderer,
-          interactive: !disableInteractions && (invInteractive || mvfTrenchInteractive || mvftTrenchInteractive),
+          interactive: !disableInteractions && (invInteractive || mvfTrenchInteractive),
           
-          style: (feature) => {
+          style: () => {
             // LVIB mode: lv_box and inv_box with red color
             if (isLVIB && (file.name === 'lv_box' || file.name === 'inv_box')) {
               return {
@@ -5059,19 +6170,6 @@ export default function BaseModule({
               return {
                 color: 'rgba(255,255,255,0.85)',
                 weight: 1.25,
-                fill: false,
-                fillOpacity: 0,
-              };
-            }
-
-            // MVFT: base mv_trench stays white; selected portion is rendered via overlay parts.
-            if (mvftTrenchInteractive) {
-              return {
-                color: 'rgba(255,255,255,0.85)',
-                weight: 1.25,
-                opacity: 1.0,
-                lineJoin: 'round',
-                lineCap: 'round',
                 fill: false,
                 fillOpacity: 0,
               };
@@ -5311,21 +6409,6 @@ export default function BaseModule({
           },
           
           onEachFeature: (feature, featureLayer) => {
-            // MVFT: index mv_trench features for click-near selection + style updates
-            if (mvftTrenchInteractive && featureLayer) {
-              const fidRaw = feature?.properties?.fid ?? feature?.properties?.FID ?? feature?.properties?.id ?? feature?.id;
-              const id = fidRaw != null ? `mvft_trench_${String(fidRaw)}` : (() => {
-                try {
-                  const coords = feature?.geometry?.coordinates;
-                  const head = Array.isArray(coords) ? JSON.stringify(coords).slice(0, 160) : '';
-                  return `mvft_trench_geom_${head.length}_${head}`;
-                } catch {
-                  return 'mvft_trench_geom_unknown';
-                }
-              })();
-              mvftTrenchByIdRef.current[id] = featureLayer;
-            }
-
             // MVF: allow selecting mv_trench segments (click toggles green)
             if (mvfTrenchInteractive && featureLayer && typeof featureLayer.on === 'function') {
               const fidRaw = feature?.properties?.fid;
@@ -5983,7 +7066,9 @@ export default function BaseModule({
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     // MVT: no table work in this mode; disable box selection / global mouse capture so labels are clickable.
-    if (isMVT || isLVTT) return;
+    // PUNCH_LIST: disable box selection only in normal mode.
+    // Note mode relies on these handlers for click-to-create and box-to-select notes.
+    if (isMVT || isLVTT || (isPL && !noteMode)) return;
     
     const map = mapRef.current;
     const container = map.getContainer();
@@ -5994,7 +7079,10 @@ export default function BaseModule({
       return Boolean(
         t.closest?.('.custom-note-pin') ||
           t.closest?.('.note-dot-hit') ||
-          t.closest?.('.note-dot-core')
+          t.closest?.('.note-dot-core') ||
+          t.closest?.('.custom-punch-pin') ||
+          t.closest?.('.punch-dot-hit') ||
+          t.closest?.('.punch-dot-core')
       );
     };
     
@@ -6007,6 +7095,12 @@ export default function BaseModule({
     const onMouseDown = (e) => {
       if (e.button !== 0 && e.button !== 2) return; // Left or right click
 
+      // PUNCH_LIST: Capture hamburger menu state NOW (before App.jsx's document listener closes it)
+      // This must be done at mousedown because App.jsx closes menu on mousedown
+      if (isPL) {
+        plHamburgerWasOpenOnMouseDownRef.current = !!window.__cewHamburgerMenuOpen;
+      }
+
       // Prevent "clicking a note marker creates a new note" bug
       if (noteMode && isNoteMarkerDomTarget(e)) {
         return;
@@ -6014,6 +7108,7 @@ export default function BaseModule({
       
       // Reset marker click flag at start of new interaction
       markerClickedRef.current = false;
+      polygonClickedRef.current = false;
 
       // Leaflet can throw here if the map pane isn't fully initialized (or was just torn down during a mode switch).
       let startLatLng = null;
@@ -6031,6 +7126,17 @@ export default function BaseModule({
         isRightClick: e.button === 2,
         isDrag: false
       };
+
+      // PUNCH_LIST: box selection should not leak into Leaflet's own handlers.
+      // When Leaflet also processes the same drag, canvas hover can get stuck after box select.
+      if (isPL && !noteMode) {
+        try {
+          e.preventDefault();
+          e.stopPropagation();
+        } catch (_e) {
+          void _e;
+        }
+      }
       try { map.dragging?.disable?.(); } catch (_e) { void _e; }
     };
     
@@ -6065,40 +7171,116 @@ export default function BaseModule({
           weight: 2,
           fillColor: boxColor,
           fillOpacity: 0.2,
-          dashArray: '5, 5'
+          dashArray: '5, 5',
+          interactive: false,
         }).addTo(map);
       }
     };
     
-    const onMouseUp = () => {
+    const onMouseUp = (e) => {
       if (!draggingRef.current) return;
+
+      // ═══════════════════════════════════════════════════════════════════
+      // MENU OPEN CHECK: If any menu WAS open when mousedown started, don't create punch
+      // We use the ref captured at mousedown because App.jsx closes hamburger on mousedown
+      // ═══════════════════════════════════════════════════════════════════
+      const wasHamburgerMenuOpen = plHamburgerWasOpenOnMouseDownRef.current === true;
+      const isContractorDropdownOpen = plContractorDropdownOpenRef.current === true;
       
-      map.dragging.enable();
+      // Reset the hamburger flag for next interaction
+      plHamburgerWasOpenOnMouseDownRef.current = false;
+      
+      if (wasHamburgerMenuOpen || isContractorDropdownOpen) {
+        // Close contractor dropdown if open
+        if (isContractorDropdownOpen) {
+          setPlContractorDropdownOpen(false);
+        }
+        // Hamburger menu closes itself via App.jsx document listener
+        // Clean up drag state and exit - don't do anything else
+        draggingRef.current = null;
+        if (boxRectRef.current) {
+          try { boxRectRef.current.remove(); } catch (_e) { void _e; }
+          boxRectRef.current = null;
+        }
+        try { map.dragging.enable(); } catch (_e) { void _e; }
+        return;
+      }
+      // ═══════════════════════════════════════════════════════════════════
+
+      // Always restore map dragging, even if selection logic throws.
+      try {
+        map.dragging.enable();
+      } catch (_e) {
+        void _e;
+      }
       
       const wasDrag = draggingRef.current.isDrag;
       const isRightClick = draggingRef.current.isRightClick;
       const clickLatLng = draggingRef.current.start;
+
+      // PUNCH_LIST: stop the mouseup from bubbling into Leaflet after a box-select drag.
+      if (isPL && wasDrag && !noteMode) {
+        try {
+          e?.preventDefault?.();
+          e?.stopPropagation?.();
+        } catch (_e) {
+          void _e;
+        }
+      }
       
       // Handle box selection (drag)
       if (boxRectRef.current && wasDrag) {
         const bounds = boxRectRef.current.getBounds();
         
         if (noteMode) {
-          // NOTE MODE: Select only notes within bounds
-          const notesInBounds = notes.filter(note => 
-            bounds.contains(L.latLng(note.lat, note.lng))
-          );
-          
-          if (notesInBounds.length > 0) {
-            setSelectedNotes(prev => {
-              const next = new Set(prev);
-              if (isRightClick) {
-                notesInBounds.forEach(n => next.delete(n.id));
-              } else {
-                notesInBounds.forEach(n => next.add(n.id));
+          // PUNCH_LIST MODE: Select punches within bounds
+          if (isPL) {
+            const punchesInBounds = plPunches.filter(punch => {
+              // Get punch position (handle isometric punches with random positions)
+              let pLat = punch.lat;
+              let pLng = punch.lng;
+              
+              // If isometric punch with stored position, use that
+              if (punch.tableId && punch.isoX != null && punch.isoY != null && punch.lat === 0 && punch.lng === 0) {
+                const storedPos = plIsoPunchPositionsRef.current?.[punch.id];
+                if (storedPos) {
+                  pLat = storedPos.lat;
+                  pLng = storedPos.lng;
+                }
               }
-              return next;
+              
+              if (!pLat || !pLng) return false;
+              return bounds.contains(L.latLng(pLat, pLng));
             });
+            
+            if (punchesInBounds.length > 0) {
+              setPlSelectedPunches(prev => {
+                const next = new Set(prev);
+                if (isRightClick) {
+                  punchesInBounds.forEach(p => next.delete(p.id));
+                } else {
+                  punchesInBounds.forEach(p => next.add(p.id));
+                }
+                return next;
+              });
+            }
+          } else {
+            // NOTE MODE: Select only notes within bounds
+            const notesInBounds = notes.filter(note => 
+              bounds.contains(L.latLng(note.lat, note.lng))
+            );
+            
+            if (notesInBounds.length > 0) {
+              setSelectedNotes(prev => {
+                const next = new Set(prev);
+                if (isRightClick) {
+                  notesInBounds.forEach(n => next.delete(n.id));
+                } else {
+                  notesInBounds.forEach(n => next.add(n.id));
+                }
+                return next;
+              });
+            }
           }
         } else {
           // MVF MODE: Box select ONLY mv_trench (avoid selecting tables/other layers)
@@ -6341,146 +7523,6 @@ export default function BaseModule({
 
             // MVF segment selections are mapped into trench PARTs now,
             // so partial erase/select via box works automatically (no separate segment-route unselect needed).
-          } else if (isMVFT) {
-            // MVFT MODE: Box select ONLY mv_trench (partial meters inside the box)
-            const byId = mvftTrenchByIdRef.current || {};
-
-            if (isRightClick) {
-              // Partial erase: remove only the portion inside the box.
-              setMvftSelectedTrenchParts((prev) => {
-                const parts = prev || [];
-                if (parts.length === 0) return parts;
-
-                const groups = new Map(); // fid:lineIndex -> parts[]
-                parts.forEach((p) => {
-                  const fid = String(p?.fid || '');
-                  const lineIndex = Number(p?.lineIndex);
-                  if (!fid || !Number.isFinite(lineIndex) || !Number.isFinite(Number(p?.startM)) || !Number.isFinite(Number(p?.endM))) {
-                    const k = `__raw__:${Math.random()}`;
-                    groups.set(k, [p]);
-                    return;
-                  }
-                  const k = `${fid}:${lineIndex}`;
-                  if (!groups.has(k)) groups.set(k, []);
-                  groups.get(k).push(p);
-                });
-
-                const out = [];
-                for (const [k, arr] of groups.entries()) {
-                  if (k.startsWith('__raw__')) {
-                    out.push(...arr);
-                    continue;
-                  }
-                  const [fid, lineIndexStr] = k.split(':');
-                  const lineIndex = Number(lineIndexStr);
-                  const layer = byId[fid];
-                  if (!layer || typeof layer.getLatLngs !== 'function') {
-                    out.push(...arr);
-                    continue;
-                  }
-                  const lines = asLineStrings(layer.getLatLngs());
-                  const lineLL = lines[lineIndex];
-                  if (!lineLL || lineLL.length < 2) {
-                    out.push(...arr);
-                    continue;
-                  }
-
-                  const eraseIntervals = computeIntervalsInBox({ L, map, bounds, lineLatLngs: lineLL, minMeters: 0.5 });
-                  if (!eraseIntervals.length) {
-                    out.push(...arr);
-                    continue;
-                  }
-                  const eraseMerged = mergeIntervals(eraseIntervals);
-                  const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
-
-                  arr.forEach((p) => {
-                    const startM = Number(p.startM);
-                    const endM = Number(p.endM);
-                    const lo = Math.min(startM, endM);
-                    const hi = Math.max(startM, endM);
-                    const remainIntervals = subtractInterval([lo, hi], eraseMerged, 0.2);
-                    remainIntervals.forEach(([a, b]) => {
-                      const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: a, endM: b });
-                      if (!coords || coords.length < 2) return;
-                      out.push({
-                        ...p,
-                        id: `mvft:${fid}:${lineIndex}:${a.toFixed(2)}-${b.toFixed(2)}`,
-                        fid,
-                        lineIndex,
-                        startM: a,
-                        endM: b,
-                        coords,
-                        meters: Math.max(0, b - a),
-                      });
-                    });
-                  });
-                }
-                return out;
-              });
-            } else {
-              // Add only the portion inside the box.
-              const toAdd = [];
-              const coveredIntervalsByKey = new Map(); // fid:lineIndex -> merged intervals
-              const addCovered = (p) => {
-                const fid = String(p?.fid || '');
-                const lineIndex = Number(p?.lineIndex);
-                const a = Number(p?.startM);
-                const b = Number(p?.endM);
-                if (!fid || !Number.isFinite(lineIndex) || !Number.isFinite(a) || !Number.isFinite(b)) return;
-                const lo = Math.min(a, b);
-                const hi = Math.max(a, b);
-                if (!(hi > lo)) return;
-                const key = `${fid}:${lineIndex}`;
-                if (!coveredIntervalsByKey.has(key)) coveredIntervalsByKey.set(key, []);
-                coveredIntervalsByKey.get(key).push([lo, hi]);
-              };
-              (mvftSelectedTrenchPartsRef.current || []).forEach(addCovered);
-              for (const [k, arr] of coveredIntervalsByKey.entries()) coveredIntervalsByKey.set(k, mergeIntervals(arr));
-
-              Object.keys(byId).forEach((fid) => {
-                const layer = byId[fid];
-                if (!layer || typeof layer.getBounds !== 'function' || typeof layer.getLatLngs !== 'function') return;
-                try {
-                  const lb = layer.getBounds();
-                  if (!lb || !bounds.intersects(lb)) return;
-                } catch (_e) {
-                  void _e;
-                  return;
-                }
-
-                const lines = asLineStrings(layer.getLatLngs());
-                lines.forEach((lineLL, lineIndex) => {
-                  if (!lineLL || lineLL.length < 2) return;
-                  const key = `${fid}:${lineIndex}`;
-                  let candidates = computeIntervalsInBox({ L, map, bounds, lineLatLngs: lineLL, minMeters: 0.5 });
-                  if (!candidates.length) return;
-
-                  let covered = coveredIntervalsByKey.get(key) || [];
-                  const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
-                  candidates.forEach(([a, b]) => {
-                    const newInts = subtractInterval([a, b], covered, 0.2);
-                    if (!newInts.length) return;
-                    covered = mergeIntervals([...covered, ...newInts]);
-                    coveredIntervalsByKey.set(key, covered);
-                    newInts.forEach(([x, y]) => {
-                      const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: x, endM: y });
-                      if (!coords || coords.length < 2) return;
-                      toAdd.push({
-                        id: `mvft:${fid}:${lineIndex}:${x.toFixed(2)}-${y.toFixed(2)}`,
-                        fid: String(fid),
-                        lineIndex,
-                        startM: x,
-                        endM: y,
-                        coords,
-                        meters: Math.max(0, y - x),
-                      });
-                    });
-                  });
-                });
-              });
-
-              if (toAdd.length > 0) setMvftSelectedTrenchParts((prev) => [...(prev || []), ...toAdd]);
-            }
           } else if (isMC4) {
             // MC4 MODE: Box advance/reset panel-end states (both ends)
             const ids = [];
@@ -6894,7 +7936,11 @@ export default function BaseModule({
           }
         }
         
-        boxRectRef.current.remove();
+        try {
+          boxRectRef.current.remove();
+        } catch (_e) {
+          void _e;
+        }
         boxRectRef.current = null;
       } else if (!wasDrag && isRightClick) {
         // Right-click without dragging: always allow MVF "unselect"
@@ -6912,19 +7958,48 @@ export default function BaseModule({
             setMvfActiveSegmentKeys(new Set());
           }
         }
-        // MVFT: right-click clears current trench selection
-        if (isMVFT) {
-          if ((mvftSelectedTrenchPartsRef.current?.length || 0) > 0) setMvftSelectedTrenchParts([]);
-        }
       } else if (!wasDrag && !isRightClick && noteMode) {
         // NOTE MODE: Create note on simple click (unless a marker click just happened)
+        // PUNCH_LIST mode: Create punch instead of note
         if (!markerClickedRef.current) {
-          createNote(clickLatLng);
+          if (isPL) {
+            // In PUNCH_LIST: if click is on a table polygon, open isometric view
+            // Otherwise, create a punch point (not on a table)
+            // Use setTimeout to allow polygon click handler to set polygonClickedRef first
+            setTimeout(() => {
+              if (polygonClickedRef.current) {
+                // Table was clicked - polygonClickHandler already opened isometric view
+                // Don't create a punch here
+              } else {
+                // Click outside tables - create punch on general area
+                // Check if contractor is selected (use ref for current value in async context)
+                if (!plSelectedContractorIdRef.current) {
+                  // Show warning toast
+                  const toast = document.createElement('div');
+                  toast.className = 'punch-warning-toast';
+                  toast.innerHTML = '⚠️ Please select a contractor first!';
+                  document.body.appendChild(toast);
+                  setTimeout(() => toast.remove(), 2500);
+                  return;
+                }
+                plCreatePunch(clickLatLng, null);
+              }
+            }, 10);
+          } else {
+            createNote(clickLatLng);
+          }
         }
       } else if (!wasDrag && !isRightClick && !noteMode) {
         // SINGLE CLICK SELECTION MODE: Select individual items by clicking
         const clickPoint = map.latLngToLayerPoint(clickLatLng);
         const clickTolerance = 10; // pixels
+
+        // PUNCH_LIST: if a polygon click handler already processed this click,
+        // don't run the global fallback picker (avoids double-handling and hover glitches).
+        if (isPL && polygonClickedRef.current) {
+          draggingRef.current = null;
+          return;
+        }
 
         // MVT: intercept clicks on our custom labels (counter + TESTED) before any other selection logic.
         if (isMVT) {
@@ -7208,40 +8283,6 @@ export default function BaseModule({
               void _e;
             }
           }
-        } else if (isMVFT) {
-          // MVFT: Single click near a trench line toggles the WHOLE trench feature (green = completed)
-          const byId = mvftTrenchByIdRef.current || {};
-          let bestId = null;
-          let bestDist = Infinity;
-
-          Object.keys(byId).forEach((id) => {
-            const layer = byId[id];
-            if (!layer || typeof layer.getLatLngs !== 'function') return;
-            const lines = asLineStrings(layer.getLatLngs());
-            lines.forEach((lineLL) => {
-              if (!lineLL || lineLL.length < 2) return;
-              for (let i = 0; i < lineLL.length - 1; i++) {
-                const p1 = map.latLngToLayerPoint(lineLL[i]);
-                const p2 = map.latLngToLayerPoint(lineLL[i + 1]);
-                const dx = p2.x - p1.x;
-                const dy = p2.y - p1.y;
-                const len2 = dx * dx + dy * dy;
-                let t = 0;
-                if (len2 > 0) {
-                  t = Math.max(0, Math.min(1, ((clickPoint.x - p1.x) * dx + (clickPoint.y - p1.y) * dy) / len2));
-                }
-                const projX = p1.x + t * dx;
-                const projY = p1.y + t * dy;
-                const dist = Math.sqrt((clickPoint.x - projX) ** 2 + (clickPoint.y - projY) ** 2);
-                if (dist < clickTolerance && dist < bestDist) {
-                  bestDist = dist;
-                  bestId = id;
-                }
-              }
-            });
-          });
-
-          // MVFT: do not toggle on click (box selection only)
         } else if (isMVF) {
           // MVF: Single click near a trench line to select a small segment around the click point
           const byId = mvfTrenchByIdRef.current || {};
@@ -7438,17 +8479,28 @@ export default function BaseModule({
     };
     
     container.addEventListener('mousedown', onMouseDown);
-    container.addEventListener('mousemove', onMouseMove);
-    container.addEventListener('mouseup', onMouseUp);
+    // Mouse move/up on window so we always clean up even if the user releases outside the map.
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
     
     return () => {
       container.removeEventListener('contextmenu', preventContextMenu);
       container.removeEventListener('mousedown', onMouseDown);
-      container.removeEventListener('mousemove', onMouseMove);
-      container.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+
+      // Safety: ensure we don't leave the map in a non-interactive state.
+      try { map.dragging.enable(); } catch (_e) { void _e; }
+      try {
+        if (boxRectRef.current) boxRectRef.current.remove();
+      } catch (_e) {
+        void _e;
+      }
+      boxRectRef.current = null;
+      draggingRef.current = null;
     };
   // IMPORTANT: include isMC4 (and module key) so drag-selection behavior updates when switching modes.
-  }, [mapReady, activeMode?.key, isLV, isMVF, isMVFT, isMC4, isMVT, isLVTT, isDCCT, stringPoints, noteMode, notes]);
+  }, [mapReady, activeMode?.key, isLV, isMVF, isMC4, isMVT, isLVTT, isDCCT, stringPoints, noteMode, notes]);
 
   useEffect(() => {
     mapRef.current = L.map('map', {
@@ -7500,15 +8552,6 @@ export default function BaseModule({
     } catch (_e) {
       void _e;
       mvfTrenchCommittedLayerRef.current = null;
-    }
-
-    // MVFT: partial trench selection overlay layer
-    try {
-      if (mvftTrenchSelectedLayerRef.current) mvftTrenchSelectedLayerRef.current.remove();
-      mvftTrenchSelectedLayerRef.current = L.layerGroup().addTo(mapRef.current);
-    } catch (_e) {
-      void _e;
-      mvftTrenchSelectedLayerRef.current = null;
     }
 
     // Hide raster tiles for best performance + clean dark background
@@ -7756,10 +8799,6 @@ export default function BaseModule({
         return sum + m * mult;
       }, 0)
     : 0;
-
-  const mvftSelectedMeters = isMVFT
-    ? (mvftSelectedTrenchParts || []).reduce((sum, p) => sum + (Number(p?.meters) || 0), 0)
-    : 0;
   const mvfCommittedCableMeters = isMVF
     ? (mvfCommittedTrenchParts || []).reduce((sum, p) => {
         const segKey = String(p?.segmentKey || '');
@@ -7782,18 +8821,12 @@ export default function BaseModule({
   const tipCompletedTables = isTIP ? Math.floor(selectedPolygons.size / 2) : 0;
 
   // MVF Total must come from CSV (already represents 3 circuits); completed comes from selected trench meters * 3.
-  const overallTotal = isTIP
-    ? tipTotal
-    : (isMVFT
-      ? mvftTrenchTotalMeters
-      : (isMVF ? totalPlus : ((isLV || useSimpleCounters) ? totalPlus : (totalPlus + totalMinus))));
+  const overallTotal = isTIP ? tipTotal : (isMVF ? totalPlus : ((isLV || useSimpleCounters) ? totalPlus : (totalPlus + totalMinus)));
   const completedTotal = isTIP
     ? tipCompletedTables
-    : (isMVFT
-      ? mvftSelectedMeters
-      : (isLV
-        ? lvCompletedLength
-        : (isMVF ? (mvfSelectedCableMeters + mvfCommittedCableMeters + mvfDoneCableMeters) : (completedPlus + completedMinus))));
+    : (isLV
+      ? lvCompletedLength
+      : (isMVF ? (mvfSelectedCableMeters + mvfCommittedCableMeters + mvfDoneCableMeters) : (completedPlus + completedMinus)));
   const completedPct = overallTotal > 0 ? (completedTotal / overallTotal) * 100 : 0;
   const remainingPlus = Math.max(0, totalPlus - completedPlus);
   const remainingMinus = Math.max(0, totalMinus - completedMinus);
@@ -7869,31 +8902,23 @@ export default function BaseModule({
     return { totalStrings, totalEnds, mc4Completed, terminatedCompleted };
   }, [isMC4, mc4PanelStates, mc4HistoryTick, mc4TotalStringsCsv]);
 
-  const lvibActiveSelectedCount = isLVIB
-    ? (String(lvibSubMode || 'lvBox') === 'invBox' ? lvibSelectedInvBoxes.size : lvibSelectedLvBoxes.size)
-    : 0;
-
-  const workSelectionCount = isLV
-    ? lvCompletedInvIds.size
-    : (isLVIB
-      ? lvibActiveSelectedCount
-      : (isMVFT
-        ? (mvftSelectedTrenchParts?.length || 0)
-        : (isMVF
-          ? (mvfSelectedTrenchParts?.length || 0)
-          : (isMC4
-            ? Object.keys(mc4PanelStates || {}).length
-            : (activeMode?.workUnitWeights
-              ? (() => {
-                  const seen = new Set();
-                  (selectedPolygons || new Set()).forEach((pid) => {
-                    const info = polygonById.current?.[pid];
-                    const key = String(info?.dedupeKey || pid);
-                    seen.add(key);
-                  });
-                  return seen.size;
-                })()
-              : selectedPolygons.size)))));
+  const workSelectionCount = isLV 
+    ? lvCompletedInvIds.size 
+    : (isMVF 
+      ? (mvfSelectedTrenchParts?.length || 0) 
+      : (isMC4 
+        ? Object.keys(mc4PanelStates || {}).length 
+        : (activeMode?.workUnitWeights
+          ? (() => {
+              const seen = new Set();
+              (selectedPolygons || new Set()).forEach((pid) => {
+                const info = polygonById.current?.[pid];
+                const key = String(info?.dedupeKey || pid);
+                seen.add(key);
+              });
+              return seen.size;
+            })()
+          : selectedPolygons.size)));
   const mvtCompletedForSubmit = isMVT
     ? Math.max(0, Object.values(mvtTerminationByStation || {}).reduce((s, v) => s + Math.max(0, Math.min(3, Number(v) || 0)), 0))
     : 0;
@@ -7906,11 +8931,9 @@ export default function BaseModule({
   const lvttWorkUnit = lvttCompletedForSubmit === 1 ? 'cable terminated' : 'cables terminated';
   const workAmount = isMVF 
     ? mvfSelectedCableMeters 
-    : (isMVFT
-      ? mvftSelectedMeters
-      : (isMC4 
-        ? (mc4Counts?.mc4Completed || 0) 
-        : completedTotal)); // MVF: pending selected cable meters (scaled), MVFT: selected trench meters, MC4: completed ends count
+    : (isMC4 
+      ? (mc4Counts?.mc4Completed || 0) 
+      : completedTotal); // MVF: pending selected cable meters (scaled), MC4: completed ends count
 
   const [dwgUrl, setDwgUrl] = useState('');
   useEffect(() => {
@@ -8328,6 +9351,44 @@ export default function BaseModule({
           );
         })()}
       </div>
+    ) : null) ||
+    (isPL ? (
+      <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start">
+        {(() => {
+          const total = plPunches.length;
+          const completed = plPunches.filter(p => p.completed).length;
+          const remaining = Math.max(0, total - completed);
+          const completedPct = total > 0 ? ((completed / total) * 100).toFixed(1) : '0.0';
+          
+          return (
+            <div className="flex items-center gap-3">
+              {/* Total Counter */}
+              <div className="min-w-[120px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
+                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                  <span className="text-xs font-bold text-slate-200">Total</span>
+                  <span className="text-xs font-bold text-slate-200 tabular-nums">{total}</span>
+                </div>
+              </div>
+              
+              {/* Completed Counter */}
+              <div className="min-w-[160px] border-2 border-emerald-700/50 bg-emerald-900/20 py-3 px-3">
+                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                  <span className="text-xs font-bold text-emerald-400">Completed</span>
+                  <span className="text-xs font-bold text-emerald-400 tabular-nums">{completed} ({completedPct}%)</span>
+                </div>
+              </div>
+              
+              {/* Remaining Counter */}
+              <div className="min-w-[120px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
+                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                  <span className="text-xs font-bold text-amber-400">Remaining</span>
+                  <span className="text-xs font-bold text-amber-400 tabular-nums">{remaining}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
     ) : null);
 
   return (
@@ -8657,24 +9718,17 @@ export default function BaseModule({
                           ? 'MVT_TERM'
                           : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
                             ? 'LVTT_TERM'
-                            : (isLVIB
-                              ? 'LVIB'
-                              : (activeMode?.key || ''))),
+                            : (activeMode?.key || '')),
                       moduleLabel: isMC4
                         ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
                         : (isMVT
                           ? 'Cable Termination'
                           : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
                             ? 'Cable Termination'
-                            : (isLVIB
-                              ? 'LV/INV Box Installation'
-                              : moduleName)),
+                            : moduleName),
                       unit: isMC4
                         ? 'ends'
-                        : (isLVIB
-                          ? 'boxes'
-                          : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination')) ? 'cables' : 'm')),
-                      lvibBreakdown: Boolean(isLVIB),
+                        : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination')) ? 'cables' : 'm'),
                       chartSheetName: (isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
                         ? 'Cable Termination'
                         : undefined,
@@ -8853,6 +9907,103 @@ export default function BaseModule({
         )}
 
         {/* Legend / DWG / Notes (right aligned, vertically centered on screen) */}
+        {/* For PUNCH_LIST: Show Punch and Contractor buttons instead of Legend/DWG/TEXT */}
+        {isPL ? (
+          <div className="fixed right-3 sm:right-5 top-[40%] -translate-y-1/2 z-[1090] flex flex-col items-end gap-4">
+            {/* Punch button with red pulsing dot */}
+            <button
+              type="button"
+              onClick={() => {
+                setNoteMode((prev) => !prev);
+              }}
+              aria-pressed={noteMode}
+              aria-label={noteMode ? 'Exit Punch Mode' : 'Punch Mode'}
+              title={noteMode ? 'Exit Punch Mode' : 'Punch Mode'}
+              className="relative inline-flex h-8 items-center justify-center border-2 border-slate-700 bg-slate-900 px-3 text-[11px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
+            >
+              Punch
+              {/* Red corner indicator (pulses when active) */}
+              <svg
+                className={`note-dot absolute -right-1 -top-1 ${noteMode ? 'h-3 w-3 note-dot--active' : 'h-2 w-2'}`}
+                viewBox="0 0 12 12"
+                aria-hidden="true"
+              >
+                <circle cx="6" cy="6" r="4" fill="#e23a3a" stroke="#7a0f0f" strokeWidth="2" />
+              </svg>
+            </button>
+            
+            {/* Selected punches indicator */}
+            {plSelectedPunches.size > 0 && (
+              <div className="inline-flex h-8 items-center gap-2 border-2 border-red-700 bg-red-900/80 px-3 text-[11px] font-extrabold uppercase tracking-wide text-red-200">
+                <span>{plSelectedPunches.size} Selected</span>
+                <button
+                  type="button"
+                  onClick={() => plDeleteSelectedPunches()}
+                  className="text-red-400 hover:text-white ml-1"
+                  title="Delete Selected (Delete key)"
+                >
+                  🗑️
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPlSelectedPunches(new Set())}
+                  className="text-red-400 hover:text-white"
+                  title="Clear Selection (Escape)"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+            
+            {/* Legend for PUNCH_LIST - in the middle */}
+            <div className="border-2 border-slate-700 bg-slate-900 px-4 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
+              <div className="text-base font-black uppercase tracking-wide text-white">Legend</div>
+              <div className="mt-2 border-2 border-slate-700 bg-slate-800 px-3 py-2">
+                {/* Completed punch indicator */}
+                <div className="flex items-center gap-2">
+                  <span 
+                    className="h-3 w-3 rounded-full border-2 border-emerald-300" 
+                    style={{ backgroundColor: PUNCH_COMPLETED_COLOR }}
+                    aria-hidden="true" 
+                  />
+                  <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-400">Completed</span>
+                </div>
+                {/* Contractor colors */}
+                {plContractors.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-slate-600">
+                    {plContractors.map((c) => (
+                      <div key={c.id} className="flex items-center gap-2 mt-1 first:mt-0">
+                        <span 
+                          className="h-3 w-3 rounded-full border border-white/40" 
+                          style={{ backgroundColor: c.color }}
+                          aria-hidden="true" 
+                        />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-slate-300">{c.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Contractor button - at the bottom, always shows "Contractor" */}
+            <button
+              type="button"
+              id="pl-contractor-btn"
+              onClick={() => setPlContractorDropdownOpen((v) => !v)}
+              className="inline-flex h-8 min-w-[120px] items-center justify-between gap-2 border-2 border-slate-700 bg-slate-900 px-3 text-[11px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
+            >
+              {plSelectedContractorId && (
+                <span
+                  className="inline-block h-3 w-3 rounded-full border border-white/40 flex-shrink-0"
+                  style={{ backgroundColor: plGetContractor(plSelectedContractorId)?.color || '#888' }}
+                />
+              )}
+              <span className={plSelectedContractorId ? 'text-white' : 'text-amber-400'}>Contractor</span>
+              <svg className="h-3 w-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+            </button>
+          </div>
+        ) : (
         <div className="fixed right-3 sm:right-5 top-[40%] -translate-y-1/2 z-[1090] flex flex-col items-end gap-2">
           <div className="border-2 border-slate-700 bg-slate-900 px-4 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
             <div className="text-base font-black uppercase tracking-wide text-white">Legend</div>
@@ -8995,9 +10146,12 @@ export default function BaseModule({
             </button>
           )}
         </div>
+        )}
 
-        {/* NOTE (between header and legend, right-aligned with legend/DWG) */}
-        <div className="fixed right-3 sm:right-5 top-[20%] z-[1090] note-btn-wrap">
+        {/* NOTE button (between header and legend, right-aligned with legend/DWG) */}
+        {/* PUNCH_LIST: Note/Punch button is hidden - punch mode is always active */}
+        {!isPL && (
+        <div className="fixed right-3 sm:right-5 top-[20%] z-[1090] note-btn-wrap flex flex-col items-end gap-1">
           <button
             type="button"
             onClick={() => {
@@ -9023,6 +10177,7 @@ export default function BaseModule({
             </svg>
           </button>
         </div>
+        )}
         </div>
       </div>
 
@@ -9605,6 +10760,811 @@ export default function BaseModule({
         </div>
       )}
 
+      {/* ─────────────────────────────────────────────────────────────────
+          PUNCH LIST: Punch Edit Popup - Dark Industrial Theme
+          ───────────────────────────────────────────────────────────────── */}
+      {isPL && plEditingPunch && (() => {
+        // Calculate popup position to avoid covering the punch point
+        const popupWidth = 320;
+        const popupHeight = 400;
+        const margin = 20;
+        let popupX = (plPopupPosition?.x || window.innerWidth / 2) + margin;
+        let popupY = (plPopupPosition?.y || window.innerHeight / 2) - popupHeight / 2;
+        
+        // Adjust if would go off-screen right
+        if (popupX + popupWidth > window.innerWidth - margin) {
+          popupX = (plPopupPosition?.x || window.innerWidth / 2) - popupWidth - margin;
+        }
+        // Adjust if would go off-screen bottom
+        if (popupY + popupHeight > window.innerHeight - margin) {
+          popupY = window.innerHeight - popupHeight - margin;
+        }
+        // Adjust if would go off-screen top
+        if (popupY < margin) {
+          popupY = margin;
+        }
+        
+        return (
+        <div
+          className="punch-popup-overlay"
+          onClick={() => {
+            setPlEditingPunch(null);
+            setPlPunchText('');
+            setPlPunchContractorId(null);
+            setPlPunchPhotoDataUrl(null);
+            setPlPunchPhotoName('');
+            setPlPopupPosition(null);
+          }}
+        >
+          <div 
+            className="punch-popup-compact" 
+            onClick={(e) => e.stopPropagation()}
+            style={{ left: popupX, top: popupY }}
+          >
+            <div 
+              className="punch-popup-header-compact punch-popup-draggable"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                const startX = e.clientX;
+                const startY = e.clientY;
+                const startLeft = popupX;
+                const startTop = popupY;
+                
+                const onMouseMove = (ev) => {
+                  const dx = ev.clientX - startX;
+                  const dy = ev.clientY - startY;
+                  setPlPopupPosition({ x: startLeft + dx - 20, y: startTop + dy + 160 });
+                };
+                
+                const onMouseUp = () => {
+                  document.removeEventListener('mousemove', onMouseMove);
+                  document.removeEventListener('mouseup', onMouseUp);
+                };
+                
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+              }}
+            >
+              <h3>
+                <span
+                  className="inline-block h-3 w-3 rounded-full border border-white/40"
+                  style={{ backgroundColor: plGetContractor(plPunchContractorId)?.color || '#888' }}
+                />
+                Punch
+              </h3>
+              <button
+                className="punch-close-btn-compact"
+                onClick={() => {
+                  setPlEditingPunch(null);
+                  setPlPunchText('');
+                  setPlPunchContractorId(null);
+                  setPlPunchPhotoDataUrl(null);
+                  setPlPunchPhotoName('');
+                  setPlPopupPosition(null);
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Contractor selector */}
+            <div className="punch-form-row-compact">
+              <select
+                className="punch-select-compact"
+                value={plPunchContractorId || ''}
+                onChange={(e) => setPlPunchContractorId(e.target.value || null)}
+              >
+                <option value="">Contractor...</option>
+                {plContractors.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Photo section */}
+            <div className="punch-photo-section-compact">
+              <input
+                ref={plPunchPhotoInputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  handlePlPunchPhotoSelected(file);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                className="punch-btn-photo-compact"
+                onClick={() => plPunchPhotoInputRef.current?.click()}
+                type="button"
+              >
+                📷
+              </button>
+              {plPunchPhotoDataUrl && (
+                <button
+                  className="punch-btn-remove-photo-compact"
+                  onClick={() => {
+                    setPlPunchPhotoDataUrl(null);
+                    setPlPunchPhotoName('');
+                  }}
+                  type="button"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {plPunchPhotoDataUrl && (
+              <div 
+                className="punch-photo-preview-medium"
+                onClick={(e) => {
+                  // Open lightbox on click
+                  e.stopPropagation();
+                  // Position lightbox dynamically - offset from popup
+                  const lightboxX = popupX + 280;
+                  const lightboxY = popupY;
+                  // If would go off-screen right, put it on the left
+                  const finalX = lightboxX + 350 > window.innerWidth ? popupX - 370 : lightboxX;
+                  setPlPhotoLightbox({ url: plPunchPhotoDataUrl, name: plPunchPhotoName, x: finalX, y: lightboxY });
+                }}
+                title="Click to enlarge"
+              >
+                <img src={plPunchPhotoDataUrl} alt={plPunchPhotoName || 'Punch attachment'} draggable={false} />
+                <div className="punch-photo-zoom-hint">🔍 Click to enlarge</div>
+              </div>
+            )}
+
+            {/* Description */}
+            <div className="punch-form-row-compact">
+              <textarea
+                className="punch-textarea-compact"
+                value={plPunchText}
+                onChange={(e) => setPlPunchText(e.target.value)}
+                placeholder="Description..."
+                autoFocus
+              />
+            </div>
+
+            {/* Actions - compact */}
+            <div className="punch-actions-compact">
+              <button className="punch-btn-delete-compact" onClick={() => plDeletePunch(plEditingPunch.id)} title="Delete">
+                🗑️
+              </button>
+              {!plEditingPunch.completed ? (
+                <button
+                  className="punch-btn-done-compact"
+                  onClick={() => plMarkPunchCompleted(plEditingPunch.id)}
+                  title="Mark as completed"
+                >
+                  ✓
+                </button>
+              ) : (
+                <button
+                  className="punch-btn-uncomplete-compact"
+                  onClick={() => plMarkPunchUncompleted(plEditingPunch.id)}
+                  title="Mark as uncompleted"
+                >
+                  ↩
+                </button>
+              )}
+              <button className="punch-btn-save-compact" onClick={plSavePunch} title="Save">
+                💾
+              </button>
+            </div>
+
+            {plEditingPunch.completed && (
+              <div className="punch-completed-badge">✓ COMPLETED</div>
+            )}
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* Photo Lightbox - enlarged view */}
+      {isPL && plPhotoLightbox && (
+        <div
+          className="punch-lightbox-overlay"
+          onClick={() => setPlPhotoLightbox(null)}
+        >
+          <div
+            className="punch-lightbox"
+            style={{ left: plPhotoLightbox.x, top: plPhotoLightbox.y }}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              
+              // Middle mouse button (button === 1) = pan the image
+              if (e.button === 1) {
+                const startX = e.clientX;
+                const startY = e.clientY;
+                const startPanX = plPhotoLightbox.panX || 0;
+                const startPanY = plPhotoLightbox.panY || 0;
+                
+                const onMouseMove = (ev) => {
+                  const dx = ev.clientX - startX;
+                  const dy = ev.clientY - startY;
+                  setPlPhotoLightbox(prev => ({ ...prev, panX: startPanX + dx, panY: startPanY + dy }));
+                };
+                
+                const onMouseUp = () => {
+                  document.removeEventListener('mousemove', onMouseMove);
+                  document.removeEventListener('mouseup', onMouseUp);
+                };
+                
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+                return;
+              }
+              
+              // Left mouse button = drag the lightbox
+              const startX = e.clientX;
+              const startY = e.clientY;
+              const startLeft = plPhotoLightbox.x;
+              const startTop = plPhotoLightbox.y;
+              
+              const onMouseMove = (ev) => {
+                const dx = ev.clientX - startX;
+                const dy = ev.clientY - startY;
+                setPlPhotoLightbox(prev => ({ ...prev, x: startLeft + dx, y: startTop + dy }));
+              };
+              
+              const onMouseUp = () => {
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+              };
+              
+              document.addEventListener('mousemove', onMouseMove);
+              document.addEventListener('mouseup', onMouseUp);
+            }}
+            onWheel={(e) => {
+              // Mouse wheel zoom
+              e.preventDefault();
+              e.stopPropagation();
+              const delta = e.deltaY > 0 ? -0.1 : 0.1; // scroll down = zoom out, scroll up = zoom in
+              setPlPhotoLightbox(prev => ({
+                ...prev,
+                zoom: Math.min(3, Math.max(0.5, (prev.zoom || 1) + delta))
+              }));
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <button
+              className="punch-lightbox-close"
+              onClick={() => setPlPhotoLightbox(null)}
+            >
+              ×
+            </button>
+            <img 
+              src={plPhotoLightbox.url} 
+              alt={plPhotoLightbox.name || 'Punch photo'} 
+              draggable={false}
+              style={{ 
+                transform: `scale(${plPhotoLightbox.zoom || 1}) translate(${(plPhotoLightbox.panX || 0) / (plPhotoLightbox.zoom || 1)}px, ${(plPhotoLightbox.panY || 0) / (plPhotoLightbox.zoom || 1)}px)` 
+              }}
+            />
+            <div className="punch-lightbox-zoom-hint">
+              🖱️ Scroll: Zoom ({Math.round((plPhotoLightbox.zoom || 1) * 100)}%) | Middle click + drag: Pan
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────────
+          PUNCH LIST: Contractor Dropdown Menu (appears below button)
+          ───────────────────────────────────────────────────────────────── */}
+      {isPL && plContractorDropdownOpen && !plShowAddContractorForm && !plEditingContractor && (() => {
+        // Position dropdown below the contractor button
+        const btn = document.getElementById('pl-contractor-btn');
+        const btnRect = btn?.getBoundingClientRect();
+        const dropdownTop = btnRect ? btnRect.bottom + 4 : 300;
+        const dropdownRight = btnRect ? (window.innerWidth - btnRect.right) : 12;
+        
+        return (
+        <div
+          className="contractor-dropdown-overlay"
+          onClick={() => setPlContractorDropdownOpen(false)}
+        >
+          <div 
+            className="contractor-dropdown-menu"
+            style={{ top: dropdownTop, right: dropdownRight }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Contractor List (if contractors exist) */}
+            {plContractors.length > 0 && (
+              <div className="contractor-dropdown-list">
+                {plContractors.map((c) => (
+                  <div
+                    key={c.id}
+                    className={`contractor-dropdown-item ${plSelectedContractorId === c.id ? 'selected' : ''}`}
+                    onClick={() => {
+                      setPlSelectedContractorId(c.id);
+                      setPlContractorDropdownOpen(false);
+                    }}
+                  >
+                    <span className="contractor-color-dot" style={{ backgroundColor: c.color }} />
+                    <span className="contractor-name">{c.name}</span>
+                    <button
+                      type="button"
+                      className="contractor-dropdown-edit"
+                      title="Edit"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPlEditingContractor(c);
+                        setPlEditContractorName(c.name);
+                        setPlEditContractorColor(c.color);
+                      }}
+                    >
+                      ✎
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Add Contractor option - always visible */}
+            <div 
+              className="contractor-dropdown-add"
+              onClick={() => {
+                setPlShowAddContractorForm(true);
+              }}
+            >
+              <span className="contractor-add-icon">+</span>
+              <span>Add Contractor</span>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* ─────────────────────────────────────────────────────────────────
+          PUNCH LIST: Add/Edit Contractor Modal - Center Screen
+          ───────────────────────────────────────────────────────────────── */}
+      {isPL && (plShowAddContractorForm || plEditingContractor) && (
+        <div
+          className="contractor-modal-overlay"
+          onClick={() => {
+            setPlShowAddContractorForm(false);
+            setPlEditingContractor(null);
+            setPlEditContractorName('');
+            setPlEditContractorColor('');
+            setPlNewContractorName('');
+          }}
+        >
+          <div className="contractor-modal" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="contractor-modal-header">
+              <h3>👷 {plEditingContractor ? 'Edit Contractor' : 'Add Contractor'}</h3>
+              <button
+                className="contractor-modal-close"
+                onClick={() => {
+                  setPlShowAddContractorForm(false);
+                  setPlEditingContractor(null);
+                  setPlEditContractorName('');
+                  setPlEditContractorColor('');
+                  setPlNewContractorName('');
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Edit Contractor Form */}
+            {plEditingContractor && (
+              <div className="contractor-form-section compact">
+                <input
+                  type="text"
+                  className="contractor-input compact"
+                  value={plEditContractorName}
+                  onChange={(e) => setPlEditContractorName(e.target.value)}
+                  placeholder="Contractor name"
+                  autoFocus
+                />
+                <div className="contractor-color-picker compact">
+                  {DEFAULT_PUNCH_COLORS.map((clr) => {
+                    const isUsedByOther = plContractors.some(c => c.color === clr && c.id !== plEditingContractor.id);
+                    return (
+                      <button
+                        key={clr}
+                        type="button"
+                        className={`contractor-color-option compact ${plEditContractorColor === clr ? 'selected' : ''} ${isUsedByOther ? 'disabled' : ''}`}
+                        style={{ backgroundColor: clr, opacity: isUsedByOther ? 0.3 : 1 }}
+                        onClick={() => !isUsedByOther && setPlEditContractorColor(clr)}
+                        disabled={isUsedByOther}
+                        title={isUsedByOther ? 'This color is used by another contractor' : ''}
+                      />
+                    );
+                  })}
+                </div>
+                <div className="contractor-form-actions">
+                  <button
+                    type="button"
+                    className="contractor-btn delete"
+                    onClick={() => {
+                      if (window.confirm(`Are you sure you want to delete contractor "${plEditingContractor.name}"?`)) {
+                        plRemoveContractor(plEditingContractor.id);
+                        if (plSelectedContractorId === plEditingContractor.id) setPlSelectedContractorId(null);
+                        setPlEditingContractor(null);
+                        setPlEditContractorName('');
+                        setPlEditContractorColor('');
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
+                  <button
+                    type="button"
+                    className="contractor-btn cancel"
+                    onClick={() => {
+                      setPlEditingContractor(null);
+                      setPlEditContractorName('');
+                      setPlEditContractorColor('');
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="contractor-btn save"
+                    disabled={!plEditContractorName.trim()}
+                    onClick={() => {
+                      plUpdateContractor(plEditingContractor.id, plEditContractorName, plEditContractorColor);
+                      setPlEditingContractor(null);
+                      setPlEditContractorName('');
+                      setPlEditContractorColor('');
+                    }}
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Add New Contractor Form - Compact style like Edit */}
+            {plShowAddContractorForm && !plEditingContractor && (
+              <div className="contractor-form-section compact">
+                <input
+                  type="text"
+                  className="contractor-input compact"
+                  value={plNewContractorName}
+                  onChange={(e) => setPlNewContractorName(e.target.value)}
+                  placeholder="Contractor name"
+                  autoFocus
+                />
+                <div className="contractor-color-picker compact">
+                  {DEFAULT_PUNCH_COLORS.map((clr) => {
+                    const isUsed = plContractors.some(c => c.color === clr);
+                    return (
+                      <button
+                        key={clr}
+                        type="button"
+                        className={`contractor-color-option compact ${plNewContractorColor === clr ? 'selected' : ''} ${isUsed ? 'disabled' : ''}`}
+                        style={{ backgroundColor: clr, opacity: isUsed ? 0.3 : 1 }}
+                        onClick={() => !isUsed && setPlNewContractorColor(clr)}
+                        disabled={isUsed}
+                        title={isUsed ? 'This color is used by another contractor' : ''}
+                      />
+                    );
+                  })}
+                </div>
+                <div className="contractor-form-actions">
+                  <button
+                    type="button"
+                    className="contractor-btn cancel"
+                    onClick={() => {
+                      setPlShowAddContractorForm(false);
+                      setPlNewContractorName('');
+                      setPlNewContractorColor(getFirstAvailableColor());
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="contractor-btn save"
+                    disabled={!plNewContractorName.trim()}
+                    onClick={() => {
+                      const newC = plAddContractor(plNewContractorName, plNewContractorColor);
+                      if (newC) {
+                        setPlSelectedContractorId(newC.id);
+                        setPlNewContractorName('');
+                        setPlNewContractorColor(getFirstAvailableColor());
+                        setPlShowAddContractorForm(false);
+                        setPlContractorDropdownOpen(false);
+                      }
+                    }}
+                  >
+                    + Add
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────────
+          PUNCH LIST: Isometric Side Panel (fixed right panel, map stays interactive)
+          ───────────────────────────────────────────────────────────────── */}
+      {isPL && plIsometricOpen && plIsometricTableId && (
+        <div
+          className="fixed right-0 w-[380px] z-[1100] bg-slate-900 border-l-2 border-slate-700 shadow-2xl flex flex-col"
+          style={{ pointerEvents: 'auto', top: '60px', height: 'calc(100vh - 60px)' }}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700 bg-slate-800 flex-shrink-0">
+            <div className="flex flex-col">
+              <span className="text-white font-bold text-sm uppercase tracking-wide">Isometric</span>
+              <span className="text-amber-400 font-mono text-base font-bold">{plIsometricTableId}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-slate-400 text-[11px]">
+                {plPunches.filter(p => p.tableId === plIsometricTableId).length} punch
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setPlIsometricOpen(false);
+                  setPlIsometricTableId(null);
+                }}
+                className="text-slate-400 hover:text-white text-xl font-bold leading-none"
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+
+          {/* Contractor Selector */}
+          <div className="px-3 py-2 border-b border-slate-700 bg-slate-800/50">
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400 text-[10px] uppercase">Contractor:</span>
+              <select
+                className="flex-1 border border-slate-600 bg-slate-800 px-2 py-1 text-[11px] text-white focus:outline-none focus:border-amber-400 rounded"
+                value={plSelectedContractorId || ''}
+                onChange={(e) => setPlSelectedContractorId(e.target.value || null)}
+              >
+                <option value="">Select...</option>
+                {plContractors.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              {plSelectedContractorId && (
+                <span
+                  className="w-4 h-4 rounded-full border border-white/40"
+                  style={{ backgroundColor: plGetContractor(plSelectedContractorId)?.color || '#888' }}
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Isometric content area with zoom/pan */}
+          <div className="flex-1 overflow-hidden p-3 flex flex-col gap-2">
+            {/* Isometric PNG with clickable punch points, zoom & pan support */}
+            <div
+              className="relative flex-1 border border-slate-600 rounded overflow-hidden bg-slate-800"
+              style={{ minHeight: '300px' }}
+              onWheel={(e) => {
+                e.preventDefault();
+                const container = e.currentTarget;
+                const inner = container.querySelector('[data-iso-inner]');
+                if (!inner) return;
+                
+                // Get current transform values
+                const currentScale = parseFloat(inner.dataset.scale || '1');
+                const currentX = parseFloat(inner.dataset.panX || '0');
+                const currentY = parseFloat(inner.dataset.panY || '0');
+                
+                // Calculate zoom
+                const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                const newScale = Math.min(Math.max(currentScale * delta, 0.5), 5);
+                
+                // Get mouse position relative to container
+                const rect = container.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                
+                // Adjust pan to zoom towards mouse position
+                const scaleChange = newScale / currentScale;
+                const newX = mouseX - (mouseX - currentX) * scaleChange;
+                const newY = mouseY - (mouseY - currentY) * scaleChange;
+                
+                inner.dataset.scale = String(newScale);
+                inner.dataset.panX = String(newX);
+                inner.dataset.panY = String(newY);
+                inner.style.transform = `translate(${newX}px, ${newY}px) scale(${newScale})`;
+              }}
+              onMouseDown={(e) => {
+                // Only middle mouse button (button 1) for pan
+                if (e.button !== 1) return;
+                e.preventDefault();
+                const container = e.currentTarget;
+                const inner = container.querySelector('[data-iso-inner]');
+                if (!inner) return;
+                
+                const startX = e.clientX;
+                const startY = e.clientY;
+                const startPanX = parseFloat(inner.dataset.panX || '0');
+                const startPanY = parseFloat(inner.dataset.panY || '0');
+                
+                const onMouseMove = (ev) => {
+                  const dx = ev.clientX - startX;
+                  const dy = ev.clientY - startY;
+                  const newX = startPanX + dx;
+                  const newY = startPanY + dy;
+                  const scale = parseFloat(inner.dataset.scale || '1');
+                  
+                  inner.dataset.panX = String(newX);
+                  inner.dataset.panY = String(newY);
+                  inner.style.transform = `translate(${newX}px, ${newY}px) scale(${scale})`;
+                };
+                
+                const onMouseUp = () => {
+                  document.removeEventListener('mousemove', onMouseMove);
+                  document.removeEventListener('mouseup', onMouseUp);
+                };
+                
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+              }}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              {/* Fit button - top right corner of image */}
+              <button
+                type="button"
+                onClick={() => {
+                  const inner = plIsoInnerRef.current;
+                  if (inner) {
+                    inner.dataset.scale = '1';
+                    inner.dataset.panX = '0';
+                    inner.dataset.panY = '0';
+                    inner.style.transform = 'translate(0px, 0px) scale(1)';
+                  }
+                }}
+                className="absolute top-2 right-2 z-10 flex items-center justify-center w-7 h-7 bg-slate-700/80 hover:bg-slate-600 border border-slate-500 rounded transition-colors"
+                title="Fit to screen"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-300">
+                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                </svg>
+              </button>
+              <div
+                ref={plIsoInnerRef}
+                data-iso-inner="true"
+                data-scale="1"
+                data-pan-x="0"
+                data-pan-y="0"
+                className="absolute inset-0 origin-top-left cursor-crosshair"
+                style={{ transform: 'translate(0px, 0px) scale(1)' }}
+                onClick={(e) => {
+                  // Don't create punch on middle click
+                  if (e.button === 1) return;
+                  
+                  // Get click position relative to the inner container, accounting for transform
+                  const inner = e.currentTarget;
+                  const scale = parseFloat(inner.dataset.scale || '1');
+                  const panX = parseFloat(inner.dataset.panX || '0');
+                  const panY = parseFloat(inner.dataset.panY || '0');
+                  
+                  const rect = inner.parentElement.getBoundingClientRect();
+                  const clickX = e.clientX - rect.left;
+                  const clickY = e.clientY - rect.top;
+                  
+                  // Convert to original coordinates
+                  const x = ((clickX - panX) / scale / rect.width) * 100;
+                  const y = ((clickY - panY) / scale / rect.height) * 100;
+                  
+                  // Only create punch if click is within bounds
+                  if (x < 0 || x > 100 || y < 0 || y > 100) return;
+                  
+                  // Check if contractor is selected (use ref for reliability)
+                  const currentContractorId = plSelectedContractorIdRef.current;
+                  if (!currentContractorId) {
+                    // Show warning toast
+                    const toast = document.createElement('div');
+                    toast.className = 'punch-warning-toast';
+                    toast.innerHTML = '⚠️ Please select a contractor first!';
+                    document.body.appendChild(toast);
+                    setTimeout(() => toast.remove(), 2500);
+                    return;
+                  }
+                  
+                  // Get next punch number using ref (always current) and increment both ref and state
+                  const nextNumber = plPunchCounterRef.current + 1;
+                  plPunchCounterRef.current = nextNumber; // Update ref immediately for next call
+                  setPlPunchCounter(nextNumber); // Update state for persistence
+                  
+                  // Create punch with isometric position (no popup - click on dot to edit)
+                  const punch = {
+                    id: `punch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    lat: 0,
+                    lng: 0,
+                    contractorId: currentContractorId,
+                    text: '',
+                    photoDataUrl: null,
+                    photoName: '',
+                    tableId: plIsometricTableId,
+                    isoX: x,
+                    isoY: y,
+                    createdAt: new Date().toISOString(),
+                    punchNumber: nextNumber // Permanent number - never changes
+                  };
+                  setPlPunches(prev => [...prev, punch]);
+                }}
+              >
+                <img
+                  src="/PUNCH_LIST/photo/table.png"
+                  alt="Table Isometric"
+                  className="w-full h-full object-contain"
+                  draggable={false}
+                  onError={(e) => {
+                    console.error('Failed to load isometric image');
+                    e.target.style.display = 'none';
+                  }}
+                />
+                {/* Punch markers on isometric */}
+                {plPunches
+                  .filter(p => p.tableId === plIsometricTableId && p.isoX != null && p.isoY != null)
+                  .map((p) => {
+                    const c = plGetContractor(p.contractorId);
+                    // Use green for completed punches
+                    const dotColor = p.completed ? PUNCH_COMPLETED_COLOR : (c?.color || '#888');
+                    const isIsoEditing = plEditingPunch?.id === p.id;
+                    return (
+                      <div
+                        key={p.id}
+                        className={`absolute w-3 h-3 -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-transform ${isIsoEditing ? 'scale-150 z-50' : 'hover:scale-150'}`}
+                        style={{
+                          left: `${p.isoX}%`,
+                          top: `${p.isoY}%`,
+                          ...(isIsoEditing ? { animation: 'punch-editing-pulse 1s ease-in-out infinite' } : {}),
+                        }}
+                        title={`${c?.name || 'No contractor'}: ${p.text || '(no description)'}${p.completed ? ' ✓ COMPLETED' : ''}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPlEditingPunch(p);
+                          setPlPunchText(p.text || '');
+                          setPlPunchContractorId(p.contractorId);
+                          setPlPunchPhotoDataUrl(p.photoDataUrl || null);
+                          setPlPunchPhotoName(p.photoName || '');
+                        }}
+                      >
+                        <div
+                          className={`w-full h-full rounded-full border shadow-md ${isIsoEditing ? 'border-2 border-yellow-400' : 'border border-white'}`}
+                          style={{ backgroundColor: dotColor }}
+                        />
+                        {p.completed && (
+                          <span className="absolute -top-1 -right-1 text-[8px] text-white font-bold">✓</span>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+
+            {/* Instructions */}
+            <div className="text-slate-500 text-[10px] text-center py-1">
+              Scroll to zoom • Middle-click drag to pan • Click to add punch
+            </div>
+          </div>
+
+          {/* Close button at bottom */}
+          <div className="px-3 py-2 border-t border-slate-700 bg-slate-800">
+            <button
+              type="button"
+              onClick={() => {
+                setPlIsometricOpen(false);
+                setPlIsometricTableId(null);
+              }}
+              className="w-full border border-slate-600 bg-slate-700 px-3 py-2 text-[11px] font-bold uppercase text-white hover:bg-slate-600 rounded"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Submit Modal */}
       <SubmitModal
         isOpen={modalOpen}
@@ -9676,15 +11636,6 @@ export default function BaseModule({
               setMvfActiveSegmentKeys(new Set());
             }
           }
-          // LVIB: submit must apply only to the active sub-mode; clear only that selection.
-          if (isLVIB) {
-            const modeNow = String(lvibSubModeRef.current || 'lvBox');
-            if (modeNow === 'invBox') setLvibSelectedInvBoxes(new Set());
-            else setLvibSelectedLvBoxes(new Set());
-          }
-          if (isMVFT) {
-            setMvftSelectedTrenchParts([]);
-          }
           addRecord({ ...record, notes: notesOnDate });
           alert('Work submitted successfully!');
         }}
@@ -9694,18 +11645,14 @@ export default function BaseModule({
             ? 'MVT_TERM'
             : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
               ? 'LVTT_TERM'
-              : (isLVIB
-                ? lvibActiveKey
-                : (activeMode?.key || '')))}
+              : (activeMode?.key || ''))}
         moduleLabel={isMC4
           ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
           : (isMVT
             ? 'Cable Termination'
             : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
               ? 'Cable Termination'
-              : (isLVIB
-                ? lvibActiveLabel
-                : moduleName))}
+              : moduleName)}
         workAmount={isMC4
           ? (mc4SelectionMode === 'termination'
             ? (mc4Counts?.terminatedCompleted || 0)
@@ -9714,9 +11661,7 @@ export default function BaseModule({
             ? mvtCompletedForSubmit
             : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
               ? lvttCompletedForSubmit
-              : (isLVIB
-                ? lvibActiveSelectedCount
-                : workAmount))}
+              : workAmount)}
         workUnit={
           isMC4
             ? (mc4SelectionMode === 'termination' ? 'cables terminated' : 'mc4')
@@ -9724,11 +11669,9 @@ export default function BaseModule({
               ? 'cables terminated'
               : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
                 ? lvttWorkUnit
-                : (isLVIB
-                  ? lvibActiveUnit
-                  : (activeMode?.submitWorkUnit
-                    ? String(activeMode.submitWorkUnit)
-                    : (activeMode?.workUnitWeights ? 'panels' : 'm'))))
+                : (activeMode?.submitWorkUnit
+                  ? String(activeMode.submitWorkUnit)
+                  : (activeMode?.workUnitWeights ? 'panels' : 'm')))
         }
       />
       
@@ -9768,7 +11711,7 @@ export default function BaseModule({
                   else { setHistorySortBy('cable'); setHistorySortOrder('desc'); }
                 }}
               >
-                {isLVIB ? 'Work' : 'Cable'} {historySortBy === 'cable' && (historySortOrder === 'desc' ? '↓' : '↑')}
+                Cable {historySortBy === 'cable' && (historySortOrder === 'desc' ? '↓' : '↑')}
               </button>
             </div>
             
@@ -9778,16 +11721,8 @@ export default function BaseModule({
                 <span className="summary-value">{dailyLog.length}</span>
               </div>
               <div className="summary-item">
-                <span className="summary-label">{isLVIB ? 'Total Work' : 'Total Cable'}</span>
-                <span className="summary-value">
-                  {isLVIB
-                    ? (() => {
-                        const lv = dailyLog.reduce((s, r) => s + (String(r?.module_key || '').toUpperCase() === 'LVIB_LV' ? (r.total_cable || 0) : 0), 0);
-                        const inv = dailyLog.reduce((s, r) => s + (String(r?.module_key || '').toUpperCase() === 'LVIB_INV' ? (r.total_cable || 0) : 0), 0);
-                        return `${Number(lv).toFixed(0)} LV box, ${Number(inv).toFixed(0)} Inverter box`;
-                      })()
-                    : `${dailyLog.reduce((s, r) => s + (r.total_cable || 0), 0).toFixed(0)} m`}
-                </span>
+                <span className="summary-label">Total Cable</span>
+                <span className="summary-value">{dailyLog.reduce((s, r) => s + (r.total_cable || 0), 0).toFixed(0)} m</span>
               </div>
               <div className="summary-item">
                 <span className="summary-label">Total Workers</span>
@@ -9835,12 +11770,6 @@ export default function BaseModule({
                   const recs = [...(recordsByDate[d] || [])];
                   const dayNotes = [...(notesByDate[d] || [])].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
                   const dateLabel = new Date(d).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
-                  const lvibDayLv = isLVIB
-                    ? recs.reduce((s, r) => s + (String(r?.module_key || '').toUpperCase() === 'LVIB_LV' ? (r.total_cable || 0) : 0), 0)
-                    : 0;
-                  const lvibDayInv = isLVIB
-                    ? recs.reduce((s, r) => s + (String(r?.module_key || '').toUpperCase() === 'LVIB_INV' ? (r.total_cable || 0) : 0), 0)
-                    : 0;
 
                   return (
                     <div key={d} className="history-day">
@@ -9848,12 +11777,6 @@ export default function BaseModule({
                         <span className="history-day-date">{dateLabel}</span>
                         <span className="history-day-badges">
                           {recs.length > 0 && <span className="history-day-badge">Work: {recs.length}</span>}
-                          {isLVIB && recs.length > 0 && (
-                            <>
-                              <span className="history-day-badge">LV: {Number(lvibDayLv).toFixed(0)}</span>
-                              <span className="history-day-badge">INV: {Number(lvibDayInv).toFixed(0)}</span>
-                            </>
-                          )}
                           {dayNotes.length > 0 && <span className="history-day-badge notes">Notes: {dayNotes.length}</span>}
                         </span>
                       </div>
@@ -9875,27 +11798,15 @@ export default function BaseModule({
                                   </svg>
                                   <span>{record.workers} workers</span>
                                 </div>
-                                <div className="stat stat-total">
-                                  <span>
-                                    {isLVIB
-                                      ? (() => {
-                                          const k = String(record?.module_key || '').toUpperCase();
-                                          const label = k === 'LVIB_INV' ? 'Inverter box installed' : 'LV box installed';
-                                          return `Total: ${(record.total_cable || 0).toFixed(0)} ${label}`;
-                                        })()
-                                      : `Total: ${(record.total_cable || 0).toFixed(0)} m`}
-                                  </span>
+                                <div className="stat stat-positive">
+                                  <span>+DC: {(record.plus_dc || 0).toFixed(0)} m</span>
                                 </div>
-                                {!isLVIB && (
-                                  <>
-                                    <div className="stat stat-positive">
-                                      <span>+DC: {(record.plus_dc || 0).toFixed(0)} m</span>
-                                    </div>
-                                    <div className="stat stat-negative">
-                                      <span>-DC: {(record.minus_dc || 0).toFixed(0)} m</span>
-                                    </div>
-                                  </>
-                                )}
+                                <div className="stat stat-negative">
+                                  <span>-DC: {(record.minus_dc || 0).toFixed(0)} m</span>
+                                </div>
+                                <div className="stat stat-total">
+                                  <span>Total: {(record.total_cable || 0).toFixed(0)} m</span>
+                                </div>
                               </div>
                             </div>
                           ))}

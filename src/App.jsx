@@ -33,6 +33,13 @@ export default function App() {
   const [activeKey, setActiveKey] = useState('DC');
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
+  const menuOpenRef = useRef(false);
+
+  // Keep ref in sync and expose globally for BaseModule to check
+  useEffect(() => {
+    menuOpenRef.current = menuOpen;
+    window.__cewHamburgerMenuOpen = menuOpen;
+  }, [menuOpen]);
 
   useEffect(() => {
     const onDocMouseDown = (e) => {
