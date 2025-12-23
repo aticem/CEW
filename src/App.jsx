@@ -13,6 +13,7 @@ import TableInstallationProgressModule from './modules/TableInstallationProgress
 import LVBoxInvBoxModule from './modules/LVBoxInvBoxModule.jsx';
 import PunchListModule from './modules/PunchListModule.jsx';
 import ParameterAndTableEarthingProgressModule from './modules/ParameterAndTableEarthingProgressModule.jsx';
+import DCACTrenchModule from './modules/DCACTrenchModule.jsx';
 
 const MODULES = {
   DC: { key: 'DC', label: 'DC Cable Pulling Progress', Component: DCModule },
@@ -28,6 +29,7 @@ const MODULES = {
   TIP: { key: 'TIP', label: 'Table Installation Progress', Component: TableInstallationProgressModule },
   LVIB: { key: 'LVIB', label: 'LV Box & Inv Box Installation', Component: LVBoxInvBoxModule },
   PTEP: { key: 'PTEP', label: 'Parameter & Table Earthing', Component: ParameterAndTableEarthingProgressModule },
+  DATP: { key: 'DATP', label: 'DC&AC Trench Progress', Component: DCACTrenchModule },
   PL: { key: 'PL', label: 'Punch List', Component: PunchListModule },
 };
 

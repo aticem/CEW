@@ -531,6 +531,34 @@ export const PARAMETER_AND_TABLE_EARTHING_PROGRESS_MODULE_CONFIG = {
   ],
 };
 
+export const DC_AC_TRENCH_PROGRESS_MODULE_CONFIG = {
+  key: 'DATP',
+  label: 'DC&AC TRENCH PROGRESS',
+  // Files live in: public/DC_AC_TRENCH_PROGRESS/
+  csvFormat: null,
+  csvPath: null,
+  linkPath: '/DC_AC_TRENCH_PROGRESS/link',
+  simpleCounters: true,
+  simpleCounterUnit: 'm',
+  submitWorkUnit: 'm excavated',
+  // Use same string_text rendering as DC module (simple, zoom-based visibility)
+  stringTextVisibility: 'always',
+  stringTextToggle: false,
+  stringTextDefaultOn: true,
+  // Zoom-based visibility: only show labels when zoomed in enough
+  stringTextMinZoom: 18,
+  geojsonFiles: [
+    // Full panels - background reference
+    { url: '/DC_AC_TRENCH_PROGRESS/dc_trench_full_panels.geojson', name: 'full', color: '#64748b', fillColor: '#475569', weight: 1, fillOpacity: 0.2 },
+    // Boundary - RED (kırmızı)
+    { url: '/DC_AC_TRENCH_PROGRESS/dc_trench_boundry.geojson', name: 'boundry', color: '#ef4444', fillColor: 'transparent', weight: 3 },
+    // Trench lines - BLUE (mavi, selectable)
+    { url: '/DC_AC_TRENCH_PROGRESS/dc_trench_trench_line.geojson', name: 'trench', color: '#3b82f6', fillColor: '#3b82f6', weight: 2.5 },
+    // Text labels - YELLOW (sarı) - rendered via string_text pipeline
+    { url: '/DC_AC_TRENCH_PROGRESS/dc_trench_text.geojson', name: 'string_text', color: '#facc15', fillColor: '#facc15' },
+  ],
+};
+
 export const PUNCH_LIST_MODULE_CONFIG = {
   key: 'PL',
   label: 'PUNCH LIST',
