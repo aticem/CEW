@@ -426,6 +426,7 @@ export default function BaseModule({
   const lvttInvIdRendererRef = useRef(null); // dedicated canvas renderer for LVTT inv_id labels to avoid overlap when switching modes
   const lvttTermCounterRendererRef = useRef(null); // dedicated canvas renderer for LVTT termination counters
   const ptepTableToTableSvgRendererRef = useRef(null); // dedicated SVG renderer for PTEP table-to-table (ensures clickability under preferCanvas)
+  const ptepParameterSvgRendererRef = useRef(null); // dedicated SVG renderer for PTEP parameter (ensures clickability under preferCanvas)
   const layersRef = useRef([]);
   const polygonIdCounter = useRef(0); // Counter for unique polygon IDs
   const polygonById = useRef({}); // uniqueId -> {layer, stringId}
@@ -1372,8 +1373,11 @@ export default function BaseModule({
     setNotesState((s) => {
       const next = typeof updater === 'function' ? updater(s.present) : updater;
       if (next === s.present) return s;
-      const past = [...s.past, s.present].slice(-NOTES_HISTORY_LIMIT);
-      return { past, present: next, future: [] };
+      return {
+        past: [...s.past, s.present].slice(-NOTES_HISTORY_LIMIT),
+        present: next,
+        future: [],
+      };
     });
   };
 
@@ -1384,7 +1388,7 @@ export default function BaseModule({
       return {
         past: s.past.slice(0, -1),
         present: previous,
-        future: [s.present, ...s.future]
+        future: [s.present, ...s.future].slice(0, NOTES_HISTORY_LIMIT),
       };
     });
   };
@@ -1468,23 +1472,84 @@ export default function BaseModule({
     }
   }, [isLV, lvStorageKey, lvCompletedInvIds]);
 
+  // PTEP: Sub-mode selection (like MC4) - 'tabletotable' or 'parameter'
+  const [ptepSubMode, setPtepSubMode] = useState('tabletotable'); // 'tabletotable' | 'parameter'
+  const ptepSubModeRef = useRef(ptepSubMode);
+  useEffect(() => {
+    ptepSubModeRef.current = ptepSubMode;
+  }, [ptepSubMode]);
+
   // PTEP: table-to-table completion tracking (click lines to mark completed)
   const ptepTodayYmd = getTodayYmd();
-  const ptepStorageKey = `cew:ptep:tabletotable:${ptepTodayYmd}`;
+  const ptepStorageKeyTT = `cew:ptep:tabletotable:${ptepTodayYmd}`;
+  const ptepStorageKeyParam = `cew:ptep:parameter:${ptepTodayYmd}`;
+  const ptepStorageKeyParamParts = `cew:ptep:parameter_parts:${ptepTodayYmd}`;
   const [ptepCompletedTableToTable, setPtepCompletedTableToTable] = useState(() => new Set());
   const ptepCompletedTableToTableRef = useRef(ptepCompletedTableToTable);
   const [ptepTotalTableToTable, setPtepTotalTableToTable] = useState(0);
   const ptepTableToTableByIdRef = useRef({}); // uniqueId -> featureLayer
 
+  // PTEP: Undo/Redo history for table-to-table
+  const ptepTTHistoryRef = useRef({ past: [], future: [] });
+  const ptepTTPrevSnapshotRef = useRef([]);
+  const ptepTTHistorySuspendRef = useRef(false);
+  const [ptepTTHistoryTick, setPtepTTHistoryTick] = useState(0);
+
+  // PTEP: parameter completion tracking (MVF-style partial selection: store selected PART geometries)
+  // parts: [{ id, uid, lineIndex, startM, endM, coords:[[lat,lng],...], meters }]
+  const [ptepSelectedParameterParts, setPtepSelectedParameterParts] = useState(() => []);
+  const ptepSelectedParameterPartsRef = useRef(ptepSelectedParameterParts);
+  const ptepParameterSelectedLayerRef = useRef(null); // L.LayerGroup for selected green parts
+  const ptepLegacyCompletedParameterIdsRef = useRef(null); // Set<string> | null (migration from old full-line IDs)
+  const [ptepTotalParameterMeters, setPtepTotalParameterMeters] = useState(0);
+  const ptepParameterByIdRef = useRef({}); // uniqueId -> featureLayer
+  const ptepParameterLenByIdRef = useRef({}); // uniqueId -> length in meters
+
+  // PTEP: Undo/Redo history for parameter parts
+  const ptepParamHistoryRef = useRef({ past: [], future: [] });
+  const ptepParamPrevSnapshotRef = useRef([]);
+  const ptepParamHistorySuspendRef = useRef(false);
+  const [ptepParamHistoryTick, setPtepParamHistoryTick] = useState(0);
+
   useEffect(() => {
     ptepCompletedTableToTableRef.current = ptepCompletedTableToTable;
   }, [ptepCompletedTableToTable]);
 
-  // Load PTEP completions from localStorage
+  useEffect(() => {
+    ptepSelectedParameterPartsRef.current = ptepSelectedParameterParts;
+  }, [ptepSelectedParameterParts]);
+
+  // Track PTEP table-to-table changes for undo/redo
+  useEffect(() => {
+    if (!isPTEP) return;
+    if (ptepTTHistorySuspendRef.current) return;
+    const current = Array.from(ptepCompletedTableToTable || new Set()).sort();
+    const prev = ptepTTPrevSnapshotRef.current || [];
+    if (JSON.stringify(current) === JSON.stringify(prev)) return;
+    ptepTTHistoryRef.current.past = [...ptepTTHistoryRef.current.past, prev].slice(-HISTORY_LIMIT);
+    ptepTTHistoryRef.current.future = [];
+    ptepTTPrevSnapshotRef.current = current;
+    setPtepTTHistoryTick((t) => t + 1);
+  }, [isPTEP, ptepCompletedTableToTable]);
+
+  // Track PTEP parameter parts changes for undo/redo
+  useEffect(() => {
+    if (!isPTEP) return;
+    if (ptepParamHistorySuspendRef.current) return;
+    const current = JSON.stringify(ptepSelectedParameterParts || []);
+    const prev = JSON.stringify(ptepParamPrevSnapshotRef.current || []);
+    if (current === prev) return;
+    ptepParamHistoryRef.current.past = [...ptepParamHistoryRef.current.past, ptepParamPrevSnapshotRef.current || []].slice(-HISTORY_LIMIT);
+    ptepParamHistoryRef.current.future = [];
+    ptepParamPrevSnapshotRef.current = ptepSelectedParameterParts || [];
+    setPtepParamHistoryTick((t) => t + 1);
+  }, [isPTEP, ptepSelectedParameterParts]);
+
+  // Load PTEP table-to-table completions from localStorage
   useEffect(() => {
     if (!isPTEP) return;
     try {
-      const raw = localStorage.getItem(ptepStorageKey);
+      const raw = localStorage.getItem(ptepStorageKeyTT);
       const arr = raw ? JSON.parse(raw) : [];
       if (Array.isArray(arr)) setPtepCompletedTableToTable(new Set(arr));
       else setPtepCompletedTableToTable(new Set());
@@ -1492,30 +1557,206 @@ export default function BaseModule({
       void _e;
       setPtepCompletedTableToTable(new Set());
     }
-  }, [isPTEP, ptepStorageKey]);
+  }, [isPTEP, ptepStorageKeyTT]);
 
-  // Save PTEP completions to localStorage and update styles
+  // Load PTEP parameter PART completions from localStorage
   useEffect(() => {
     if (!isPTEP) return;
     try {
-      localStorage.setItem(ptepStorageKey, JSON.stringify(Array.from(ptepCompletedTableToTable)));
+      const rawParts = localStorage.getItem(ptepStorageKeyParamParts);
+      const parts = rawParts ? JSON.parse(rawParts) : [];
+      if (Array.isArray(parts)) {
+        setPtepSelectedParameterParts(parts);
+        ptepLegacyCompletedParameterIdsRef.current = null;
+        return;
+      }
+      setPtepSelectedParameterParts([]);
+    } catch (_e) {
+      void _e;
+      setPtepSelectedParameterParts([]);
+    }
+    // Back-compat: if old full-line storage exists (array of ids), migrate after geojson loads.
+    try {
+      const rawLegacy = localStorage.getItem(ptepStorageKeyParam);
+      const arr = rawLegacy ? JSON.parse(rawLegacy) : [];
+      if (Array.isArray(arr) && arr.length > 0) {
+        ptepLegacyCompletedParameterIdsRef.current = new Set(arr.map(String));
+      } else {
+        ptepLegacyCompletedParameterIdsRef.current = null;
+      }
+    } catch (_e) {
+      void _e;
+      ptepLegacyCompletedParameterIdsRef.current = null;
+    }
+  }, [isPTEP, ptepStorageKeyParamParts, ptepStorageKeyParam]);
+
+  // PTEP: One-time migration from legacy full-line IDs -> full-length PARTs
+  useEffect(() => {
+    if (!isPTEP) return;
+    const legacy = ptepLegacyCompletedParameterIdsRef.current;
+    if (!legacy || legacy.size === 0) return;
+    const byId = ptepParameterByIdRef.current || {};
+    const toAdd = [];
+    legacy.forEach((uid) => {
+      const layer = byId[String(uid)];
+      if (!layer || typeof layer.getLatLngs !== 'function') return;
+      const lines = asLineStrings(layer.getLatLngs());
+      lines.forEach((lineLL, lineIndex) => {
+        if (!Array.isArray(lineLL) || lineLL.length < 2) return;
+        const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+        const totalM = cumData?.cum?.[cumData.cum.length - 1] || 0;
+        if (!(totalM > 0)) return;
+        const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: 0, endM: totalM });
+        if (!coords || coords.length < 2) return;
+        toAdd.push({
+          id: `${String(uid)}:${lineIndex}:0.00-${totalM.toFixed(2)}`,
+          uid: String(uid),
+          lineIndex,
+          startM: 0,
+          endM: totalM,
+          coords,
+          meters: totalM,
+        });
+      });
+    });
+    if (toAdd.length > 0) setPtepSelectedParameterParts(toAdd);
+    ptepLegacyCompletedParameterIdsRef.current = null;
+  }, [isPTEP, ptepTotalParameterMeters]);
+
+  // Save PTEP table-to-table completions to localStorage and update styles
+  useEffect(() => {
+    if (!isPTEP) return;
+    try {
+      localStorage.setItem(ptepStorageKeyTT, JSON.stringify(Array.from(ptepCompletedTableToTable)));
     } catch (_e) {
       void _e;
     }
-    // Update styles for all table-to-table features
+    // Update styles and interactivity for all table-to-table features
     const byId = ptepTableToTableByIdRef.current || {};
+    const isActive = ptepSubModeRef.current === 'tabletotable';
     Object.keys(byId).forEach((uid) => {
       const layer = byId[uid];
       if (layer && typeof layer.setStyle === 'function') {
         const isDone = ptepCompletedTableToTable.has(uid);
         layer.setStyle({
-          color: isDone ? '#22c55e' : '#ffffff',
-          weight: 5,
-          opacity: 1,
+          color: isDone ? '#22c55e' : '#3b82f6',
+          weight: 2.2,
+          opacity: isActive ? 1 : 0,
+          dashArray: isDone ? null : '6 4',
+          lineCap: 'round',
+          lineJoin: 'round',
         });
+        // Disable/enable interactivity based on sub-mode
+        if (layer.options) {
+          layer.options.interactive = isActive;
+        }
+        // Also update the underlying path element's pointer-events
+        try {
+          if (layer._path) {
+            layer._path.style.pointerEvents = isActive ? 'auto' : 'none';
+          }
+        } catch (_e) { void _e; }
       }
     });
-  }, [isPTEP, ptepStorageKey, ptepCompletedTableToTable]);
+  }, [isPTEP, ptepStorageKeyTT, ptepCompletedTableToTable, ptepSubMode]);
+
+  // Save PTEP parameter PART completions to localStorage and update base styles/interactivity
+  useEffect(() => {
+    if (!isPTEP) return;
+    try {
+      localStorage.setItem(ptepStorageKeyParamParts, JSON.stringify(ptepSelectedParameterParts || []));
+    } catch (_e) {
+      void _e;
+    }
+
+    const byId = ptepParameterByIdRef.current || {};
+    const isActive = ptepSubModeRef.current === 'parameter';
+    Object.keys(byId).forEach((uid) => {
+      const layer = byId[uid];
+      if (layer && typeof layer.setStyle === 'function') {
+        layer.setStyle({
+          color: '#facc15',
+          weight: 1.5,
+          opacity: isActive ? 1 : 0,
+        });
+        if (layer.options) {
+          layer.options.interactive = isActive;
+        }
+        try {
+          if (layer._path) {
+            layer._path.style.pointerEvents = isActive ? 'auto' : 'none';
+          }
+        } catch (_e) {
+          void _e;
+        }
+      }
+    });
+  }, [isPTEP, ptepStorageKeyParamParts, ptepSelectedParameterParts, ptepSubMode]);
+
+  // PTEP: Render selected parameter PARTS as green overlay (MVF-style)
+  useEffect(() => {
+    if (!isPTEP) return;
+    const map = mapRef.current;
+    if (!map) return;
+    try {
+      if (!ptepParameterSelectedLayerRef.current) {
+        ptepParameterSelectedLayerRef.current = L.layerGroup().addTo(map);
+      }
+      const lg = ptepParameterSelectedLayerRef.current;
+      lg.clearLayers();
+      if (ptepSubModeRef.current !== 'parameter') return;
+      const parts = ptepSelectedParameterPartsRef.current || [];
+      parts.forEach((p) => {
+        const coords = p?.coords;
+        if (!Array.isArray(coords) || coords.length < 2) return;
+        const line = L.polyline(coords, {
+          color: '#22c55e',
+          weight: 3,
+          opacity: 1,
+          interactive: false,
+          pane: 'ptepParameterSelectedPane',
+        });
+        lg.addLayer(line);
+      });
+    } catch (_e) {
+      void _e;
+    }
+  }, [isPTEP, ptepSubMode, ptepSelectedParameterParts]);
+
+  // PTEP: Update pane-level pointer-events and visibility based on sub-mode
+  // This ensures inactive layers are both non-interactive AND hidden
+  useEffect(() => {
+    if (!isPTEP) return;
+    const map = mapRef.current;
+    if (!map) return;
+
+    try {
+      const ttPane = map.getPane('ptepTableToTablePane');
+      const paramPane = map.getPane('ptepParameterPane');
+
+      if (ttPane) {
+        ttPane.style.pointerEvents = ptepSubMode === 'tabletotable' ? 'auto' : 'none';
+        ttPane.style.opacity = ptepSubMode === 'tabletotable' ? '1' : '0';
+      }
+      if (paramPane) {
+        paramPane.style.pointerEvents = ptepSubMode === 'parameter' ? 'auto' : 'none';
+        paramPane.style.opacity = ptepSubMode === 'parameter' ? '1' : '0';
+      }
+    } catch (_e) {
+      void _e;
+    }
+  }, [isPTEP, ptepSubMode]);
+
+  // Compute completed parameter meters
+  const ptepCompletedParameterMeters = useMemo(() => {
+    const parts = ptepSelectedParameterParts || [];
+    let sum = 0;
+    for (const p of parts) {
+      const m = Number(p?.meters);
+      if (Number.isFinite(m) && m > 0) sum += m;
+    }
+    return sum;
+  }, [ptepSelectedParameterParts]);
 
   // MC4: panel-end progress tracking (two ends per panel: left/right)
   const MC4_PANEL_STATES = {
@@ -1859,43 +2100,109 @@ export default function BaseModule({
     setMvtTermHistoryTick((t) => t + 1);
   }, [setMvtTerminationByStation]);
 
+  // PTEP: Undo/Redo functions for table-to-table
+  const ptepTTCanUndo = isPTEP && ptepSubMode === 'tabletotable' && ptepTTHistoryRef.current.past.length > 0;
+  const ptepTTCanRedo = isPTEP && ptepSubMode === 'tabletotable' && ptepTTHistoryRef.current.future.length > 0;
+  const ptepTTUndo = useCallback(() => {
+    const h = ptepTTHistoryRef.current;
+    if (!h.past.length) return;
+    const current = Array.from(ptepCompletedTableToTableRef.current || new Set()).sort();
+    const previous = h.past[h.past.length - 1] || [];
+    h.past = h.past.slice(0, -1);
+    h.future = [current, ...h.future].slice(0, HISTORY_LIMIT);
+    ptepTTHistorySuspendRef.current = true;
+    ptepTTPrevSnapshotRef.current = previous;
+    setPtepCompletedTableToTable(new Set(previous));
+    setPtepTTHistoryTick((t) => t + 1);
+    setTimeout(() => { ptepTTHistorySuspendRef.current = false; }, 0);
+  }, [setPtepCompletedTableToTable]);
+
+  const ptepTTRedo = useCallback(() => {
+    const h = ptepTTHistoryRef.current;
+    if (!h.future.length) return;
+    const current = Array.from(ptepCompletedTableToTableRef.current || new Set()).sort();
+    const next = h.future[0] || [];
+    h.future = h.future.slice(1);
+    h.past = [...h.past, current].slice(-HISTORY_LIMIT);
+    ptepTTHistorySuspendRef.current = true;
+    ptepTTPrevSnapshotRef.current = next;
+    setPtepCompletedTableToTable(new Set(next));
+    setPtepTTHistoryTick((t) => t + 1);
+    setTimeout(() => { ptepTTHistorySuspendRef.current = false; }, 0);
+  }, [setPtepCompletedTableToTable]);
+
+  // PTEP: Undo/Redo functions for parameter
+  const ptepParamCanUndo = isPTEP && ptepSubMode === 'parameter' && ptepParamHistoryRef.current.past.length > 0;
+  const ptepParamCanRedo = isPTEP && ptepSubMode === 'parameter' && ptepParamHistoryRef.current.future.length > 0;
+  const ptepParamUndo = useCallback(() => {
+    const h = ptepParamHistoryRef.current;
+    if (!h.past.length) return;
+    const current = ptepSelectedParameterPartsRef.current || [];
+    const previous = h.past[h.past.length - 1] || [];
+    h.past = h.past.slice(0, -1);
+    h.future = [current, ...h.future].slice(0, HISTORY_LIMIT);
+    ptepParamHistorySuspendRef.current = true;
+    ptepParamPrevSnapshotRef.current = previous;
+    setPtepSelectedParameterParts(previous);
+    setPtepParamHistoryTick((t) => t + 1);
+    setTimeout(() => { ptepParamHistorySuspendRef.current = false; }, 0);
+  }, [setPtepSelectedParameterParts]);
+
+  const ptepParamRedo = useCallback(() => {
+    const h = ptepParamHistoryRef.current;
+    if (!h.future.length) return;
+    const current = ptepSelectedParameterPartsRef.current || [];
+    const next = h.future[0] || [];
+    h.future = h.future.slice(1);
+    h.past = [...h.past, current].slice(-HISTORY_LIMIT);
+    ptepParamHistorySuspendRef.current = true;
+    ptepParamPrevSnapshotRef.current = next;
+    setPtepSelectedParameterParts(next);
+    setPtepParamHistoryTick((t) => t + 1);
+    setTimeout(() => { ptepParamHistorySuspendRef.current = false; }, 0);
+  }, [setPtepSelectedParameterParts]);
+
   const globalCanUndo = noteMode
     ? canUndoNotes
     : (isMC4 ? mc4CanUndo
       : isLVTT ? lvttCanUndo
         : isMVT ? mvtCanUndo
-          : isLV ? lvInvCanUndo
-            : isMVF ? mvfPartsCanUndo
-              : selectionCanUndo);
+          : isPTEP ? (ptepSubMode === 'tabletotable' ? ptepTTCanUndo : ptepParamCanUndo)
+            : isLV ? lvInvCanUndo
+              : isMVF ? mvfPartsCanUndo
+                : selectionCanUndo);
 
   const globalCanRedo = noteMode
     ? canRedoNotes
     : (isMC4 ? mc4CanRedo
       : isLVTT ? lvttCanRedo
         : isMVT ? mvtCanRedo
-          : isLV ? lvInvCanRedo
-            : isMVF ? mvfPartsCanRedo
-              : selectionCanRedo);
+          : isPTEP ? (ptepSubMode === 'tabletotable' ? ptepTTCanRedo : ptepParamCanRedo)
+            : isLV ? lvInvCanRedo
+              : isMVF ? mvfPartsCanRedo
+                : selectionCanRedo);
 
   const globalUndo = useCallback(() => {
     if (noteMode) return void undoNotes();
     if (isMC4) return void mc4Undo();
     if (isLVTT) return void lvttUndo();
     if (isMVT) return void mvtUndo();
+    if (isPTEP) return void (ptepSubModeRef.current === 'tabletotable' ? ptepTTUndo() : ptepParamUndo());
     if (isLV) return void lvInvUndo();
     if (isMVF) return void mvfPartsUndo();
     return void selectionUndo();
-  }, [noteMode, undoNotes, isMC4, mc4Undo, isLVTT, lvttUndo, isMVT, mvtUndo, isLV, lvInvUndo, isMVF, mvfPartsUndo, selectionUndo]);
+  }, [noteMode, undoNotes, isMC4, mc4Undo, isLVTT, lvttUndo, isMVT, mvtUndo, isPTEP, ptepTTUndo, ptepParamUndo, isLV, lvInvUndo, isMVF, mvfPartsUndo, selectionUndo]);
 
   const globalRedo = useCallback(() => {
     if (noteMode) return void redoNotes();
     if (isMC4) return void mc4Redo();
     if (isLVTT) return void lvttRedo();
     if (isMVT) return void mvtRedo();
+    if (isPTEP) return void (ptepSubModeRef.current === 'tabletotable' ? ptepTTRedo() : ptepParamRedo());
     if (isLV) return void lvInvRedo();
     if (isMVF) return void mvfPartsRedo();
     return void selectionRedo();
-  }, [noteMode, redoNotes, isMC4, mc4Redo, isLVTT, lvttRedo, isMVT, mvtRedo, isLV, lvInvRedo, isMVF, mvfPartsRedo, selectionRedo]);
+  }, [noteMode, redoNotes, isMC4, mc4Redo, isLVTT, lvttRedo, isMVT, mvtRedo, isPTEP, ptepTTRedo, ptepParamRedo, isLV, lvInvRedo, isMVF, mvfPartsRedo, selectionRedo]);
 
   useEffect(() => {
     if (!isMC4) return;
@@ -6191,26 +6498,39 @@ export default function BaseModule({
         const invLabelMode = file.name === 'inv_id' && (isLV || isLVTT || activeMode?.invIdLabelMode);
         const invInteractive = (isLV || isLVTT) && file.name === 'inv_id';
         const mvfTrenchInteractive = isMVF && file.name === 'mv_trench';
-        // PTEP: only earthing_tabletotable is interactive
+        // PTEP: both earthing_tabletotable and earthing_parameter are interactive
         const ptepTableToTableInteractive = isPTEP && file.name === 'earthing_tabletotable';
+        const ptepParameterInteractive = isPTEP && file.name === 'earthing_parameter';
         // MVT: we don't want table selection interactions in this mode.
         const disableInteractions = (isMVT || isLVTT) && (file.name === 'full' || file.name === 'subs');
 
-        // For PTEP earthing_tabletotable, force an SVG pane above canvas so clicks work under preferCanvas.
-        const ptepPaneName = ptepTableToTableInteractive ? 'ptepTableToTablePane' : undefined;
+        // For PTEP earthing_tabletotable and earthing_parameter, force an SVG pane above canvas so clicks work under preferCanvas.
+        const ptepPaneName = ptepTableToTableInteractive ? 'ptepTableToTablePane' : (ptepParameterInteractive ? 'ptepParameterPane' : undefined);
         const useRenderer = ptepTableToTableInteractive
           ? (ptepTableToTableSvgRendererRef.current || L.svg({ pane: 'ptepTableToTablePane' }))
+          : ptepParameterInteractive
+          ? (ptepParameterSvgRendererRef.current || L.svg({ pane: 'ptepParameterPane' }))
           : canvasRenderer;
 
         const layer = L.geoJSON(data, {
           pane: ptepPaneName,
           renderer: useRenderer,
-          interactive: !disableInteractions && (invInteractive || mvfTrenchInteractive || ptepTableToTableInteractive),
-          bubblingMouseEvents: !ptepTableToTableInteractive,
+          interactive: !disableInteractions && (invInteractive || mvfTrenchInteractive || ptepTableToTableInteractive || ptepParameterInteractive),
+          bubblingMouseEvents: !(ptepTableToTableInteractive || ptepParameterInteractive),
           
           style: (feature) => {
-            // PTEP: earthing_full = background only (dim)
+            // PTEP: earthing_full = background only (dim), but boundry layer = red
             if (isPTEP && file.name === 'earthing_full') {
+              const layerName = String(feature?.properties?.layer || '').toLowerCase();
+              if (layerName === 'boundry' || layerName === 'boundary') {
+                return {
+                  color: '#ef4444',
+                  weight: 2.5,
+                  opacity: 1,
+                  fill: false,
+                  fillOpacity: 0,
+                };
+              }
               return {
                 color: 'rgba(255,255,255,0.26)',
                 weight: 0.78,
@@ -6218,25 +6538,30 @@ export default function BaseModule({
                 fillOpacity: 0
               };
             }
-            // PTEP: earthing_parameter = rendered normally (slightly brighter)
-            if (isPTEP && file.name === 'earthing_parameter') {
+            // PTEP: earthing_parameter = YELLOW lines (HIDDEN if tabletotable sub-mode is active)
+            if (ptepParameterInteractive) {
+              const isActive = ptepSubModeRef.current === 'parameter';
               return {
-                color: 'rgba(255,255,255,0.5)',
-                weight: 1.2,
+                color: '#facc15',
+                weight: 1.5,
+                opacity: isActive ? 1 : 0,
                 fill: false,
                 fillOpacity: 0
               };
             }
-            // PTEP: earthing_tabletotable = thick white (or green if completed)
+            // PTEP: earthing_tabletotable = BLUE dashed lines (HIDDEN if parameter sub-mode is active)
+            // Blue = uncompleted, Green = completed
             if (ptepTableToTableInteractive) {
               // Check if this feature is already completed
-              const fid = feature?.properties?.fid ?? feature?.properties?.FID ?? feature?.properties?.id ?? feature?.id;
+              const fid = feature?.properties?.handle ?? feature?.properties?.fid ?? feature?.properties?.FID ?? feature?.properties?.id ?? feature?.id;
               const uniqueId = `tt_${String(fid)}`;
               const isDone = ptepCompletedTableToTableRef.current?.has(uniqueId);
+              const isActive = ptepSubModeRef.current === 'tabletotable';
               return {
-                color: isDone ? '#22c55e' : '#ffffff',
-                weight: 5,
-                opacity: 1,
+                color: isDone ? '#00ff00' : '#3b82f6',
+                weight: isDone ? 6 : 2.2,
+                opacity: isActive ? 1 : 0,
+                dashArray: isDone ? null : '6 4',
                 lineCap: 'round',
                 lineJoin: 'round',
                 fill: false,
@@ -6508,7 +6833,7 @@ export default function BaseModule({
           onEachFeature: (feature, featureLayer) => {
             // PTEP: table-to-table click handler (toggle white/green)
             if (ptepTableToTableInteractive && featureLayer && typeof featureLayer.on === 'function') {
-              const fid = feature?.properties?.fid ?? feature?.properties?.FID ?? feature?.properties?.id ?? feature?.id;
+              const fid = feature?.properties?.handle ?? feature?.properties?.fid ?? feature?.properties?.FID ?? feature?.properties?.id ?? feature?.id;
               const uniqueId = `tt_${String(fid)}`;
               featureLayer._ptepUniqueId = uniqueId;
               ptepTableToTableByIdRef.current[uniqueId] = featureLayer;
@@ -6528,6 +6853,8 @@ export default function BaseModule({
                   void _e;
                 }
                 if (noteMode) return;
+                // Only allow selection when tabletotable sub-mode is active
+                if (ptepSubModeRef.current !== 'tabletotable') return;
                 
                 const isRightClick = e?.originalEvent?.button === 2;
                 setPtepCompletedTableToTable((prev) => {
@@ -6544,6 +6871,133 @@ export default function BaseModule({
                     }
                   }
                   return next;
+                });
+              });
+            }
+
+            // PTEP: parameter click handler (toggle normal/green, track meters)
+            if (ptepParameterInteractive && featureLayer && typeof featureLayer.on === 'function') {
+              const fid = feature?.properties?.handle ?? feature?.properties?.fid ?? feature?.properties?.id ?? feature?.id;
+              const uniqueId = `param_${String(fid)}`;
+              featureLayer._ptepParamUniqueId = uniqueId;
+              ptepParameterByIdRef.current[uniqueId] = featureLayer;
+
+              // Compute line length in meters
+              try {
+                const geom = feature?.geometry;
+                let meters = 0;
+                const addLineMeters = (coords) => {
+                  if (!Array.isArray(coords) || coords.length < 2) return;
+                  let prev = null;
+                  for (const c of coords) {
+                    const lng = c?.[0];
+                    const lat = c?.[1];
+                    if (typeof lat !== 'number' || typeof lng !== 'number') continue;
+                    const ll = L.latLng(lat, lng);
+                    if (prev) {
+                      meters += prev.distanceTo(ll);
+                    }
+                    prev = ll;
+                  }
+                };
+                if (geom?.type === 'LineString') addLineMeters(geom.coordinates);
+                else if (geom?.type === 'MultiLineString') (geom.coordinates || []).forEach(addLineMeters);
+                ptepParameterLenByIdRef.current[uniqueId] = meters;
+              } catch (_e) {
+                void _e;
+                ptepParameterLenByIdRef.current[uniqueId] = 0;
+              }
+              
+              // Ensure layer is interactive
+              if (featureLayer.options) {
+                featureLayer.options.interactive = true;
+              }
+              
+              featureLayer.on('click', (e) => {
+                try {
+                  if (e?.originalEvent) {
+                    L.DomEvent.stopPropagation(e.originalEvent);
+                    L.DomEvent.preventDefault(e.originalEvent);
+                  }
+                } catch (_e) {
+                  void _e;
+                }
+                if (noteMode) return;
+                // Only allow selection when parameter sub-mode is active
+                if (ptepSubModeRef.current !== 'parameter') return;
+
+                const isRightClick = e?.originalEvent?.button === 2;
+                setPtepSelectedParameterParts((prev) => {
+                  const parts = Array.isArray(prev) ? prev : [];
+
+                  // Right-click: remove all selected parts for this feature
+                  if (isRightClick) {
+                    return parts.filter((p) => String(p?.uid || '') !== uniqueId);
+                  }
+
+                  // Left-click: toggle FULL coverage for this feature
+                  const kept = parts.filter((p) => String(p?.uid || '') !== uniqueId);
+
+                  // Determine whether this feature is already fully covered
+                  let fullyCovered = true;
+                  try {
+                    const lines = asLineStrings(featureLayer.getLatLngs());
+                    const byLine = new Map(); // lineIndex -> merged intervals
+                    parts.forEach((p) => {
+                      if (String(p?.uid || '') !== uniqueId) return;
+                      const li = Number(p?.lineIndex);
+                      const a = Number(p?.startM);
+                      const b = Number(p?.endM);
+                      if (!Number.isFinite(li) || !Number.isFinite(a) || !Number.isFinite(b)) return;
+                      const lo = Math.min(a, b);
+                      const hi = Math.max(a, b);
+                      if (!(hi > lo)) return;
+                      if (!byLine.has(li)) byLine.set(li, []);
+                      byLine.get(li).push([lo, hi]);
+                    });
+                    lines.forEach((lineLL, lineIndex) => {
+                      if (!Array.isArray(lineLL) || lineLL.length < 2) return;
+                      const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+                      const totalM = cumData?.cum?.[cumData.cum.length - 1] || 0;
+                      if (!(totalM > 0)) return;
+                      const merged = mergeIntervals(byLine.get(lineIndex) || []);
+                      const ok = merged.length === 1 && merged[0][0] <= 0.2 && merged[0][1] >= totalM - 0.2;
+                      if (!ok) fullyCovered = false;
+                    });
+                  } catch (_e) {
+                    void _e;
+                    fullyCovered = false;
+                  }
+
+                  // If fully covered -> toggle off (remove all parts)
+                  if (fullyCovered) return kept;
+
+                  // Otherwise -> set full coverage parts
+                  const toAdd = [];
+                  try {
+                    const lines = asLineStrings(featureLayer.getLatLngs());
+                    lines.forEach((lineLL, lineIndex) => {
+                      if (!Array.isArray(lineLL) || lineLL.length < 2) return;
+                      const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+                      const totalM = cumData?.cum?.[cumData.cum.length - 1] || 0;
+                      if (!(totalM > 0)) return;
+                      const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: 0, endM: totalM });
+                      if (!coords || coords.length < 2) return;
+                      toAdd.push({
+                        id: `${uniqueId}:${lineIndex}:0.00-${totalM.toFixed(2)}`,
+                        uid: uniqueId,
+                        lineIndex,
+                        startM: 0,
+                        endM: totalM,
+                        coords,
+                        meters: totalM,
+                      });
+                    });
+                  } catch (_e) {
+                    void _e;
+                  }
+
+                  return toAdd.length > 0 ? [...kept, ...toAdd] : kept;
                 });
               });
             }
@@ -6650,6 +7104,18 @@ export default function BaseModule({
         // PTEP: Count total table-to-table features
         if (isPTEP && file.name === 'earthing_tabletotable' && data?.features?.length) {
           setPtepTotalTableToTable(data.features.length);
+        }
+
+        // PTEP: Compute total parameter meters from stored lengths
+        if (isPTEP && file.name === 'earthing_parameter' && data?.features?.length) {
+          // Sum up all the meters we calculated in onEachFeature
+          setTimeout(() => {
+            let totalMeters = 0;
+            Object.values(ptepParameterLenByIdRef.current).forEach((m) => {
+              totalMeters += m || 0;
+            });
+            setPtepTotalParameterMeters(totalMeters);
+          }, 100);
         }
         
         layersRef.current.push(layer);
@@ -7836,63 +8302,198 @@ export default function BaseModule({
               }
             }
           } else if (isPTEP) {
-            // PTEP MODE: Box select table-to-table features only
-            const tableToTableFeatures = ptepTableToTableByIdRef.current || {};
-            const idsInBounds = [];
+            // PTEP MODE: Box select only the ACTIVE sub-mode dataset
+            const activePtepSubMode = ptepSubModeRef.current;
+            const isPtepParamMode = activePtepSubMode === 'parameter';
             const map = mapRef.current;
-            
-            // Check if a line feature intersects with the selection bounds
-            const lineIntersectsBounds = (layer) => {
-              if (!layer || !map) return false;
-              try {
-                const layerBounds = layer.getBounds();
-                if (!layerBounds || !bounds.intersects(layerBounds)) return false;
-                
-                // Get line coordinates
-                let coords = null;
-                if (typeof layer.getLatLngs === 'function') {
-                  coords = layer.getLatLngs();
-                }
-                if (!coords) return false;
-                
-                // Flatten nested arrays if needed
-                while (Array.isArray(coords) && coords.length && Array.isArray(coords[0]) && !coords[0].lat) {
-                  coords = coords.flat();
-                }
-                
-                // Check if any point is within bounds
-                for (const ll of coords) {
-                  if (ll && ll.lat != null && ll.lng != null) {
-                    if (bounds.contains(ll)) return true;
+
+            if (isPtepParamMode) {
+              // PARAMETER-EARTHING: MVF-style PART selection/erase
+              const byId = ptepParameterByIdRef.current || {};
+
+              if (isRightClick) {
+                // Right-click drag: erase only the portion inside the box
+                setPtepSelectedParameterParts((prev) => {
+                  const parts = Array.isArray(prev) ? prev : [];
+                  if (parts.length === 0) return parts;
+
+                  const groups = new Map(); // key uid:lineIndex -> parts[]
+                  parts.forEach((p) => {
+                    const uid = String(p?.uid || '');
+                    const lineIndex = Number(p?.lineIndex);
+                    const a = Number(p?.startM);
+                    const b = Number(p?.endM);
+                    if (!uid || !Number.isFinite(lineIndex) || !Number.isFinite(a) || !Number.isFinite(b)) {
+                      const k = `__raw__:${Math.random()}`;
+                      groups.set(k, [p]);
+                      return;
+                    }
+                    const k = `${uid}:${lineIndex}`;
+                    if (!groups.has(k)) groups.set(k, []);
+                    groups.get(k).push(p);
+                  });
+
+                  const out = [];
+                  for (const [k, arr] of groups.entries()) {
+                    if (k.startsWith('__raw__')) {
+                      out.push(...arr);
+                      continue;
+                    }
+                    const [uid, lineIndexStr] = k.split(':');
+                    const lineIndex = Number(lineIndexStr);
+                    const layer = byId[uid];
+                    if (!layer || typeof layer.getLatLngs !== 'function') {
+                      out.push(...arr);
+                      continue;
+                    }
+                    const lines = asLineStrings(layer.getLatLngs());
+                    const lineLL = lines[lineIndex];
+                    if (!lineLL || lineLL.length < 2) {
+                      out.push(...arr);
+                      continue;
+                    }
+                    const eraseIntervals = computeIntervalsInBox({ L, map, bounds, lineLatLngs: lineLL, minMeters: 0.5 });
+                    if (!eraseIntervals.length) {
+                      out.push(...arr);
+                      continue;
+                    }
+                    const eraseMerged = mergeIntervals(eraseIntervals);
+                    const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+
+                    arr.forEach((p) => {
+                      const startM = Number(p.startM);
+                      const endM = Number(p.endM);
+                      const lo = Math.min(startM, endM);
+                      const hi = Math.max(startM, endM);
+                      const remainIntervals = subtractInterval([lo, hi], eraseMerged, 0.2);
+                      remainIntervals.forEach(([a, b]) => {
+                        const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: a, endM: b });
+                        if (!coords || coords.length < 2) return;
+                        out.push({
+                          ...p,
+                          id: `${uid}:${lineIndex}:${a.toFixed(2)}-${b.toFixed(2)}`,
+                          uid,
+                          lineIndex,
+                          startM: a,
+                          endM: b,
+                          coords,
+                          meters: Math.max(0, b - a),
+                        });
+                      });
+                    });
                   }
-                }
-                return false;
-              } catch (_e) {
-                void _e;
-                return false;
+                  return out;
+                });
+              } else {
+                // Left-click drag: add only the portion inside the box
+                setPtepSelectedParameterParts((prev) => {
+                  const parts = Array.isArray(prev) ? prev : [];
+                  const toAdd = [];
+
+                  // Covered intervals per uid:lineIndex
+                  const coveredIntervalsByKey = new Map();
+                  parts.forEach((p) => {
+                    const uid = String(p?.uid || '');
+                    const lineIndex = Number(p?.lineIndex);
+                    const a = Number(p?.startM);
+                    const b = Number(p?.endM);
+                    if (!uid || !Number.isFinite(lineIndex) || !Number.isFinite(a) || !Number.isFinite(b)) return;
+                    const lo = Math.min(a, b);
+                    const hi = Math.max(a, b);
+                    if (!(hi > lo)) return;
+                    const key = `${uid}:${lineIndex}`;
+                    if (!coveredIntervalsByKey.has(key)) coveredIntervalsByKey.set(key, []);
+                    coveredIntervalsByKey.get(key).push([lo, hi]);
+                  });
+                  for (const [key, arr] of coveredIntervalsByKey.entries()) coveredIntervalsByKey.set(key, mergeIntervals(arr));
+
+                  Object.keys(byId).forEach((uid) => {
+                    const layer = byId[uid];
+                    if (!layer || typeof layer.getBounds !== 'function' || typeof layer.getLatLngs !== 'function') return;
+                    try {
+                      const lb = layer.getBounds();
+                      if (!lb || !bounds.intersects(lb)) return;
+                    } catch (_e) {
+                      void _e;
+                      return;
+                    }
+                    const lines = asLineStrings(layer.getLatLngs());
+                    lines.forEach((lineLL, lineIndex) => {
+                      if (!lineLL || lineLL.length < 2) return;
+                      const key = `${uid}:${lineIndex}`;
+                      const candidates = computeIntervalsInBox({ L, map, bounds, lineLatLngs: lineLL, minMeters: 0.5 });
+                      if (!candidates.length) return;
+                      let covered = coveredIntervalsByKey.get(key) || [];
+                      const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+                      candidates.forEach(([a, b]) => {
+                        const newInts = subtractInterval([a, b], covered, 0.2);
+                        if (!newInts.length) return;
+                        covered = mergeIntervals([...covered, ...newInts]);
+                        coveredIntervalsByKey.set(key, covered);
+                        newInts.forEach(([x, y]) => {
+                          const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: x, endM: y });
+                          if (!coords || coords.length < 2) return;
+                          toAdd.push({
+                            id: `${uid}:${lineIndex}:${x.toFixed(2)}-${y.toFixed(2)}`,
+                            uid,
+                            lineIndex,
+                            startM: x,
+                            endM: y,
+                            coords,
+                            meters: Math.max(0, y - x),
+                          });
+                        });
+                      });
+                    });
+                  });
+
+                  return toAdd.length > 0 ? [...parts, ...toAdd] : parts;
+                });
               }
-            };
-            
-            Object.keys(tableToTableFeatures).forEach((uniqueId) => {
-              const layer = tableToTableFeatures[uniqueId];
-              if (!layer) return;
-              if (lineIntersectsBounds(layer)) {
-                idsInBounds.push(uniqueId);
-              }
-            });
-            
-            if (idsInBounds.length > 0) {
-              setPtepCompletedTableToTable((prev) => {
-                const next = new Set(prev);
-                if (isRightClick) {
-                  // Right-click: deselect all in box
-                  idsInBounds.forEach((id) => next.delete(id));
-                } else {
-                  // Left-click: select all in box
-                  idsInBounds.forEach((id) => next.add(id));
+            } else {
+              // TABLE-TO-TABLE: keep existing whole-feature selection by bounds
+              const tableToTableFeatures = ptepTableToTableByIdRef.current || {};
+              const idsInBounds = [];
+
+              const lineIntersectsBounds = (layer) => {
+                if (!layer || !map) return false;
+                try {
+                  const layerBounds = layer.getBounds();
+                  if (!layerBounds || !bounds.intersects(layerBounds)) return false;
+                  let coords = null;
+                  if (typeof layer.getLatLngs === 'function') {
+                    coords = layer.getLatLngs();
+                  }
+                  if (!coords) return false;
+                  while (Array.isArray(coords) && coords.length && Array.isArray(coords[0]) && !coords[0].lat) {
+                    coords = coords.flat();
+                  }
+                  for (const ll of coords) {
+                    if (ll && ll.lat != null && ll.lng != null) {
+                      if (bounds.contains(ll)) return true;
+                    }
+                  }
+                  return false;
+                } catch (_e) {
+                  void _e;
+                  return false;
                 }
-                return next;
+              };
+
+              Object.keys(tableToTableFeatures).forEach((uniqueId) => {
+                const layer = tableToTableFeatures[uniqueId];
+                if (!layer) return;
+                if (lineIntersectsBounds(layer)) idsInBounds.push(uniqueId);
               });
+
+              if (idsInBounds.length > 0) {
+                setPtepCompletedTableToTable((prev) => {
+                  const next = new Set(prev);
+                  if (isRightClick) idsInBounds.forEach((id) => next.delete(id));
+                  else idsInBounds.forEach((id) => next.add(id));
+                  return next;
+                });
+              }
             }
           } else if (isLV) {
           // LV MODE: Box select inv_id labels (daily completion)
@@ -8731,6 +9332,32 @@ export default function BaseModule({
       ptepTableToTableSvgRendererRef.current = null;
     }
 
+    // PTEP: dedicated SVG pane/renderer for interactive parameter layer.
+    try {
+      const paneName = 'ptepParameterPane';
+      if (!mapRef.current.getPane(paneName)) {
+        const pane = mapRef.current.createPane(paneName);
+        pane.style.zIndex = '435'; // below table-to-table (440)
+        pane.style.pointerEvents = 'auto';
+      }
+      ptepParameterSvgRendererRef.current = L.svg({ pane: paneName });
+    } catch (_e) {
+      void _e;
+      ptepParameterSvgRendererRef.current = null;
+    }
+
+    // PTEP: selected parameter parts overlay pane (always pointerEvents:none)
+    try {
+      const paneName = 'ptepParameterSelectedPane';
+      if (!mapRef.current.getPane(paneName)) {
+        const pane = mapRef.current.createPane(paneName);
+        pane.style.zIndex = '436'; // above parameter base (435), below table-to-table (440)
+        pane.style.pointerEvents = 'none';
+      }
+    } catch (_e) {
+      void _e;
+    }
+
     // Dedicated canvas renderer + pane for string_text labels (prevents ghosting when hiding/showing)
     try {
       const paneName = 'stringTextPane';
@@ -9124,19 +9751,21 @@ export default function BaseModule({
     ? lvCompletedInvIds.size 
     : (isMVF 
       ? (mvfSelectedTrenchParts?.length || 0) 
-      : (isMC4 
-        ? Object.keys(mc4PanelStates || {}).length 
-        : (activeMode?.workUnitWeights
-          ? (() => {
-              const seen = new Set();
-              (selectedPolygons || new Set()).forEach((pid) => {
-                const info = polygonById.current?.[pid];
-                const key = String(info?.dedupeKey || pid);
-                seen.add(key);
-              });
-              return seen.size;
-            })()
-          : selectedPolygons.size)));
+      : (isPTEP
+        ? (ptepSubMode === 'tabletotable' ? ptepCompletedTableToTable.size : (ptepSelectedParameterParts?.length || 0))
+        : (isMC4 
+          ? Object.keys(mc4PanelStates || {}).length 
+          : (activeMode?.workUnitWeights
+            ? (() => {
+                const seen = new Set();
+                (selectedPolygons || new Set()).forEach((pid) => {
+                  const info = polygonById.current?.[pid];
+                  const key = String(info?.dedupeKey || pid);
+                  seen.add(key);
+                });
+                return seen.size;
+              })()
+            : selectedPolygons.size))));
   const mvtCompletedForSubmit = isMVT
     ? Math.max(0, Object.values(mvtTerminationByStation || {}).reduce((s, v) => s + Math.max(0, Math.min(3, Number(v) || 0)), 0))
     : 0;
@@ -9147,11 +9776,20 @@ export default function BaseModule({
     )
     : 0;
   const lvttWorkUnit = lvttCompletedForSubmit === 1 ? 'cable terminated' : 'cables terminated';
+  // PTEP completed amounts for submit
+  const ptepCompletedForSubmit = isPTEP
+    ? (ptepSubMode === 'tabletotable' ? ptepCompletedTableToTable.size : ptepCompletedParameterMeters)
+    : 0;
+  const ptepWorkUnit = isPTEP
+    ? (ptepSubMode === 'tabletotable' ? 'pcs' : 'm')
+    : '';
   const workAmount = isMVF 
     ? mvfSelectedCableMeters 
-    : (isMC4 
-      ? (mc4Counts?.mc4Completed || 0) 
-      : completedTotal); // MVF: pending selected cable meters (scaled), MC4: completed ends count
+    : (isPTEP
+      ? ptepCompletedForSubmit
+      : (isMC4 
+        ? (mc4Counts?.mc4Completed || 0) 
+        : completedTotal)); // MVF: pending selected cable meters (scaled), MC4: completed ends count
 
   const [dwgUrl, setDwgUrl] = useState('');
   useEffect(() => {
@@ -9781,31 +10419,168 @@ export default function BaseModule({
                       </>
                     ) : isPTEP ? (
                       <>
-                        {/* PTEP: TableToTable counters */}
-                        <div className="flex items-center gap-3 self-center">
-                          <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
-                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
-                              <span className="text-xs font-bold text-slate-200">TableToTable - Total</span>
-                              <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{ptepTotalTableToTable}</span>
-                            </div>
-                          </div>
+                        {/* PTEP: MC4-style sub-mode selector with counters */}
+                        {(() => {
+                          const isTTMode = ptepSubMode === 'tabletotable';
+                          const isParamMode = ptepSubMode === 'parameter';
+                          const ttTotal = ptepTotalTableToTable;
+                          const ttDone = ptepCompletedTableToTable.size;
+                          const ttRem = Math.max(0, ttTotal - ttDone);
+                          const ttPct = ttTotal > 0 ? ((ttDone / ttTotal) * 100).toFixed(2) : '0.00';
+                          const paramTotal = ptepTotalParameterMeters;
+                          const paramDone = ptepCompletedParameterMeters;
+                          const paramRem = Math.max(0, paramTotal - paramDone);
+                          const paramPct = paramTotal > 0 ? ((paramDone / paramTotal) * 100).toFixed(2) : '0.00';
+                          // Fixed-width counter box style for alignment
+                          const PTEP_COUNTER_BOX = 'w-[160px] border-2 border-slate-700 bg-slate-800 py-2 px-3';
+                          return (
+                            <div className="min-w-[900px] border-2 border-slate-700 bg-slate-900/40 py-3 px-3">
+                              <div className="flex flex-col gap-2">
+                                {/* Table-to-Table row */}
+                                <div
+                                  className="grid grid-cols-[24px_180px_160px_160px_160px] items-center gap-x-3 cursor-pointer"
+                                  onClick={() => {
+                                    if (!isTTMode) {
+                                      ptepSubModeRef.current = 'tabletotable';
+                                      setPtepSubMode('tabletotable');
+                                      try {
+                                        const map = mapRef.current;
+                                        if (map) {
+                                          const ttPane = map.getPane('ptepTableToTablePane');
+                                          const paramPane = map.getPane('ptepParameterPane');
+                                          if (ttPane) ttPane.style.pointerEvents = 'auto';
+                                          if (paramPane) paramPane.style.pointerEvents = 'none';
+                                        }
+                                      } catch (_e) {
+                                        void _e;
+                                      }
+                                    }
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (!isTTMode) {
+                                        ptepSubModeRef.current = 'tabletotable';
+                                        setPtepSubMode('tabletotable');
+                                        try {
+                                          const map = mapRef.current;
+                                          if (map) {
+                                            const ttPane = map.getPane('ptepTableToTablePane');
+                                            const paramPane = map.getPane('ptepParameterPane');
+                                            if (ttPane) ttPane.style.pointerEvents = 'auto';
+                                            if (paramPane) paramPane.style.pointerEvents = 'none';
+                                          }
+                                        } catch (_e) {
+                                          void _e;
+                                        }
+                                      }
+                                    }}
+                                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
+                                      isTTMode 
+                                        ? 'border-white bg-white text-slate-900' 
+                                        : 'border-slate-500 bg-slate-800 hover:border-white'
+                                    }`}
+                                    title="Select Table-to-Table mode"
+                                  >
+                                    {isTTMode && <span className="text-xs font-bold">✓</span>}
+                                  </button>
+                                  <div className={`text-sm font-bold ${isTTMode ? 'text-white' : 'text-slate-500'}`}>Table-to-Table:</div>
+                                  <div className={PTEP_COUNTER_BOX}>
+                                    <div className="flex justify-between items-center">
+                                      <span className={COUNTER_LABEL}>Total</span>
+                                      <span className={COUNTER_VALUE}>{ttTotal}</span>
+                                    </div>
+                                  </div>
+                                  <div className={PTEP_COUNTER_BOX}>
+                                    <div className="flex justify-between items-center">
+                                      <span className={isTTMode ? 'text-xs font-bold text-emerald-400' : 'text-xs font-bold text-slate-500'}>Completed</span>
+                                      <span className={isTTMode ? 'text-xs font-bold text-emerald-400 tabular-nums' : 'text-xs font-bold text-slate-500 tabular-nums'}>{ttDone}</span>
+                                    </div>
+                                  </div>
+                                  <div className={PTEP_COUNTER_BOX}>
+                                    <div className="flex justify-between items-center">
+                                      <span className={COUNTER_LABEL}>Remaining</span>
+                                      <span className={COUNTER_VALUE}>{ttRem}</span>
+                                    </div>
+                                  </div>
+                                </div>
 
-                          <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
-                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
-                              <span className="text-xs font-bold text-emerald-400">Completed</span>
-                              <span className="text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap">
-                                {ptepCompletedTableToTable.size}, {ptepTotalTableToTable > 0 ? ((ptepCompletedTableToTable.size / ptepTotalTableToTable) * 100).toFixed(2) : '0.00'}%
-                              </span>
+                                {/* Parameter-Earthing row */}
+                                <div
+                                  className="grid grid-cols-[24px_180px_160px_160px_160px] items-center gap-x-3 cursor-pointer"
+                                  onClick={() => {
+                                    if (!isParamMode) {
+                                      ptepSubModeRef.current = 'parameter';
+                                      setPtepSubMode('parameter');
+                                      try {
+                                        const map = mapRef.current;
+                                        if (map) {
+                                          const ttPane = map.getPane('ptepTableToTablePane');
+                                          const paramPane = map.getPane('ptepParameterPane');
+                                          if (ttPane) ttPane.style.pointerEvents = 'none';
+                                          if (paramPane) paramPane.style.pointerEvents = 'auto';
+                                        }
+                                      } catch (_e) {
+                                        void _e;
+                                      }
+                                    }
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (!isParamMode) {
+                                        ptepSubModeRef.current = 'parameter';
+                                        setPtepSubMode('parameter');
+                                        try {
+                                          const map = mapRef.current;
+                                          if (map) {
+                                            const ttPane = map.getPane('ptepTableToTablePane');
+                                            const paramPane = map.getPane('ptepParameterPane');
+                                            if (ttPane) ttPane.style.pointerEvents = 'none';
+                                            if (paramPane) paramPane.style.pointerEvents = 'auto';
+                                          }
+                                        } catch (_e) {
+                                          void _e;
+                                        }
+                                      }
+                                    }}
+                                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
+                                      isParamMode 
+                                        ? 'border-amber-400 bg-amber-400 text-slate-900' 
+                                        : 'border-slate-500 bg-slate-800 hover:border-amber-400'
+                                    }`}
+                                    title="Select Parameter-Earthing mode"
+                                  >
+                                    {isParamMode && <span className="text-xs font-bold">✓</span>}
+                                  </button>
+                                  <div className={`text-sm font-bold ${isParamMode ? 'text-amber-400' : 'text-slate-500'}`}>Parameter-Earthing:</div>
+                                  <div className={PTEP_COUNTER_BOX}>
+                                    <div className="flex justify-between items-center">
+                                      <span className={COUNTER_LABEL}>Total</span>
+                                      <span className={COUNTER_VALUE}>{paramTotal.toFixed(0)} m</span>
+                                    </div>
+                                  </div>
+                                  <div className={PTEP_COUNTER_BOX}>
+                                    <div className="flex justify-between items-center">
+                                      <span className={isParamMode ? 'text-xs font-bold text-emerald-400' : 'text-xs font-bold text-slate-500'}>Completed</span>
+                                      <span className={isParamMode ? 'text-xs font-bold text-emerald-400 tabular-nums' : 'text-xs font-bold text-slate-500 tabular-nums'}>{paramDone.toFixed(0)} m</span>
+                                    </div>
+                                  </div>
+                                  <div className={PTEP_COUNTER_BOX}>
+                                    <div className="flex justify-between items-center">
+                                      <span className={COUNTER_LABEL}>Remaining</span>
+                                      <span className={COUNTER_VALUE}>{paramRem.toFixed(0)} m</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
-                          </div>
-
-                          <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
-                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
-                              <span className="text-xs font-bold text-slate-200">Remaining</span>
-                              <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{Math.max(0, ptepTotalTableToTable - ptepCompletedTableToTable.size)}</span>
-                            </div>
-                          </div>
-                        </div>
+                          );
+                        })()}
                       </>
                     ) : (
                       <>
@@ -9934,9 +10709,11 @@ export default function BaseModule({
                   disabled={
                     noteMode ||
                     (isMC4 && !mc4SelectionMode) ||
-                    (isLVTT
-                      ? (String(lvttSubMode || 'termination') === 'testing' || lvttCompletedForSubmit === 0)
-                      : (isMVT ? mvtCompletedForSubmit === 0 : workSelectionCount === 0))
+                    (isPTEP
+                      ? (ptepSubMode === 'tabletotable' ? ptepCompletedTableToTable.size === 0 : ptepCompletedParameterMeters === 0)
+                      : (isLVTT
+                        ? (String(lvttSubMode || 'termination') === 'testing' || lvttCompletedForSubmit === 0)
+                        : (isMVT ? mvtCompletedForSubmit === 0 : workSelectionCount === 0)))
                   }
                   className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
                   title={isMC4 && !mc4SelectionMode ? "Select MC4 Install or Cable Termination first" : "Submit Work"}
@@ -9960,27 +10737,37 @@ export default function BaseModule({
                     exportToExcel(dailyLog, {
                       moduleKey: isMC4
                         ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST')
-                        : (isMVT
-                          ? 'MVT_TERM'
-                          : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-                            ? 'LVTT_TERM'
-                            : (activeMode?.key || '')),
+                        : (isPTEP
+                          ? (ptepSubMode === 'tabletotable' ? 'PTEP_TT' : 'PTEP_PARAM')
+                          : (isMVT
+                            ? 'MVT_TERM'
+                            : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                              ? 'LVTT_TERM'
+                              : (activeMode?.key || ''))),
                       moduleLabel: isMC4
                         ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
-                        : (isMVT
-                          ? 'Cable Termination'
-                          : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                        : (isPTEP
+                          ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+                          : (isMVT
                             ? 'Cable Termination'
-                            : moduleName),
+                            : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                              ? 'Cable Termination'
+                              : moduleName)),
                       unit: isMC4
                         ? 'ends'
-                        : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination')) ? 'cables' : 'm'),
+                        : (isPTEP
+                          ? (ptepSubMode === 'tabletotable' ? 'pcs' : 'm')
+                          : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination')) ? 'cables' : 'm')),
                       chartSheetName: (isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
                         ? 'Cable Termination'
-                        : undefined,
+                        : (isPTEP
+                          ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+                          : undefined),
                       chartTitle: (isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
                         ? 'Cable Termination'
-                        : undefined,
+                        : (isPTEP
+                          ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+                          : undefined),
                     })
                   }
                   disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || dailyLog.length === 0}
@@ -10267,6 +11054,30 @@ export default function BaseModule({
                   <div className="mt-2 flex items-center gap-2">
                     <span className="h-3 w-3 rounded-full border-2 border-emerald-700 bg-emerald-500" aria-hidden="true" />
                     <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-400">Completed Termination</span>
+                  </div>
+                </>
+              ) : isPTEP ? (
+                <>
+                  {/* Blue dashed line for Table to Table */}
+                  <div className="flex items-center gap-2">
+                    <svg width="24" height="12" aria-hidden="true">
+                      <line x1="0" y1="6" x2="24" y2="6" stroke="#3b82f6" strokeWidth="2" strokeDasharray="4 3" />
+                    </svg>
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-blue-400">Table to Table</span>
+                  </div>
+                  {/* Yellow line for Parameter Earthing */}
+                  <div className="mt-2 flex items-center gap-2">
+                    <svg width="24" height="12" aria-hidden="true">
+                      <line x1="0" y1="6" x2="24" y2="6" stroke="#facc15" strokeWidth="2" />
+                    </svg>
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-yellow-400">Parameter Earthing</span>
+                  </div>
+                  {/* Green line for Completed */}
+                  <div className="mt-2 flex items-center gap-2">
+                    <svg width="24" height="12" aria-hidden="true">
+                      <line x1="0" y1="6" x2="24" y2="6" stroke="#22c55e" strokeWidth="2" />
+                    </svg>
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-400">Completed</span>
                   </div>
                 </>
               ) : isDCCT ? (
@@ -11887,37 +12698,45 @@ export default function BaseModule({
         }}
         moduleKey={isMC4
           ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST')
-          : (isMVT
-            ? 'MVT_TERM'
-            : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-              ? 'LVTT_TERM'
-              : (activeMode?.key || ''))}
+          : (isPTEP
+            ? (ptepSubMode === 'tabletotable' ? 'PTEP_TT' : 'PTEP_PARAM')
+            : (isMVT
+              ? 'MVT_TERM'
+              : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                ? 'LVTT_TERM'
+                : (activeMode?.key || '')))}
         moduleLabel={isMC4
           ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
-          : (isMVT
-            ? 'Cable Termination'
-            : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+          : (isPTEP
+            ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+            : (isMVT
               ? 'Cable Termination'
-              : moduleName)}
+              : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                ? 'Cable Termination'
+                : moduleName))}
         workAmount={isMC4
           ? (mc4SelectionMode === 'termination'
             ? (mc4Counts?.terminatedCompleted || 0)
             : (mc4Counts?.mc4Completed || 0))
-          : (isMVT
-            ? mvtCompletedForSubmit
-            : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-              ? lvttCompletedForSubmit
-              : workAmount)}
+          : (isPTEP
+            ? ptepCompletedForSubmit
+            : (isMVT
+              ? mvtCompletedForSubmit
+              : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                ? lvttCompletedForSubmit
+                : workAmount))}
         workUnit={
           isMC4
             ? (mc4SelectionMode === 'termination' ? 'cables terminated' : 'mc4')
-            : (isMVT
-              ? 'cables terminated'
-              : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-                ? lvttWorkUnit
-                : (activeMode?.submitWorkUnit
-                  ? String(activeMode.submitWorkUnit)
-                  : (activeMode?.workUnitWeights ? 'panels' : 'm')))
+            : (isPTEP
+              ? ptepWorkUnit
+              : (isMVT
+                ? 'cables terminated'
+                : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                  ? lvttWorkUnit
+                  : (activeMode?.submitWorkUnit
+                    ? String(activeMode.submitWorkUnit)
+                    : (activeMode?.workUnitWeights ? 'panels' : 'm'))))
         }
       />
       
@@ -11951,29 +12770,14 @@ export default function BaseModule({
                 Workers {historySortBy === 'workers' && (historySortOrder === 'desc' ? '↓' : '↑')}
               </button>
               <button 
-                className={`sort-btn ${historySortBy === 'cable' ? 'active' : ''}`}
+                className={`sort-btn ${historySortBy === 'amount' ? 'active' : ''}`}
                 onClick={() => {
-                  if (historySortBy === 'cable') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
-                  else { setHistorySortBy('cable'); setHistorySortOrder('desc'); }
+                  if (historySortBy === 'amount') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
+                  else { setHistorySortBy('amount'); setHistorySortOrder('desc'); }
                 }}
               >
-                Cable {historySortBy === 'cable' && (historySortOrder === 'desc' ? '↓' : '↑')}
+                Amount {historySortBy === 'amount' && (historySortOrder === 'desc' ? '↓' : '↑')}
               </button>
-            </div>
-            
-            <div className="history-summary">
-              <div className="summary-item">
-                <span className="summary-label">Total Records</span>
-                <span className="summary-value">{dailyLog.length}</span>
-              </div>
-              <div className="summary-item">
-                <span className="summary-label">Total Cable</span>
-                <span className="summary-value">{dailyLog.reduce((s, r) => s + (r.total_cable || 0), 0).toFixed(0)} m</span>
-              </div>
-              <div className="summary-item">
-                <span className="summary-label">Total Workers</span>
-                <span className="summary-value">{dailyLog.reduce((s, r) => s + (r.workers || 0), 0)}</span>
-              </div>
             </div>
             
             <div className="history-list">
@@ -12002,7 +12806,7 @@ export default function BaseModule({
                 const dateMetric = (d) => {
                   const recs = recordsByDate[d] || [];
                   if (historySortBy === 'workers') return recs.reduce((s, r) => s + (r.workers || 0), 0);
-                  if (historySortBy === 'cable') return recs.reduce((s, r) => s + (r.total_cable || 0), 0);
+                  if (historySortBy === 'amount') return recs.reduce((s, r) => s + (r.total_cable || 0), 0);
                   return new Date(d).getTime();
                 };
 
@@ -12022,7 +12826,7 @@ export default function BaseModule({
                       <div className="history-day-header">
                         <span className="history-day-date">{dateLabel}</span>
                         <span className="history-day-badges">
-                          {recs.length > 0 && <span className="history-day-badge">Work: {recs.length}</span>}
+                          {recs.length > 0 && <span className="history-day-badge">Total Records: {recs.length}</span>}
                           {dayNotes.length > 0 && <span className="history-day-badge notes">Notes: {dayNotes.length}</span>}
                         </span>
                       </div>
@@ -12044,14 +12848,8 @@ export default function BaseModule({
                                   </svg>
                                   <span>{record.workers} workers</span>
                                 </div>
-                                <div className="stat stat-positive">
-                                  <span>+DC: {(record.plus_dc || 0).toFixed(0)} m</span>
-                                </div>
-                                <div className="stat stat-negative">
-                                  <span>-DC: {(record.minus_dc || 0).toFixed(0)} m</span>
-                                </div>
                                 <div className="stat stat-total">
-                                  <span>Total: {(record.total_cable || 0).toFixed(0)} m</span>
+                                  <span>Amount: {(record.total_cable || 0).toFixed(0)} {record.unit || 'm'}</span>
                                 </div>
                               </div>
                             </div>
