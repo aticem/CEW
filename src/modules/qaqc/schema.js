@@ -97,6 +97,7 @@ export const QAQC_SCHEMA = {
     fixed: true,
     isNCR: true,
     allowMultiple: true,
+    publicPath: '/QAQC/NCRs',
     children: {},
   },
   ThirdParty: {
@@ -109,6 +110,7 @@ export const QAQC_SCHEMA = {
         label: 'DNV',
         fixed: true,
         allowMultiple: true,
+        publicPath: '/QAQC/ThirdParty/DNV',
         children: {},
       },
       'tp-cea': {
@@ -116,6 +118,7 @@ export const QAQC_SCHEMA = {
         label: 'CEA',
         fixed: true,
         allowMultiple: true,
+        publicPath: '/QAQC/ThirdParty/CEA',
         children: {},
       },
     },

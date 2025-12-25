@@ -207,6 +207,21 @@ export default function QAQCModule() {
         { name: 'mechanical.docx', path: '/QAQC/Checklists/mechanical/mounting-structure-assembly/mechanical.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
       ],
     },
+    'NCRs': {
+      'NCRs': [
+        { name: 'civil - Copy - Copy.docx', path: '/QAQC/NCRs/civil - Copy - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'electrical - Copy (2).docx', path: '/QAQC/NCRs/electrical - Copy (2).docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'mechanical - Copy (2).docx', path: '/QAQC/NCRs/mechanical - Copy (2).docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+      ],
+    },
+    'ThirdParty': {
+      'tp-dnv': [
+        // Add files here when you put them in public/QAQC/ThirdParty/DNV/
+      ],
+      'tp-cea': [
+        // Add files here when you put them in public/QAQC/ThirdParty/CEA/
+      ],
+    },
   }), []);
   
   // Calculate stats from metadata
@@ -620,11 +635,25 @@ export default function QAQCModule() {
         </div>
         
         <div className="flex-1 overflow-y-auto p-3">
+          {/* Show public files directly in category (for NCRs, ThirdParty) */}
+          {publicFiles[selectedCategory]?.[selectedCategory]?.map((file) => (
+            <PublicFileItem 
+              key={file.path}
+              file={file}
+              categoryKey={selectedCategory}
+              nodeKey={selectedCategory}
+              onStatusChange={handleStatusChange}
+              metadata={metadata}
+              depth={-1}
+            />
+          ))}
+          
           {currentCategory?.children && Object.entries(currentCategory.children).map(([k, v]) => 
             renderNode(v, k, [], selectedCategory, isNCR)
           )}
           
-          {(!currentCategory?.children || Object.keys(currentCategory.children).length === 0) && (
+          {(!currentCategory?.children || Object.keys(currentCategory.children).length === 0) && 
+           !publicFiles[selectedCategory]?.[selectedCategory]?.length && (
             <div className="text-center text-slate-500 text-[12px] py-8">
               No documents yet. Click "Upload" to add documents.
             </div>
