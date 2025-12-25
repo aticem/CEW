@@ -216,10 +216,17 @@ export default function QAQCModule() {
     },
     'ThirdParty': {
       'tp-dnv': [
-        // Add files here when you put them in public/QAQC/ThirdParty/DNV/
+        { name: 'electrical - Copy (2).docx', path: '/QAQC/ThirdParty/DNV/electrical - Copy (2).docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'mechanical - Copy (2).docx', path: '/QAQC/ThirdParty/DNV/mechanical - Copy (2).docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'mechanical - Copy - Copy.docx', path: '/QAQC/ThirdParty/DNV/mechanical - Copy - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'mechanical - Copy.docx', path: '/QAQC/ThirdParty/DNV/mechanical - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
       ],
       'tp-cea': [
-        // Add files here when you put them in public/QAQC/ThirdParty/CEA/
+        { name: 'civil - Copy (2).docx', path: '/QAQC/ThirdParty/CEA/civil - Copy (2).docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'civil - Copy - Copy.docx', path: '/QAQC/ThirdParty/CEA/civil - Copy - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'civil - Copy.docx', path: '/QAQC/ThirdParty/CEA/civil - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'civil.docx', path: '/QAQC/ThirdParty/CEA/civil.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'electrical - Copy - Copy.docx', path: '/QAQC/ThirdParty/CEA/electrical - Copy - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
       ],
     },
   }), []);
