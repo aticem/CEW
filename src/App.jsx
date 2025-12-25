@@ -14,6 +14,7 @@ import LVBoxInvBoxModule from './modules/LVBoxInvBoxModule.jsx';
 import PunchListModule from './modules/PunchListModule.jsx';
 import ParameterAndTableEarthingProgressModule from './modules/ParameterAndTableEarthingProgressModule.jsx';
 import DCACTrenchModule from './modules/DCACTrenchModule.jsx';
+import QAQCModule from './modules/qaqc/QAQCModule.jsx';
 
 const MODULES = {
   DC: { key: 'DC', label: 'DC Cable Pulling Progress', Component: DCModule },
@@ -31,6 +32,7 @@ const MODULES = {
   PTEP: { key: 'PTEP', label: 'Parameter & Table Earthing', Component: ParameterAndTableEarthingProgressModule },
   DATP: { key: 'DATP', label: 'DC&AC Trench Progress', Component: DCACTrenchModule },
   PL: { key: 'PL', label: 'Punch List', Component: PunchListModule },
+  QAQC: { key: 'QAQC', label: 'QA / QC – Docs & Status', Component: QAQCModule },
 };
 
 export default function App() {
@@ -60,8 +62,8 @@ export default function App() {
     <>
       <ActiveComponent />
 
-      {/* Mode button (left). Keep it aligned with the Note button across all modules. */}
-      <div className="fixed left-3 sm:left-5 top-[20%] z-[1200]" ref={menuRef}>
+      {/* Mode button (left). Aligned with title bar below header */}
+      <div className="fixed left-3 sm:left-5 top-[102px] z-[1200]" ref={menuRef}>
         <div className="relative">
           <button
             type="button"
@@ -78,7 +80,7 @@ export default function App() {
           </button>
 
           {menuOpen && (
-            <div className="absolute left-0 mt-2 w-72 border-2 border-slate-700 bg-slate-900 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
+            <div className="absolute left-0 mt-2 w-72 max-h-[70vh] overflow-y-auto border-2 border-slate-700 bg-slate-900 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
               {Object.values(MODULES).map((m, idx) => (
               <button 
                   key={m.key}
