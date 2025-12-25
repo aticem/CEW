@@ -49,6 +49,14 @@ export function initializeMetadata() {
       for (const [key, schemaCategory] of Object.entries(QAQC_SCHEMA)) {
         merged.tree[key] = mergeSchemaIntoNode(schemaCategory, parsed.tree?.[key]);
       }
+
+      // Preserve any user-created (non-schema) categories
+      for (const [key, existingCategory] of Object.entries(parsed.tree || {})) {
+        if (!(key in QAQC_SCHEMA)) {
+          merged.tree[key] = existingCategory;
+        }
+      }
+
       merged.updatedAt = Date.now();
       saveMetadata(merged);
       return merged;
@@ -75,7 +83,7 @@ export function getMetadata() {
   if (!stored) return initializeMetadata();
   try {
     return JSON.parse(stored);
-  } catch (e) {
+  } catch {
     return initializeMetadata();
   }
 }
@@ -83,16 +91,6 @@ export function getMetadata() {
 export function saveMetadata(metadata) {
   metadata.updatedAt = Date.now();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(metadata));
-}
-
-// Helper to find a node by path (array of keys)
-function findNode(tree, path) {
-  let node = tree;
-  for (const key of path) {
-    if (!node || !node.children) return null;
-    node = node.children[key] || node[key];
-  }
-  return node;
 }
 
 // Add a document to a folder
@@ -246,12 +244,92 @@ export function createFolder(categoryKey, parentPath, folderName) {
     label: folderName,
     fixed: false,
     allowMultiple: true,
-    allowFolderCreation: categoryKey === 'Random',
+    allowFolderCreation: true,
     children: {},
   };
   
   saveMetadata(metadata);
   return folderId;
+}
+
+// Create a new category (top-level tab)
+export function createCategory(categoryName) {
+  const metadata = getMetadata();
+  
+  // Generate a unique key for the category
+  const categoryKey = 'custom-' + generateId();
+  
+  metadata.tree[categoryKey] = {
+    type: 'category',
+    label: categoryName,
+    fixed: false,
+    allowFolderCreation: true,
+    allowMultiple: true,
+    children: {},
+  };
+  
+  saveMetadata(metadata);
+  return categoryKey;
+}
+
+// Rename a category (only non-fixed categories)
+export function renameCategory(categoryKey, newName) {
+  const metadata = getMetadata();
+  const category = metadata.tree?.[categoryKey];
+  if (!category) return false;
+  if (category.fixed) return false;
+
+  category.label = newName;
+  saveMetadata(metadata);
+  return true;
+}
+
+// Delete a category (only non-fixed categories). Returns fileIds to delete from storage.
+export function deleteCategory(categoryKey) {
+  const metadata = getMetadata();
+  const category = metadata.tree?.[categoryKey];
+  if (!category) return [];
+  if (category.fixed) return [];
+
+  function collectFileIds(node) {
+    const ids = [];
+    if (node.fileId) ids.push(node.fileId);
+    if (node.children) {
+      for (const child of Object.values(node.children)) {
+        ids.push(...collectFileIds(child));
+      }
+    }
+    return ids;
+  }
+
+  const fileIds = collectFileIds(category);
+  delete metadata.tree[categoryKey];
+  saveMetadata(metadata);
+  return fileIds;
+}
+
+// Rename a folder (only non-fixed folders)
+export function renameFolder(categoryKey, path, newName) {
+  const metadata = getMetadata();
+  const category = metadata.tree[categoryKey];
+  if (!category) return false;
+  
+  let target = category;
+  for (const key of path) {
+    if (target.children && target.children[key]) {
+      target = target.children[key];
+    } else {
+      return false;
+    }
+  }
+  
+  if (!target.fixed) {
+    target.label = newName;
+    saveMetadata(metadata);
+    return true;
+  }
+  
+  return false;
 }
 
 // Delete a folder (only non-fixed folders)
@@ -297,14 +375,17 @@ export function deleteFolder(categoryKey, path) {
 export function calculateStats(metadata, publicFiles = {}) {
   const stats = {
     overall: { total: 0, done: 0, inProgress: 0 },
-    ITPs: { total: 0, done: 0, inProgress: 0 },
-    Checklists: { total: 0, done: 0, inProgress: 0 },
-    NCRs: { total: 0, done: 0, inProgress: 0 },
-    ThirdParty: { total: 0, done: 0, inProgress: 0 },
-    Random: { total: 0, done: 0, inProgress: 0 },
   };
+
+  // Ensure a stats bucket exists for each category (including user-created ones)
+  for (const key of Object.keys(metadata.tree || {})) {
+    stats[key] = stats[key] || { total: 0, done: 0, inProgress: 0 };
+  }
   
   function countDocs(node, categoryKey, isNCR = false) {
+    if (!stats[categoryKey]) {
+      stats[categoryKey] = { total: 0, done: 0, inProgress: 0 };
+    }
     if (node.type === 'document' || node.type === 'doc-slot') {
       if (node.fileId) {
         stats[categoryKey].total++;
@@ -344,6 +425,9 @@ export function calculateStats(metadata, publicFiles = {}) {
   // Count public files
   const publicFileStatuses = metadata.publicFileStatuses || {};
   for (const [categoryKey, folders] of Object.entries(publicFiles)) {
+    if (!stats[categoryKey]) {
+      stats[categoryKey] = { total: 0, done: 0, inProgress: 0 };
+    }
     for (const [nodeKey, files] of Object.entries(folders)) {
       for (const file of files) {
         const statusKey = `${categoryKey}-${nodeKey}-${file.name}`;

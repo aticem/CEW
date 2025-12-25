@@ -9,7 +9,11 @@ import {
   updatePublicFileStatus,
   deleteDocument,
   createFolder,
+  createCategory,
+  renameCategory,
+  deleteCategory,
   deleteFolder,
+  renameFolder,
   calculateStats 
 } from './metadataStorage.js';
 import { saveFile, deleteFile, getFileUrl } from './fileStorage.js';
@@ -150,6 +154,7 @@ export default function QAQCModule() {
   const [metadata, setMetadata] = useState(() => initializeMetadata());
   const [selectedCategory, setSelectedCategory] = useState('ITPs');
   const [expandedNodes, setExpandedNodes] = useState(new Set());
+  const [selectedContainer, setSelectedContainer] = useState(null); // { categoryKey, path } where path is a folder path
   const [searchQuery, setSearchQuery] = useState('');
   const [previewFile, setPreviewFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -157,6 +162,11 @@ export default function QAQCModule() {
   const [uploadTarget, setUploadTarget] = useState(null);
   const [newFolderParent, setNewFolderParent] = useState(null);
   const [newFolderName, setNewFolderName] = useState('');
+  const [newCategoryModal, setNewCategoryModal] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [editCategoryModal, setEditCategoryModal] = useState(null); // { key, name, fixed }
+  const [editCategoryName, setEditCategoryName] = useState('');
+  const [editingFolder, setEditingFolder] = useState(null); // { categoryKey, path, currentName }
   
   // Public files manifest - static definition of files in public/QAQC folders
   // When you add files to public/QAQC/Checklists/*, add them here too
@@ -238,6 +248,18 @@ export default function QAQCModule() {
     const meta = getMetadata();
     setMetadata(meta);
   }, []);
+
+  const expandFolderPath = useCallback((categoryKey, folderPath) => {
+    if (!folderPath || folderPath.length === 0) return;
+    setExpandedNodes(prev => {
+      const next = new Set(prev);
+      for (let i = 1; i <= folderPath.length; i++) {
+        const prefix = folderPath.slice(0, i);
+        next.add(`${categoryKey}-${prefix.join('-')}`);
+      }
+      return next;
+    });
+  }, []);
   
   // Toggle folder expand/collapse - when collapsing, also collapse all children
   const toggleExpand = useCallback((nodeId) => {
@@ -280,6 +302,9 @@ export default function QAQCModule() {
         updateDocSlot(uploadTarget.category, uploadTarget.slotKey, docData);
       } else if (uploadTarget.type === 'folder') {
         addDocument(uploadTarget.category, uploadTarget.path, docData);
+        // Make sure the folder is expanded so the uploaded file is visible immediately
+        expandFolderPath(uploadTarget.category, uploadTarget.path);
+        setSelectedContainer({ categoryKey: uploadTarget.category, path: uploadTarget.path });
       } else if (uploadTarget.type === 'category') {
         addDocument(uploadTarget.category, [], docData);
       }
@@ -292,7 +317,7 @@ export default function QAQCModule() {
     
     setUploadTarget(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
-  }, [uploadTarget, refreshMetadata]);
+  }, [uploadTarget, refreshMetadata, expandFolderPath]);
   
   // Handle status change (supports both regular docs and public files)
   const handleStatusChange = useCallback((categoryKeyOrStatusKey, path, newStatus, isPublicFile = false) => {
@@ -349,10 +374,78 @@ export default function QAQCModule() {
   const handleCreateFolder = useCallback(() => {
     if (!newFolderParent || !newFolderName.trim()) return;
     createFolder(newFolderParent.category, newFolderParent.path, newFolderName.trim());
+    // Ensure parent path is expanded so the new folder is visible
+    expandFolderPath(newFolderParent.category, newFolderParent.path);
+    setSelectedContainer({ categoryKey: newFolderParent.category, path: newFolderParent.path });
     refreshMetadata();
     setNewFolderParent(null);
     setNewFolderName('');
-  }, [newFolderParent, newFolderName, refreshMetadata]);
+  }, [newFolderParent, newFolderName, refreshMetadata, expandFolderPath]);
+  
+  // Create new category (tab)
+  const handleCreateCategory = useCallback(() => {
+    if (!newCategoryName.trim()) return;
+    const newKey = createCategory(newCategoryName.trim());
+    refreshMetadata();
+    setSelectedCategory(newKey);
+    setNewCategoryModal(false);
+    setNewCategoryName('');
+  }, [newCategoryName, refreshMetadata]);
+
+  const openEditCategory = useCallback((categoryKey) => {
+    const category = metadata?.tree?.[categoryKey];
+    if (!category) return;
+    setEditCategoryModal({ key: categoryKey, name: category.label, fixed: !!category.fixed });
+    setEditCategoryName(category.label || '');
+  }, [metadata]);
+
+  const handleRenameCategory = useCallback(() => {
+    if (!editCategoryModal) return;
+    if (editCategoryModal.fixed) return;
+    const nextName = editCategoryName.trim();
+    if (!nextName) return;
+    renameCategory(editCategoryModal.key, nextName);
+    refreshMetadata();
+    setEditCategoryModal(null);
+    setEditCategoryName('');
+  }, [editCategoryModal, editCategoryName, refreshMetadata]);
+
+  const handleDeleteCategory = useCallback(async () => {
+    if (!editCategoryModal) return;
+    if (editCategoryModal.fixed) return;
+    if (!confirm('Are you sure you want to delete this category and all its files?')) return;
+
+    try {
+      const fileIds = deleteCategory(editCategoryModal.key);
+      for (const id of fileIds) {
+        await deleteFile(id);
+      }
+    } catch (err) {
+      console.error('Delete category failed:', err);
+    }
+
+    const metaAfter = getMetadata();
+    setMetadata(metaAfter);
+
+    if (selectedCategory === editCategoryModal.key) {
+      const fallback = metaAfter.tree?.ITPs ? 'ITPs' : Object.keys(metaAfter.tree || {})[0];
+      if (fallback) setSelectedCategory(fallback);
+    }
+    if (selectedContainer?.categoryKey === editCategoryModal.key) {
+      setSelectedContainer(null);
+    }
+
+    setEditCategoryModal(null);
+    setEditCategoryName('');
+  }, [editCategoryModal, selectedCategory, selectedContainer]);
+  
+  // Rename folder
+  const handleRenameFolder = useCallback((newName) => {
+    if (!editingFolder || !newName.trim()) return;
+    renameFolder(editingFolder.categoryKey, editingFolder.path, newName.trim());
+    refreshMetadata();
+    setEditingFolder(null);
+  }, [editingFolder, refreshMetadata]);
   
   // Trigger file input
   const triggerUpload = useCallback((target) => {
@@ -368,6 +461,12 @@ export default function QAQCModule() {
     const isFolder = node.type === 'folder';
     const isDocSlot = node.type === 'doc-slot';
     const isDocument = node.type === 'document';
+
+    const categoryAllowsFolderCreation = !!(metadata?.tree?.[categoryKey]?.allowFolderCreation);
+    const isSelectedFolder =
+      !!selectedContainer &&
+      selectedContainer.categoryKey === categoryKey &&
+      selectedContainer.path.join('-') === fullPath.join('-');
     
     // Get public files for this folder
     const folderPublicFiles = publicFiles[categoryKey]?.[nodeKey] || [];
@@ -375,8 +474,16 @@ export default function QAQCModule() {
     const hasChildNodes = node.children && Object.keys(node.children).length > 0;
     const hasChildren = hasChildNodes || hasPublicFiles;
     
-    // Always show fixed folders even if empty
-    const shouldShow = node.fixed || hasChildren;
+    // Visibility rules:
+    // - Documents and doc-slots should always render.
+    // - User-created folders should render even if empty (so users can see what they created).
+    // - Fixed folders always render.
+    // - Other empty non-fixed folders can stay hidden.
+    const shouldShow =
+      isDocument ||
+      isDocSlot ||
+      (isFolder &&
+        (node.fixed || hasChildren || categoryAllowsFolderCreation || categoryKey === 'Random'));
     
     // Search filter
     if (searchQuery && !node.label?.toLowerCase().includes(searchQuery.toLowerCase())) {
@@ -397,9 +504,16 @@ export default function QAQCModule() {
     return (
       <div key={nodeKey} className="select-none">
         <div 
-          className={`flex items-center gap-2 py-1.5 px-2 hover:bg-slate-700/50 rounded cursor-pointer group`}
+          className={`flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer group ${
+            isSelectedFolder ? 'bg-slate-700/70' : 'hover:bg-slate-700/50'
+          }`}
           style={{ marginLeft: `${depth * 20}px` }}
-          onClick={() => isFolder && toggleExpand(nodeId)}
+          onClick={() => {
+            if (isFolder) {
+              setSelectedContainer({ categoryKey, path: fullPath });
+              toggleExpand(nodeId);
+            }
+          }}
         >
           {/* Expand/collapse icon for folders */}
           {isFolder && (
@@ -419,11 +533,38 @@ export default function QAQCModule() {
             </span>
           )}
           
-          {/* Label */}
-          <span className={`flex-1 text-[12px] ${node.fileId ? 'text-white' : 'text-slate-400'}`}>
-            {node.label}
-            {isDocSlot && !node.fileId && <span className="text-red-400 ml-1">(required)</span>}
-          </span>
+          {/* Label - editable for non-fixed folders in Random */}
+          {editingFolder && editingFolder.categoryKey === categoryKey && 
+           editingFolder.path.join('-') === fullPath.join('-') ? (
+            <input
+              type="text"
+              defaultValue={node.label}
+              autoFocus
+              className="flex-1 bg-slate-700 border border-amber-500 rounded px-2 py-0.5 text-[12px] text-white focus:outline-none"
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleRenameFolder(e.target.value);
+                } else if (e.key === 'Escape') {
+                  setEditingFolder(null);
+                }
+              }}
+              onBlur={(e) => handleRenameFolder(e.target.value)}
+            />
+          ) : (
+            <span 
+              className={`flex-1 text-[12px] ${node.fileId ? 'text-white' : 'text-slate-400'}`}
+              onDoubleClick={(e) => {
+                if (isFolder && !node.fixed && categoryKey === 'Random') {
+                  e.stopPropagation();
+                  setEditingFolder({ categoryKey, path: fullPath, currentName: node.label });
+                }
+              }}
+            >
+              {node.label}
+              {isDocSlot && !node.fileId && <span className="text-red-400 ml-1">(required)</span>}
+            </span>
+          )}
           
           {/* Upload date */}
           {node.uploadedAt && (
@@ -490,8 +631,22 @@ export default function QAQCModule() {
               </button>
             )}
             
+            {/* Rename (only for non-fixed folders in Random) */}
+            {isFolder && !node.fixed && categoryKey === 'Random' && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEditingFolder({ categoryKey, path: fullPath, currentName: node.label });
+                }}
+                className="p-1 hover:bg-slate-600 rounded text-[10px] text-slate-300"
+                title="Rename"
+              >
+                ✎
+              </button>
+            )}
+            
             {/* Add folder (only in Random or allowed folders) */}
-            {isFolder && (node.allowFolderCreation || categoryKey === 'Random') && (
+            {isFolder && (node.allowFolderCreation || categoryAllowsFolderCreation || categoryKey === 'Random') && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -582,25 +737,58 @@ export default function QAQCModule() {
         {/* Categories row inside the main column */}
         <div className="flex-shrink-0 border-b-2 border-slate-700 bg-slate-900/80 overflow-x-auto">
           <div className="flex items-center px-3 py-2 gap-1">
-            {Object.entries(metadata.tree).map(([key, category]) => (
-              <button
-                key={key}
-                onClick={() => setSelectedCategory(key)}
-                className={`flex-shrink-0 px-3 py-2 flex items-center gap-2 text-left transition-colors rounded ${
-                  selectedCategory === key 
-                    ? 'bg-amber-500/20 border border-amber-500 text-amber-400' 
-                    : 'text-slate-300 hover:bg-slate-800 border border-transparent'
-                }`}
-              >
-                <CategoryIcon category={key} />
-                <div>
-                  <div className="text-[11px] font-medium">{category.label}</div>
-                  <div className="text-[9px] text-slate-500">
-                    {stats[key].done}/{stats[key].total} ({stats[key].percentage}%)
-                  </div>
+            {Object.entries(metadata.tree).map(([key, category]) => {
+              const catStats = stats?.[key] || { done: 0, total: 0, percentage: 0 };
+              return (
+                <div key={key} className="relative flex-shrink-0 group">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCategory(key)}
+                    className={`px-3 py-2 flex items-center gap-2 text-left transition-colors rounded ${
+                      selectedCategory === key 
+                        ? 'bg-amber-500/20 border border-amber-500 text-amber-400' 
+                        : 'text-slate-300 hover:bg-slate-800 border border-transparent'
+                    }`}
+                  >
+                    <CategoryIcon category={key} />
+                    <div>
+                      <div className="text-[11px] font-medium">{category.label}</div>
+                      <div className="text-[9px] text-slate-500">
+                        {catStats.done}/{catStats.total} ({catStats.percentage}%)
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* Edit category (rename/delete) - overlay, does not affect layout */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openEditCategory(key);
+                    }}
+                    className={`absolute top-1 right-1 h-4 w-4 flex items-center justify-center rounded text-[10px] transition-opacity ${
+                      selectedCategory === key
+                        ? 'text-amber-300 opacity-100'
+                        : 'text-slate-400 opacity-0 group-hover:opacity-100'
+                    } hover:bg-slate-700`}
+                    title="Edit category"
+                  >
+                    ✎
+                  </button>
                 </div>
-              </button>
-            ))}
+              );
+            })}
+            {/* Add new category button */}
+            <button
+              type="button"
+              onClick={() => setNewCategoryModal(true)}
+              className="flex-shrink-0 px-3 py-2 flex items-center justify-center transition-colors rounded text-slate-400 hover:bg-slate-700 hover:text-white border border-dashed border-slate-600 hover:border-amber-500"
+              title="Add new category"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
           </div>
         </div>
         
@@ -622,23 +810,37 @@ export default function QAQCModule() {
           </div>
           
           {/* Add buttons */}
-          {(currentCategory?.allowMultiple || currentCategory?.isNCR) && (
-            <button
-              onClick={() => triggerUpload({ type: 'category', category: selectedCategory })}
-              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold uppercase tracking-wide rounded"
-            >
-              + Upload
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => {
+              const targetPath =
+                selectedContainer?.categoryKey === selectedCategory
+                  ? selectedContainer.path
+                  : [];
+              if (targetPath.length > 0) {
+                triggerUpload({ type: 'folder', category: selectedCategory, path: targetPath });
+              } else {
+                triggerUpload({ type: 'category', category: selectedCategory });
+              }
+            }}
+            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold uppercase tracking-wide rounded"
+          >
+            + Upload
+          </button>
           
-          {(currentCategory?.allowFolderCreation || selectedCategory === 'Random') && (
-            <button
-              onClick={() => setNewFolderParent({ category: selectedCategory, path: [] })}
-              className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-[10px] font-bold uppercase tracking-wide rounded"
-            >
-              + Folder
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => {
+              const targetPath =
+                selectedContainer?.categoryKey === selectedCategory
+                  ? selectedContainer.path
+                  : [];
+              setNewFolderParent({ category: selectedCategory, path: targetPath });
+            }}
+            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-bold uppercase tracking-wide rounded"
+          >
+            + Folder
+          </button>
         </div>
         
         <div className="flex-1 overflow-y-auto p-3">
@@ -662,7 +864,14 @@ export default function QAQCModule() {
           {(!currentCategory?.children || Object.keys(currentCategory.children).length === 0) && 
            !publicFiles[selectedCategory]?.[selectedCategory]?.length && (
             <div className="text-center text-slate-500 text-[12px] py-8">
-              No documents yet. Click "Upload" to add documents.
+              {selectedCategory === 'Random' ? (
+                <div>
+                  <p className="mb-2">No folders or documents yet.</p>
+                  <p>Click <span className="text-amber-400 font-bold">"+ Folder"</span> to create a folder or <span className="text-emerald-400 font-bold">"+ Upload"</span> to add files.</p>
+                </div>
+              ) : (
+                'No documents yet. Click "Upload" to add documents.'
+              )}
             </div>
           )}
         </div>
@@ -773,18 +982,107 @@ export default function QAQCModule() {
             />
             <div className="flex gap-2 justify-end">
               <button
+                type="button"
                 onClick={() => setNewFolderParent(null)}
                 className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-[11px] font-bold uppercase rounded"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleCreateFolder}
                 disabled={!newFolderName.trim()}
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-white text-[11px] font-bold uppercase rounded"
               >
                 Create
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* New Category Modal */}
+      {newCategoryModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setNewCategoryModal(false)}>
+          <div className="bg-slate-800 border-2 border-slate-600 p-6 w-80" onClick={e => e.stopPropagation()}>
+            <h3 className="text-[14px] font-bold text-white mb-4">Create New Category</h3>
+            <p className="text-[11px] text-slate-400 mb-3">This will add a new tab next to ITPs, Checklists, etc.</p>
+            <input
+              type="text"
+              value={newCategoryName}
+              onChange={(e) => setNewCategoryName(e.target.value)}
+              placeholder="Category name..."
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-[12px] text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 mb-4"
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && handleCreateCategory()}
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setNewCategoryModal(false)}
+                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-[11px] font-bold uppercase rounded"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateCategory}
+                disabled={!newCategoryName.trim()}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-white text-[11px] font-bold uppercase rounded"
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Category Modal */}
+      {editCategoryModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setEditCategoryModal(null)}>
+          <div className="bg-slate-800 border-2 border-slate-600 p-6 w-96" onClick={e => e.stopPropagation()}>
+            <h3 className="text-[14px] font-bold text-white mb-4">Edit Category</h3>
+            <input
+              type="text"
+              value={editCategoryName}
+              onChange={(e) => setEditCategoryName(e.target.value)}
+              placeholder="Category name..."
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-[12px] text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 mb-3"
+              autoFocus
+              disabled={editCategoryModal.fixed}
+              onKeyDown={(e) => e.key === 'Enter' && handleRenameCategory()}
+            />
+            {editCategoryModal.fixed && (
+              <div className="text-[11px] text-slate-400 mb-3">
+                This is a fixed system category and cannot be renamed or deleted.
+              </div>
+            )}
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={handleDeleteCategory}
+                disabled={editCategoryModal.fixed}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-white text-[11px] font-bold uppercase rounded"
+              >
+                Delete
+              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditCategoryModal(null)}
+                  className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-[11px] font-bold uppercase rounded"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRenameCategory}
+                  disabled={editCategoryModal.fixed || !editCategoryName.trim()}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-white text-[11px] font-bold uppercase rounded"
+                >
+                  Save
+                </button>
+              </div>
             </div>
           </div>
         </div>
