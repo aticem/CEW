@@ -8,22 +8,25 @@ export const QAQC_SCHEMA = {
     fixed: true,
     children: {
       'itp-civil': {
-        type: 'doc-slot',
+        type: 'folder',
         label: 'Civil',
-        required: true,
         fixed: true,
+        publicPath: '/QAQC/ITPs/civil',
+        children: {},
       },
       'itp-electrical': {
-        type: 'doc-slot',
+        type: 'folder',
         label: 'Electrical',
-        required: true,
         fixed: true,
+        publicPath: '/QAQC/ITPs/electrical',
+        children: {},
       },
       'itp-mechanical': {
-        type: 'doc-slot',
+        type: 'folder',
         label: 'Mechanical',
-        required: true,
         fixed: true,
+        publicPath: '/QAQC/ITPs/mechanical',
+        children: {},
       },
     },
   },
@@ -42,6 +45,7 @@ export const QAQC_SCHEMA = {
             label: 'DC Cable Laying & Termination',
             fixed: true,
             allowMultiple: true,
+            publicPath: '/QAQC/Checklists/electrical/dc-cable',
             children: {},
           },
           'cl-earthing-foc': {
@@ -49,6 +53,7 @@ export const QAQC_SCHEMA = {
             label: 'Earthing & FOC',
             fixed: true,
             allowMultiple: true,
+            publicPath: '/QAQC/Checklists/electrical/earthing-foc',
             children: {},
           },
           'cl-inverter-lv': {
@@ -56,6 +61,7 @@ export const QAQC_SCHEMA = {
             label: 'Installation Inverter & LV Boxes Installation',
             fixed: true,
             allowMultiple: true,
+            publicPath: '/QAQC/Checklists/electrical/inverter-lv',
             children: {},
           },
         },
@@ -64,8 +70,24 @@ export const QAQC_SCHEMA = {
         type: 'folder',
         label: 'Mechanical',
         fixed: true,
-        allowMultiple: true,
-        children: {},
+        children: {
+          'cl-module-installation': {
+            type: 'folder',
+            label: 'Module Installation',
+            fixed: true,
+            allowMultiple: true,
+            publicPath: '/QAQC/Checklists/mechanical/module-installation',
+            children: {},
+          },
+          'cl-mounting-structure': {
+            type: 'folder',
+            label: 'Mounting Structure Assembly',
+            fixed: true,
+            allowMultiple: true,
+            publicPath: '/QAQC/Checklists/mechanical/mounting-structure-assembly',
+            children: {},
+          },
+        },
       },
     },
   },
@@ -111,6 +133,7 @@ export const QAQC_SCHEMA = {
 // Status definitions
 export const DOC_STATUSES = {
   INCOMPLETE: { key: 'incomplete', label: 'Incomplete', color: '#ef4444', bgColor: 'rgba(239,68,68,0.15)' },
+  IN_PROGRESS: { key: 'in_progress', label: 'In Progress', color: '#f59e0b', bgColor: 'rgba(245,158,11,0.15)' },
   COMPLETED: { key: 'completed', label: 'Completed', color: '#22c55e', bgColor: 'rgba(34,197,94,0.15)' },
 };
 

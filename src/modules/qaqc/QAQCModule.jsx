@@ -5,7 +5,8 @@ import {
   getMetadata, 
   addDocument, 
   updateDocSlot, 
-  updateStatus, 
+  updateStatus,
+  updatePublicFileStatus,
   deleteDocument,
   createFolder,
   deleteFolder,
@@ -92,8 +93,8 @@ const StatusBadge = ({ status, isNCR, onChange, small = false }) => {
 const CompletionBar = ({ label, done, total, percentage, color = '#22c55e' }) => (
   <div className="mb-3">
     <div className="flex justify-between items-center mb-1">
-      <span className="text-[11px] font-medium text-slate-300">{label}</span>
-      <span className="text-[11px] font-bold text-white">{done}/{total} ({percentage}%)</span>
+      <span className="text-[12px] font-normal text-slate-300">{label}</span>
+      <span className="text-[12px] font-normal text-slate-200">{done}/{total} ({percentage}%)</span>
     </div>
     <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
       <div 
@@ -103,6 +104,47 @@ const CompletionBar = ({ label, done, total, percentage, color = '#22c55e' }) =>
     </div>
   </div>
 );
+
+// Public file item component
+const PublicFileItem = ({ file, categoryKey, nodeKey, onStatusChange, metadata, depth = 0 }) => {
+  // Get status from metadata's publicFileStatuses
+  const statusKey = `${categoryKey}-${nodeKey}-${file.name}`;
+  const savedStatus = metadata?.publicFileStatuses?.[statusKey] || 'incomplete';
+  
+  return (
+    <div 
+      className="flex items-center gap-2 py-1.5 px-2 hover:bg-slate-700/50 rounded cursor-pointer group"
+      style={{ marginLeft: `${(depth + 1) * 20}px` }}
+    >
+      <span className="w-4 h-4 flex items-center justify-center text-[10px] font-bold">
+        <FileIcon type={file.type} />
+      </span>
+      
+      <span className="flex-1 text-[12px] text-white">
+        {file.name}
+      </span>
+      
+      <StatusBadge 
+        status={savedStatus}
+        isNCR={false}
+        onChange={(s) => onStatusChange(statusKey, [], s, true)}
+        small
+      />
+      
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <a
+          href={file.path}
+          download={file.name}
+          onClick={(e) => e.stopPropagation()}
+          className="p-1 hover:bg-slate-600 rounded text-[10px] text-slate-300"
+          title="Download"
+        >
+          ⬇
+        </a>
+      </div>
+    </div>
+  );
+};
 
 export default function QAQCModule() {
   const [metadata, setMetadata] = useState(() => initializeMetadata());
@@ -116,20 +158,80 @@ export default function QAQCModule() {
   const [newFolderParent, setNewFolderParent] = useState(null);
   const [newFolderName, setNewFolderName] = useState('');
   
+  // Public files manifest - static definition of files in public/QAQC folders
+  // When you add files to public/QAQC/Checklists/*, add them here too
+  const publicFiles = useMemo(() => ({
+    'ITPs': {
+      'itp-civil': [
+        { name: 'civil.docx', path: '/QAQC/ITPs/civil/civil.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }
+      ],
+      'itp-electrical': [
+        { name: 'electrical.docx', path: '/QAQC/ITPs/electrical/electrical.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }
+      ],
+      'itp-mechanical': [
+        { name: 'mechanical.docx', path: '/QAQC/ITPs/mechanical/mechanical.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }
+      ],
+    },
+    'Checklists': {
+      'cl-dc-cable': [
+        { name: 'civil - Copy.docx', path: '/QAQC/Checklists/electrical/dc-cable/civil - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'electrical - Copy.docx', path: '/QAQC/Checklists/electrical/dc-cable/electrical - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'mechanical - Copy.docx', path: '/QAQC/Checklists/electrical/dc-cable/mechanical - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+      ],
+      'cl-earthing-foc': [
+        { name: 'civil.docx', path: '/QAQC/Checklists/electrical/earthing-foc/civil.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'electrical.docx', path: '/QAQC/Checklists/electrical/earthing-foc/electrical.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'mechanical.docx', path: '/QAQC/Checklists/electrical/earthing-foc/mechanical.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+      ],
+      'cl-inverter-lv': [
+        { name: 'civil - Copy (2).docx', path: '/QAQC/Checklists/electrical/inverter-lv/civil - Copy (2).docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'civil - Copy - Copy.docx', path: '/QAQC/Checklists/electrical/inverter-lv/civil - Copy - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'electrical - Copy (2).docx', path: '/QAQC/Checklists/electrical/inverter-lv/electrical - Copy (2).docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'electrical - Copy - Copy.docx', path: '/QAQC/Checklists/electrical/inverter-lv/electrical - Copy - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'mechanical - Copy (2).docx', path: '/QAQC/Checklists/electrical/inverter-lv/mechanical - Copy (2).docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'mechanical - Copy - Copy.docx', path: '/QAQC/Checklists/electrical/inverter-lv/mechanical - Copy - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+      ],
+      'cl-module-installation': [
+        { name: 'civil - Copy (2).docx', path: '/QAQC/Checklists/mechanical/module-installation/civil - Copy (2).docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'civil - Copy - Copy.docx', path: '/QAQC/Checklists/mechanical/module-installation/civil - Copy - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'electrical - Copy (2).docx', path: '/QAQC/Checklists/mechanical/module-installation/electrical - Copy (2).docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'electrical - Copy - Copy.docx', path: '/QAQC/Checklists/mechanical/module-installation/electrical - Copy - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'mechanical - Copy (2).docx', path: '/QAQC/Checklists/mechanical/module-installation/mechanical - Copy (2).docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'mechanical - Copy - Copy.docx', path: '/QAQC/Checklists/mechanical/module-installation/mechanical - Copy - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+      ],
+      'cl-mounting-structure': [
+        { name: 'civil - Copy.docx', path: '/QAQC/Checklists/mechanical/mounting-structure-assembly/civil - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'civil.docx', path: '/QAQC/Checklists/mechanical/mounting-structure-assembly/civil.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'electrical - Copy.docx', path: '/QAQC/Checklists/mechanical/mounting-structure-assembly/electrical - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'mechanical - Copy.docx', path: '/QAQC/Checklists/mechanical/mounting-structure-assembly/mechanical - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+        { name: 'mechanical.docx', path: '/QAQC/Checklists/mechanical/mounting-structure-assembly/mechanical.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+      ],
+    },
+  }), []);
+  
   // Calculate stats from metadata
-  const stats = useMemo(() => calculateStats(metadata), [metadata]);
+  const stats = useMemo(() => calculateStats(metadata, publicFiles), [metadata, publicFiles]);
   
   const refreshMetadata = useCallback(() => {
     const meta = getMetadata();
     setMetadata(meta);
   }, []);
   
-  // Toggle folder expand/collapse
+  // Toggle folder expand/collapse - when collapsing, also collapse all children
   const toggleExpand = useCallback((nodeId) => {
     setExpandedNodes(prev => {
       const next = new Set(prev);
-      if (next.has(nodeId)) next.delete(nodeId);
-      else next.add(nodeId);
+      if (next.has(nodeId)) {
+        // Collapse: remove this node and all children (nodes starting with this nodeId)
+        next.delete(nodeId);
+        for (const id of prev) {
+          if (id.startsWith(nodeId + '-')) {
+            next.delete(id);
+          }
+        }
+      } else {
+        next.add(nodeId);
+      }
       return next;
     });
   }, []);
@@ -170,9 +272,14 @@ export default function QAQCModule() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, [uploadTarget, refreshMetadata]);
   
-  // Handle status change
-  const handleStatusChange = useCallback((categoryKey, path, newStatus) => {
-    updateStatus(categoryKey, path, newStatus);
+  // Handle status change (supports both regular docs and public files)
+  const handleStatusChange = useCallback((categoryKeyOrStatusKey, path, newStatus, isPublicFile = false) => {
+    if (isPublicFile) {
+      // Update public file status
+      updatePublicFileStatus(categoryKeyOrStatusKey, newStatus);
+    } else {
+      updateStatus(categoryKeyOrStatusKey, path, newStatus);
+    }
     refreshMetadata();
   }, [refreshMetadata]);
   
@@ -236,10 +343,18 @@ export default function QAQCModule() {
     const fullPath = [...path, nodeKey];
     const nodeId = `${categoryKey}-${fullPath.join('-')}`;
     const isExpanded = expandedNodes.has(nodeId);
-    const hasChildren = node.children && Object.keys(node.children).length > 0;
     const isFolder = node.type === 'folder';
     const isDocSlot = node.type === 'doc-slot';
     const isDocument = node.type === 'document';
+    
+    // Get public files for this folder
+    const folderPublicFiles = publicFiles[categoryKey]?.[nodeKey] || [];
+    const hasPublicFiles = folderPublicFiles.length > 0;
+    const hasChildNodes = node.children && Object.keys(node.children).length > 0;
+    const hasChildren = hasChildNodes || hasPublicFiles;
+    
+    // Always show fixed folders even if empty
+    const shouldShow = node.fixed || hasChildren;
     
     // Search filter
     if (searchQuery && !node.label?.toLowerCase().includes(searchQuery.toLowerCase())) {
@@ -248,13 +363,20 @@ export default function QAQCModule() {
       const childrenMatch = Object.entries(node.children || {}).some(([, v]) => 
         v.label?.toLowerCase().includes(searchQuery.toLowerCase())
       );
-      if (!childrenMatch) return null;
+      const publicFilesMatch = folderPublicFiles.some(f => 
+        f.name.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+      if (!childrenMatch && !publicFilesMatch) return null;
     }
+    
+    // Don't render non-fixed empty folders
+    if (!shouldShow) return null;
     
     return (
       <div key={nodeKey} className="select-none">
         <div 
-          className={`flex items-center gap-2 py-1.5 px-2 hover:bg-slate-700/50 rounded cursor-pointer group ${depth > 0 ? 'ml-4' : ''}`}
+          className={`flex items-center gap-2 py-1.5 px-2 hover:bg-slate-700/50 rounded cursor-pointer group`}
+          style={{ marginLeft: `${depth * 20}px` }}
           onClick={() => isFolder && toggleExpand(nodeId)}
         >
           {/* Expand/collapse icon for folders */}
@@ -362,10 +484,23 @@ export default function QAQCModule() {
           </div>
         </div>
         
-        {/* Children */}
+        {/* Children and Public Files */}
         {isFolder && isExpanded && hasChildren && (
-          <div className="border-l border-slate-700 ml-3">
-            {Object.entries(node.children).map(([k, v]) => 
+          <div className="border-l-2 border-slate-600 ml-2">
+            {/* Render public files first */}
+            {folderPublicFiles.map((file) => (
+              <PublicFileItem 
+                key={file.path}
+                file={file}
+                categoryKey={categoryKey}
+                nodeKey={nodeKey}
+                onStatusChange={handleStatusChange}
+                metadata={metadata}
+                depth={depth}
+              />
+            ))}
+            {/* Then render children */}
+            {Object.entries(node.children || {}).map(([k, v]) => 
               renderNode(v, k, fullPath, categoryKey, isNCR, depth + 1)
             )}
           </div>
@@ -386,7 +521,29 @@ export default function QAQCModule() {
   const isNCR = currentCategory?.isNCR;
   
   return (
-    <div className="fixed inset-0 bg-slate-900 flex">
+    <div className="fixed inset-0 bg-slate-900 flex flex-col">
+      {/* Title bar - same as other modules, with hamburger button */}
+      <div className="w-full border-0 bg-[#0b1220] py-2 text-center text-base font-black uppercase tracking-[0.22em] text-slate-200 relative">
+        {/* Hamburger button positioned at left */}
+        <div className="absolute left-3 top-1/2 -translate-y-1/2 z-[1200]">
+          <button
+            type="button"
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('toggleHamburgerMenu'));
+            }}
+            aria-label="Mode"
+            className="inline-flex h-8 w-8 items-center justify-center border-2 border-slate-700 bg-slate-900 text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
+          >
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <line x1="4" y1="6" x2="20" y2="6" />
+              <line x1="4" y1="12" x2="20" y2="12" />
+              <line x1="4" y1="18" x2="20" y2="18" />
+            </svg>
+          </button>
+        </div>
+        QA / QC – Docs & Status
+      </div>
+      
       {/* Hidden file input */}
       <input
         ref={fileInputRef}
@@ -396,38 +553,36 @@ export default function QAQCModule() {
         accept="*/*"
       />
       
-      {/* LEFT COLUMN - Categories */}
-      <div className="w-56 flex-shrink-0 border-r-2 border-slate-700 bg-slate-900 flex flex-col">
-        <div className="p-4 border-b-2 border-slate-700">
-          <h1 className="text-[14px] font-bold text-white tracking-wide">QA / QC</h1>
-          <p className="text-[10px] text-slate-400 mt-1">Docs & Status</p>
+      <div className="flex-1 flex overflow-hidden px-32">
+      
+      {/* MAIN AREA - Categories + Tree Explorer */}
+      <div className="flex-1 flex flex-col min-w-0 border-r-2 border-slate-700">
+        {/* Categories row inside the main column */}
+        <div className="flex-shrink-0 border-b-2 border-slate-700 bg-slate-900/80 overflow-x-auto">
+          <div className="flex items-center px-3 py-2 gap-1">
+            {Object.entries(metadata.tree).map(([key, category]) => (
+              <button
+                key={key}
+                onClick={() => setSelectedCategory(key)}
+                className={`flex-shrink-0 px-3 py-2 flex items-center gap-2 text-left transition-colors rounded ${
+                  selectedCategory === key 
+                    ? 'bg-amber-500/20 border border-amber-500 text-amber-400' 
+                    : 'text-slate-300 hover:bg-slate-800 border border-transparent'
+                }`}
+              >
+                <CategoryIcon category={key} />
+                <div>
+                  <div className="text-[11px] font-medium">{category.label}</div>
+                  <div className="text-[9px] text-slate-500">
+                    {stats[key].done}/{stats[key].total} ({stats[key].percentage}%)
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
         
-        <div className="flex-1 overflow-y-auto py-2">
-          {Object.entries(metadata.tree).map(([key, category]) => (
-            <button
-              key={key}
-              onClick={() => setSelectedCategory(key)}
-              className={`w-full px-4 py-3 flex items-center gap-3 text-left transition-colors ${
-                selectedCategory === key 
-                  ? 'bg-amber-500/20 border-r-2 border-amber-500 text-amber-400' 
-                  : 'text-slate-300 hover:bg-slate-800'
-              }`}
-            >
-              <CategoryIcon category={key} />
-              <div className="flex-1">
-                <div className="text-[12px] font-medium">{category.label}</div>
-                <div className="text-[10px] text-slate-500">
-                  {stats[key].done}/{stats[key].total} ({stats[key].percentage}%)
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-      
-      {/* MIDDLE COLUMN - Tree Explorer */}
-      <div className="flex-1 flex flex-col min-w-0 border-r-2 border-slate-700">
+        {/* Tree Explorer Header */}
         <div className="p-4 border-b-2 border-slate-700 flex items-center gap-3">
           <h2 className="text-[13px] font-bold text-white flex-shrink-0">
             {currentCategory?.label}
@@ -478,31 +633,45 @@ export default function QAQCModule() {
       </div>
       
       {/* RIGHT COLUMN - Overall Panel */}
-      <div className="w-72 flex-shrink-0 bg-slate-800/50 flex flex-col">
-        <div className="p-4 border-b-2 border-slate-700">
-          <h2 className="text-[13px] font-bold text-white">Overall Status</h2>
+      <div className="w-64 flex-shrink-0 bg-slate-800/50 flex flex-col">
+        <div className="p-3 border-b-2 border-slate-700">
+          <h2 className="text-[14px] font-semibold text-white text-center">Overall Status</h2>
         </div>
         
-        <div className="flex-1 overflow-y-auto p-4">
-          {/* Overall completion */}
-          <div className="mb-6 p-4 bg-slate-700/50 rounded-lg">
-            <div className="text-center mb-3">
-              <div className="text-[32px] font-black text-white">{stats.overall.percentage}%</div>
-              <div className="text-[11px] text-slate-400">Overall Completion</div>
+        <div className="flex-1 overflow-y-auto p-3">
+          {/* Overall completion - three status percentages */}
+          <div className="mb-4 p-3 bg-slate-700/50 rounded-lg">
+            <div className="flex justify-between items-center mb-2">
+              <div className="text-center flex-1">
+                <div className="text-[14px] font-medium text-emerald-400">{stats.overall.percentage}%</div>
+                <div className="text-[8px] text-slate-400">Completed</div>
+              </div>
+              <div className="text-center flex-1">
+                <div className="text-[14px] font-medium text-amber-400">{stats.overall.inProgressPercentage}%</div>
+                <div className="text-[8px] text-slate-400">In Progress</div>
+              </div>
+              <div className="text-center flex-1">
+                <div className="text-[14px] font-medium text-red-400">{stats.overall.incompletePercentage}%</div>
+                <div className="text-[8px] text-slate-400">Incomplete</div>
+              </div>
             </div>
-            <div className="h-3 bg-slate-600 rounded-full overflow-hidden">
+            <div className="h-2 bg-slate-600 rounded-full overflow-hidden flex">
               <div 
-                className="h-full bg-gradient-to-r from-amber-500 to-emerald-500 transition-all duration-500"
+                className="h-full bg-emerald-500 transition-all duration-500"
                 style={{ width: `${stats.overall.percentage}%` }}
               />
+              <div 
+                className="h-full bg-amber-500 transition-all duration-500"
+                style={{ width: `${stats.overall.inProgressPercentage}%` }}
+              />
             </div>
-            <div className="text-center mt-2 text-[11px] text-slate-400">
-              {stats.overall.done} of {stats.overall.total} items complete
+            <div className="text-center mt-1.5 text-[9px] text-slate-400">
+              {stats.overall.done} completed, {stats.overall.inProgress} in progress, {stats.overall.total - stats.overall.done - stats.overall.inProgress} incomplete
             </div>
           </div>
           
           {/* Per-category completion */}
-          <div className="space-y-4">
+          <div className="space-y-2 pb-3 border-b-2 border-slate-700">
             <CompletionBar 
               label="ITPs" 
               done={stats.ITPs.done} 
@@ -542,9 +711,9 @@ export default function QAQCModule() {
           
           {/* Missing docs indicator */}
           {stats.ITPs.total > 0 && stats.ITPs.done < stats.ITPs.total && (
-            <div className="mt-6 p-3 bg-red-500/10 border border-red-500/30 rounded">
-              <div className="text-[11px] font-bold text-red-400 mb-1">⚠ Missing Required Docs</div>
-              <div className="text-[10px] text-red-300/70">
+            <div className="mt-4 p-2 bg-red-500/10 border border-red-500/30 rounded">
+              <div className="text-[10px] font-medium text-red-400 mb-0.5">⚠ Missing Required Docs</div>
+              <div className="text-[9px] text-red-300/70">
                 {stats.ITPs.total - stats.ITPs.done} ITP document(s) not uploaded
               </div>
             </div>
@@ -628,6 +797,7 @@ export default function QAQCModule() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

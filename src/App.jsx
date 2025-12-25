@@ -47,6 +47,13 @@ export default function App() {
     window.__cewHamburgerMenuOpen = menuOpen;
   }, [menuOpen]);
 
+  // Listen for custom toggle event from QAQCModule
+  useEffect(() => {
+    const handleToggle = () => setMenuOpen((v) => !v);
+    window.addEventListener('toggleHamburgerMenu', handleToggle);
+    return () => window.removeEventListener('toggleHamburgerMenu', handleToggle);
+  }, []);
+
   useEffect(() => {
     const onDocMouseDown = (e) => {
       if (!menuRef.current) return;
@@ -62,7 +69,8 @@ export default function App() {
     <>
       <ActiveComponent />
 
-      {/* Mode button (left). Aligned with title bar below header */}
+      {/* Mode button (left) - hidden for QAQC module */}
+      {activeKey !== 'QAQC' && (
       <div className="fixed left-3 sm:left-5 top-[102px] z-[1200]" ref={menuRef}>
         <div className="relative">
           <button
@@ -82,10 +90,10 @@ export default function App() {
           {menuOpen && (
             <div className="absolute left-0 mt-2 w-72 max-h-[70vh] overflow-y-auto border-2 border-slate-700 bg-slate-900 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
               {Object.values(MODULES).map((m, idx) => (
-              <button 
+                <button 
                   key={m.key}
                   type="button"
-                onClick={() => {
+                  onClick={() => {
                     setActiveKey(m.key);
                     setMenuOpen(false);
                   }}
@@ -94,12 +102,37 @@ export default function App() {
                   } ${activeKey === m.key ? 'bg-amber-500 text-black' : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white'}`}
                 >
                   {m.label}
-              </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                </button>
+              ))}
             </div>
+          )}
+        </div>
+      </div>
+      )}
+
+      {/* Menu dropdown for QAQC module */}
+      {activeKey === 'QAQC' && menuOpen && (
+        <div 
+          ref={menuRef}
+          className="fixed left-3 top-[42px] z-[1300] w-72 max-h-[70vh] overflow-y-auto border-2 border-slate-700 bg-slate-900 shadow-[0_10px_26px_rgba(0,0,0,0.55)]"
+        >
+          {Object.values(MODULES).map((m, idx) => (
+            <button 
+              key={m.key}
+              type="button"
+              onClick={() => {
+                setActiveKey(m.key);
+                setMenuOpen(false);
+              }}
+              className={`w-full px-3 py-2.5 text-left text-[11px] font-medium tracking-wide ${
+                idx === 0 ? 'border-b border-slate-700/50' : ''
+              } ${activeKey === m.key ? 'bg-amber-500 text-black' : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      )}
     </>
   );
 }
