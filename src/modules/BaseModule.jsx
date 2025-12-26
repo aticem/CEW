@@ -8,7 +8,6 @@ import { useChartExport } from '../hooks/useChartExport';
 import {
   asLineStrings,
   mergeIntervals,
-  computeNewPartsForBox,
   computeIntervalsInBox,
   buildCumulativeMeters,
   sliceLineByMeters,
@@ -29,6 +28,7 @@ L.TextLabel = L.CircleMarker.extend({
     underlineColor: null, // defaults to textColor if null
     underlineWidthFactor: 1,
     offsetX: 0, // px (applied after rotation)
+    offsetY: 0, // px (applied after rotation)
     offsetXFactor: 0, // multiplied by computed fontSize (applied after rotation)
     offsetYFactor: 0, // multiplied by computed fontSize (applied after rotation)
     minFontSize: null,
@@ -80,9 +80,10 @@ L.TextLabel = L.CircleMarker.extend({
     ctx.rotate(rotationRad);
     // Apply optional offsets AFTER rotation so "below" stays aligned with rotated text.
     const offX = Number(this.options.offsetX) || 0;
+    const offYpx = Number(this.options.offsetY) || 0;
     const offXf = (Number(this.options.offsetXFactor) || 0) * fontSize;
     const offY = (Number(this.options.offsetYFactor) || 0) * fontSize;
-    if (offX || offXf || offY) ctx.translate(offX + offXf, offY);
+    if (offX || offYpx || offXf || offY) ctx.translate(offX + offXf, offYpx + offY);
 
     ctx.font = this.options.textStyle + ' ' + fontSize + 'px sans-serif';
     // If background is configured but hidden at this zoom, allow an alternate text color
@@ -94,15 +95,24 @@ L.TextLabel = L.CircleMarker.extend({
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
+    const rawText = String(this.options.text || '');
+    const lines = rawText.includes('\n') ? rawText.split(/\n+/).filter(Boolean) : [rawText];
+    const lineGap = fontSize * 0.2;
+    const lineH = fontSize + lineGap;
+
     // Optional background box behind text (square by default)
     if (bgVisible) {
-      const metrics = ctx.measureText(this.options.text || '');
-      const ascent =
-        typeof metrics.actualBoundingBoxAscent === 'number' ? metrics.actualBoundingBoxAscent : fontSize * 0.8;
-      const descent =
-        typeof metrics.actualBoundingBoxDescent === 'number' ? metrics.actualBoundingBoxDescent : fontSize * 0.25;
-      const textW = metrics.width || 0;
-      const textH = ascent + descent;
+      let maxW = 0;
+      let ascent = fontSize * 0.8;
+      let descent = fontSize * 0.25;
+      for (const ln of lines) {
+        const m = ctx.measureText(ln || '');
+        maxW = Math.max(maxW, m.width || 0);
+        if (typeof m.actualBoundingBoxAscent === 'number') ascent = Math.max(ascent, m.actualBoundingBoxAscent);
+        if (typeof m.actualBoundingBoxDescent === 'number') descent = Math.max(descent, m.actualBoundingBoxDescent);
+      }
+      const textW = maxW;
+      const textH = (lines.length * lineH) - lineGap; // no gap after last line
       const padX = Number(this.options.bgPaddingX) || 0;
       const padY = Number(this.options.bgPaddingY) || 0;
       const w = textW + padX * 2;
@@ -147,14 +157,34 @@ L.TextLabel = L.CircleMarker.extend({
       const factor = typeof this.options.textStrokeWidthFactor === 'number' ? this.options.textStrokeWidthFactor : 1;
       ctx.lineWidth = Math.max(0.55, fontSize / 18) * Math.max(0.5, factor);
       ctx.strokeStyle = this.options.textStrokeColor || 'rgba(0,0,0,0.6)';
-      ctx.strokeText(this.options.text, 0, 0);
+      if (lines.length === 1) {
+        ctx.strokeText(rawText, 0, 0);
+      } else {
+        const totalH = (lines.length * lineH) - lineGap;
+        const startY = -totalH / 2 + (fontSize / 2);
+        for (let i = 0; i < lines.length; i++) {
+          const ln = lines[i] || '';
+          const y = startY + i * lineH;
+          ctx.strokeText(ln, 0, y);
+        }
+      }
     }
-    
-    ctx.fillText(this.options.text, 0, 0);
+
+    if (lines.length === 1) {
+      ctx.fillText(rawText, 0, 0);
+    } else {
+      const totalH = (lines.length * lineH) - lineGap;
+      const startY = -totalH / 2 + (fontSize / 2);
+      for (let i = 0; i < lines.length; i++) {
+        const ln = lines[i] || '';
+        const y = startY + i * lineH;
+        ctx.fillText(ln, 0, y);
+      }
+    }
 
     // Optional underline (used for clickable "TESTED" label)
     if (this.options.underline) {
-      const metrics = ctx.measureText(this.options.text || '');
+      const metrics = ctx.measureText(lines[lines.length - 1] || '');
       const w = metrics.width || 0;
       const y = (fontSize * 0.55); // slightly below baseline-middle
       const uc = this.options.underlineColor || ctx.fillStyle;
@@ -216,6 +246,8 @@ function calculateLineAngle(coords) {
 // ID NORMALİZASYONU
 // ═══════════════════════════════════════════════════════════════
 const normalizeId = (id) => (id ? id.toString().replace(/\s+/g, '').toLowerCase().trim() : '');
+
+// (DCCT overlay ordering helper lives in utils so it's testable.)
 
 // Selection tolerances (in meters)
 const NEAR_DISTANCE_METERS = 15; // Tight match for nearby labels
@@ -285,6 +317,27 @@ export default function BaseModule({
   const isMC4 = String(activeMode?.key || '').toUpperCase() === 'MC4';
   const isMVT = String(activeMode?.key || '').toUpperCase() === 'MVT';
   const isLVTT = String(activeMode?.key || '').toUpperCase() === 'LVTT';
+  const isPL = String(activeMode?.key || '').toUpperCase() === 'PL';
+  // PARAMETER & TABLE EARTHING PROGRESS mode
+  const isPTEP = String(activeMode?.key || '').toUpperCase() === 'PTEP' || Boolean(activeMode?.earthingMode);
+  // DC Cable Testing Progress mode
+  const isDCCT = String(activeMode?.key || '').toUpperCase() === 'DCCT' || Boolean(activeMode?.dcctMode);
+  const isDCCTRef = useRef(isDCCT);
+  useEffect(() => {
+    isDCCTRef.current = isDCCT;
+  }, [isDCCT]);
+  // TABLE_INSTALLATION_PROGRESS mode
+  const isTIP = String(activeMode?.key || '').toUpperCase() === 'TIP' || Boolean(activeMode?.tableCounters);
+  // LV_BOX_INV_BOX_INSTALLATION mode
+  const isLVIB = String(activeMode?.key || '').toUpperCase() === 'LVIB' || Boolean(activeMode?.boxLabelsEnabled);
+  // DC&AC TRENCH PROGRESS mode
+  const isDATP = String(activeMode?.key || '').toUpperCase() === 'DATP';
+
+  const datpTrenchLineColor = isDATP
+    ? (activeMode?.geojsonFiles || []).find((f) => String(f?.name || '').toLowerCase() === 'trench')?.color || '#3b82f6'
+    : '#3b82f6';
+
+  const datpCompletedLineColor = '#22c55e';
   const mvfCircuitsMultiplier =
     typeof activeMode?.circuitsMultiplier === 'number' && Number.isFinite(activeMode.circuitsMultiplier)
       ? activeMode.circuitsMultiplier
@@ -380,6 +433,8 @@ export default function BaseModule({
   const stringTextRendererRef = useRef(null); // dedicated canvas renderer for string_text to avoid ghosting
   const lvttInvIdRendererRef = useRef(null); // dedicated canvas renderer for LVTT inv_id labels to avoid overlap when switching modes
   const lvttTermCounterRendererRef = useRef(null); // dedicated canvas renderer for LVTT termination counters
+  const ptepTableToTableSvgRendererRef = useRef(null); // dedicated SVG renderer for PTEP table-to-table (ensures clickability under preferCanvas)
+  const ptepParameterSvgRendererRef = useRef(null); // dedicated SVG renderer for PTEP parameter (ensures clickability under preferCanvas)
   const layersRef = useRef([]);
   const polygonIdCounter = useRef(0); // Counter for unique polygon IDs
   const polygonById = useRef({}); // uniqueId -> {layer, stringId}
@@ -431,6 +486,385 @@ export default function BaseModule({
   useEffect(() => {
     lvttTerminationByInvRef.current = lvttTerminationByInv || {};
   }, [lvttTerminationByInv]);
+
+  // DCCT: DC Cable Testing Progress state
+  // dcctTestData: { [normalizedId]: 'passed' | 'failed' }
+  const [dcctTestData, setDcctTestData] = useState(() => ({}));
+  const dcctTestDataRef = useRef(dcctTestData);
+  useEffect(() => {
+    dcctTestDataRef.current = dcctTestData || {};
+  }, [dcctTestData]);
+  // DCCT: Full CSV values per ID (for click-to-show overlays)
+  // { [normalizedId]: { plus: string, minus: string, status: 'passed'|'failed'|null, remarkRaw: string } }
+  const dcctRisoByIdRef = useRef({});
+  // DCCT: overlay labels for clicked tables
+  const dcctOverlayLayerRef = useRef(null); // L.LayerGroup
+  const dcctOverlayLabelsByIdRef = useRef({}); // normalizedId -> L.TextLabel
+  // DCCT: Map IDs from string_text.geojson
+  const [dcctMapIds, setDcctMapIds] = useState(() => new Set());
+  const dcctMapIdsRef = useRef(dcctMapIds);
+  useEffect(() => {
+    dcctMapIdsRef.current = dcctMapIds || new Set();
+  }, [dcctMapIds]);
+  // DCCT: Active filter ('passed' | 'failed' | 'not_tested' | null)
+  const [dcctFilter, setDcctFilter] = useState(null);
+  const dcctFilterRef = useRef(dcctFilter);
+  useEffect(() => {
+    dcctFilterRef.current = dcctFilter;
+  }, [dcctFilter]);
+  // DCCT: CSV totals
+  const [dcctCsvTotals, setDcctCsvTotals] = useState(() => ({ total: 0, passed: 0, failed: 0 }));
+
+  const dcctClearTestOverlays = useCallback(() => {
+    try {
+      const layer = dcctOverlayLayerRef.current;
+      if (layer) layer.clearLayers();
+    } catch (_e) {
+      void _e;
+    }
+    dcctOverlayLabelsByIdRef.current = {};
+  }, []);
+
+  // DCCT: Track open popups by idNorm
+  const dcctOpenPopupsRef = useRef({}); // idNorm -> L.Popup
+  // DCCT: Hidden file input ref for CSV import
+  const dcctFileInputRef = useRef(null);
+
+  // DCCT: Save popup changes to state (called when popup is closed)
+  const dcctSavePopupChanges = useCallback((idNorm, popupContent) => {
+    if (!idNorm || !popupContent) return;
+    
+    const plusInput = popupContent.querySelector('input[data-field="plus"]');
+    const minusInput = popupContent.querySelector('input[data-field="minus"]');
+    const statusSelect = popupContent.querySelector('select[data-field="status"]');
+    
+    const newPlus = plusInput?.value?.trim() || '0';
+    const newMinus = minusInput?.value?.trim() || '0';
+    const newStatus = statusSelect?.value || 'not_tested';
+    
+    // Update dcctRisoByIdRef - preserve originalId if it exists
+    const risoData = dcctRisoByIdRef.current || {};
+    const existingRec = risoData[idNorm] || {};
+    risoData[idNorm] = {
+      plus: newPlus,
+      minus: newMinus,
+      status: newStatus === 'not_tested' ? null : newStatus,
+      remarkRaw: newStatus === 'passed' ? 'PASSED' : newStatus === 'failed' ? 'FAILED' : '',
+      originalId: existingRec.originalId || idNorm.toUpperCase().replace(/TX(\d+)INV(\d+)STR(\d+)/i, 'TX$1-INV$2-STR$3'),
+    };
+    dcctRisoByIdRef.current = risoData;
+    
+    // Update dcctTestData state to trigger re-render and color update
+    setDcctTestData((prev) => {
+      const next = { ...prev };
+      if (newStatus === 'passed') {
+        next[idNorm] = 'passed';
+      } else if (newStatus === 'failed') {
+        next[idNorm] = 'failed';
+      } else {
+        delete next[idNorm];
+      }
+      return next;
+    });
+    
+    // Trigger map update for table colors
+    setStringMatchVersion((v) => v + 1);
+  }, []);
+
+  const dcctToggleTestOverlay = useCallback((idNorm, latlng) => {
+    const map = mapRef.current;
+    if (!map || !idNorm || !latlng) return;
+
+    const openPopups = dcctOpenPopupsRef.current || {};
+    const existingPopup = openPopups[idNorm];
+
+    // If popup exists and is open, close it (toggle off)
+    if (existingPopup) {
+      try {
+        // Save changes before closing
+        const content = existingPopup.getContent();
+        if (content instanceof HTMLElement) {
+          dcctSavePopupChanges(idNorm, content);
+        }
+        map.closePopup(existingPopup);
+      } catch (_e) {
+        void _e;
+      }
+      delete openPopups[idNorm];
+      dcctOpenPopupsRef.current = openPopups;
+      return;
+    }
+
+    // Get test data from CSV or state
+    const rec = dcctRisoByIdRef.current?.[idNorm] || null;
+    // Check if ID is in map but not in CSV (not_tested) - use 0 as default
+    const isInCsv = rec !== null;
+    const plus = rec?.plus != null ? String(rec.plus).trim() : '';
+    const minus = rec?.minus != null ? String(rec.minus).trim() : '';
+    const status = rec?.status || 'not_tested'; // 'passed', 'failed', 'not_tested'
+
+    // For items not in CSV, default to 0; for items in CSV with no value, use 999
+    const plusVal = plus || (isInCsv ? '999' : '0');
+    const minusVal = minus || (isInCsv ? '999' : '0');
+
+    // Status colors
+    const passColor = '#059669';
+    const failColor = '#dc2626';
+    const naColor = '#64748b';
+    const statusColor = status === 'passed' ? passColor : status === 'failed' ? failColor : naColor;
+
+    // Create editable HTML content
+    const popupContent = document.createElement('div');
+    popupContent.style.cssText = `
+      font-family: sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      color: #10b981;
+      min-width: 160px;
+      user-select: none;
+    `;
+    popupContent.innerHTML = `
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <span style="color: #10b981;">Ins. Res (+):</span>
+          <input type="text" value="${plusVal}" 
+            style="width: 50px; background: #1e293b; border: 1px solid #334155; border-radius: 4px; 
+                   color: #10b981; font-weight: 600; font-size: 13px; padding: 2px 6px; text-align: right;"
+            data-field="plus" />
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <span style="color: #10b981;">Ins. Res (-):</span>
+          <input type="text" value="${minusVal}"
+            style="width: 50px; background: #1e293b; border: 1px solid #334155; border-radius: 4px;
+                   color: #10b981; font-weight: 600; font-size: 13px; padding: 2px 6px; text-align: right;"
+            data-field="minus" />
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; padding-top: 6px; border-top: 1px solid #334155;">
+          <span style="color: ${statusColor};">Status:</span>
+          <select data-field="status"
+            style="background: #1e293b; border: 1px solid #334155; border-radius: 4px;
+                   color: ${statusColor}; font-weight: 600; font-size: 12px; padding: 2px 6px; cursor: pointer;">
+            <option value="passed" ${status === 'passed' ? 'selected' : ''} style="color: ${passColor};">PASSED</option>
+            <option value="failed" ${status === 'failed' ? 'selected' : ''} style="color: ${failColor};">FAILED</option>
+            <option value="not_tested" ${status === 'not_tested' || !status ? 'selected' : ''} style="color: ${naColor};">N/A</option>
+          </select>
+        </div>
+      </div>
+    `;
+
+    // Add event listeners for changes
+    const selectEl = popupContent.querySelector('select[data-field="status"]');
+    if (selectEl) {
+      selectEl.addEventListener('change', (e) => {
+        const newStatus = e.target.value;
+        const newColor = newStatus === 'passed' ? passColor : newStatus === 'failed' ? failColor : naColor;
+        e.target.style.color = newColor;
+        // Update the label span color too
+        const labelSpan = e.target.parentElement?.querySelector('span');
+        if (labelSpan) labelSpan.style.color = newColor;
+      });
+    }
+
+    // Create popup
+    const popup = L.popup({
+      closeButton: true,
+      autoClose: false,
+      closeOnEscapeKey: true,
+      closeOnClick: false,
+      className: 'dcct-test-popup',
+      maxWidth: 250,
+      minWidth: 160,
+    })
+      .setLatLng(latlng)
+      .setContent(popupContent);
+
+    // Track popup close event - save changes when popup is removed
+    popup.on('remove', () => {
+      // Save changes before removing from tracking
+      const content = popup.getContent();
+      if (content instanceof HTMLElement) {
+        dcctSavePopupChanges(idNorm, content);
+      }
+      const pops = dcctOpenPopupsRef.current || {};
+      delete pops[idNorm];
+      dcctOpenPopupsRef.current = pops;
+    });
+
+    // Open popup and track it
+    popup.openOn(map);
+    openPopups[idNorm] = popup;
+    dcctOpenPopupsRef.current = openPopups;
+
+  }, [dcctSavePopupChanges]);
+
+  // Clear DCCT popups when switching modules
+  const dcctClearAllPopups = useCallback(() => {
+    const map = mapRef.current;
+    const openPopups = dcctOpenPopupsRef.current || {};
+    Object.values(openPopups).forEach((popup) => {
+      try {
+        if (map) map.closePopup(popup);
+      } catch (_e) {
+        void _e;
+      }
+    });
+    dcctOpenPopupsRef.current = {};
+  }, []);
+
+  // DCCT: Import CSV file
+  const dcctImportCsv = useCallback((file) => {
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result;
+        if (typeof text !== 'string') return;
+        
+        const lines = text.split(/\r?\n/).filter((l) => l && l.trim());
+        if (lines.length <= 1) {
+          setDcctTestData({});
+          setDcctCsvTotals({ total: 0, passed: 0, failed: 0 });
+          dcctRisoByIdRef.current = {};
+          setStringMatchVersion((v) => v + 1);
+          return;
+        }
+
+        const header = (lines[0] || '').split(',').map((h) => h.trim().toLowerCase());
+        const idIdx = header.findIndex((h) => h === 'id');
+        const remarkIdx = header.findIndex((h) => h === 'remark');
+        const minusIdx = header.findIndex((h) => h.includes('insulation') && h.includes('(-'));
+        const plusIdx = header.findIndex((h) => h.includes('insulation') && h.includes('(+)'));
+
+        const testResults = {}; // normalizedId -> 'passed' | 'failed'
+        const risoById = {}; // normalizedId -> { plus, minus, status, remarkRaw, originalId }
+        let passedCount = 0;
+        let failedCount = 0;
+        const uniqueIds = new Set();
+
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i];
+          if (!line || !line.trim()) continue;
+          const parts = line.split(',');
+          const rawId = idIdx >= 0 ? parts[idIdx] : parts[0];
+          const rawRemark = remarkIdx >= 0 ? parts[remarkIdx] : parts[parts.length - 1];
+          const rawMinus = minusIdx >= 0 ? parts[minusIdx] : (parts.length >= 2 ? parts[1] : '');
+          const rawPlus = plusIdx >= 0 ? parts[plusIdx] : (parts.length >= 3 ? parts[2] : '');
+
+          const id = normalizeId(rawId);
+          const originalId = String(rawId || '').trim(); // Preserve original format
+          const remarkRaw = String(rawRemark || '').trim();
+          const remark = remarkRaw.toLowerCase();
+
+          if (!id) continue;
+
+          // Only count unique IDs for totals
+          if (!uniqueIds.has(id)) {
+            uniqueIds.add(id);
+            // Determine test result (use first occurrence if duplicate rows exist)
+            let status = null;
+            if (remark === 'passed' || remark === 'pass') {
+              status = 'passed';
+              testResults[id] = 'passed';
+              passedCount++;
+            } else if (remark === 'failed' || remark === 'fail') {
+              status = 'failed';
+              testResults[id] = 'failed';
+              failedCount++;
+            }
+
+            risoById[id] = {
+              plus: String(rawPlus ?? '').trim(),
+              minus: String(rawMinus ?? '').trim(),
+              status,
+              remarkRaw,
+              originalId,
+            };
+          }
+        }
+
+        setDcctTestData(testResults);
+        dcctRisoByIdRef.current = risoById;
+        setDcctCsvTotals({
+          total: uniqueIds.size,
+          passed: passedCount,
+          failed: failedCount,
+        });
+        
+        // Trigger map update for table colors
+        setStringMatchVersion((v) => v + 1);
+        
+      } catch (err) {
+        console.error('Error parsing imported CSV:', err);
+      }
+    };
+    reader.readAsText(file);
+  }, []);
+
+  // DCCT: Export CSV file with current state
+  const dcctExportCsv = useCallback(() => {
+    try {
+      const risoData = dcctRisoByIdRef.current || {};
+      const mapIds = dcctMapIdsRef.current || new Set();
+      
+      // Collect all IDs: from CSV data + from map
+      const allIds = new Set([...Object.keys(risoData), ...mapIds]);
+      
+      // Build CSV content
+      const header = 'ID,Insulation Resistance (-),Insulation Resistance (+),remark';
+      const rows = [header];
+      
+      // Sort IDs for consistent output
+      const sortedIds = Array.from(allIds).sort((a, b) => {
+        // Try to parse TX-INV-STR format for better sorting
+        const parseId = (id) => {
+          const match = String(id).match(/tx(\d+)-inv(\d+)-str(\d+)/i);
+          if (match) {
+            return [parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3], 10)];
+          }
+          return [0, 0, 0];
+        };
+        const [aTx, aInv, aStr] = parseId(a);
+        const [bTx, bInv, bStr] = parseId(b);
+        if (aTx !== bTx) return aTx - bTx;
+        if (aInv !== bInv) return aInv - bInv;
+        return aStr - bStr;
+      });
+      
+      for (const idNorm of sortedIds) {
+        const rec = risoData[idNorm] || {};
+        // Use original ID format if available, otherwise use normalized
+        const displayId = rec.originalId || idNorm.toUpperCase().replace(/TX(\d+)INV(\d+)STR(\d+)/i, 'TX$1-INV$2-STR$3');
+        const minus = rec.minus || '0';
+        const plus = rec.plus || '0';
+        const remark = rec.status === 'passed' ? 'PASSED' : rec.status === 'failed' ? 'FAILED' : '';
+        
+        rows.push(`${displayId},${minus},${plus},${remark}`);
+      }
+      
+      const csvContent = rows.join('\n');
+      
+      // Create and download file
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `dc_riso_export_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+    } catch (err) {
+      console.error('Error exporting CSV:', err);
+    }
+  }, []);
+
+  // Clear DCCT overlays when switching modules
+  useEffect(() => {
+    dcctClearTestOverlays();
+    dcctClearAllPopups();
+  }, [activeMode?.key, dcctClearTestOverlays, dcctClearAllPopups]);
   
   const [_status, setStatus] = useState('Initializing map...');
   const [lengthData, setLengthData] = useState({}); // Length data from CSV
@@ -493,6 +927,45 @@ export default function BaseModule({
   // MVF: committed (submitted/locked) trenches by day
   const [mvfCommittedTrenchIds, setMvfCommittedTrenchIds] = useState(() => new Set()); // Set<string>
   const mvfCommittedTrenchIdsRef = useRef(mvfCommittedTrenchIds);
+  
+  // TABLE_INSTALLATION: küçük ve büyük masa sayaçları (masa = 2 panel üst üste)
+  const [tableSmallCount, setTableSmallCount] = useState(0); // 2V14 küçük masalar
+  const [tableBigCount, setTableBigCount] = useState(0);     // 2V27 büyük masalar
+  // Panel eşleştirme: polygonId -> partnerId (üst üste duran paneller)
+  const tipPanelPairsRef = useRef(new Map()); // Map<polygonId, partnerPolygonId>
+  // LVIB: Box label data for rendering LV/INV text inside boxes
+  const lvibBoxLabelsRef = useRef([]); // [{center: [lat, lng], label: 'LV'|'INV'}, ...]
+  // LVIB: Sub-mode state (which box type is currently selectable)
+  const [lvibSubMode, setLvibSubMode] = useState('lvBox'); // 'lvBox' | 'invBox'
+  const lvibSubModeRef = useRef(lvibSubMode);
+  useEffect(() => { lvibSubModeRef.current = lvibSubMode; }, [lvibSubMode]);
+  // LVIB: Selected box IDs for each type
+  const [lvibSelectedLvBoxes, setLvibSelectedLvBoxes] = useState(new Set());
+  const [lvibSelectedInvBoxes, setLvibSelectedInvBoxes] = useState(new Set());
+  const lvibSelectedLvBoxesRef = useRef(lvibSelectedLvBoxes);
+  const lvibSelectedInvBoxesRef = useRef(lvibSelectedInvBoxes);
+  useEffect(() => { lvibSelectedLvBoxesRef.current = lvibSelectedLvBoxes; }, [lvibSelectedLvBoxes]);
+  useEffect(() => { lvibSelectedInvBoxesRef.current = lvibSelectedInvBoxes; }, [lvibSelectedInvBoxes]);
+
+  // LVIB: repaint box layers when selections change so selected boxes turn green.
+  useEffect(() => {
+    if (!isLVIB) return;
+    try {
+      if (lvibLvBoxLayerRef.current) lvibLvBoxLayerRef.current.setStyle(lvibLvBoxLayerRef.current.options.style);
+      if (lvibInvBoxLayerRef.current) lvibInvBoxLayerRef.current.setStyle(lvibInvBoxLayerRef.current.options.style);
+    } catch (_e) {
+      void _e;
+    }
+  }, [isLVIB, lvibSelectedLvBoxes, lvibSelectedInvBoxes]);
+  // LVIB: Total box counts from geojson (feature count)
+  const [lvibLvBoxTotal, setLvibLvBoxTotal] = useState(0);
+  const [lvibInvBoxTotal, setLvibInvBoxTotal] = useState(0);
+  // LVIB: Layer references for styling updates
+  const lvibLvBoxLayerRef = useRef(null);
+  const lvibInvBoxLayerRef = useRef(null);
+  // LVIB: polygonId -> boxType mapping
+  const lvibBoxTypeRef = useRef(new Map()); // Map<polygonId, 'lvBox'|'invBox'>
+  
   const [totalPlus, setTotalPlus] = useState(0); // Total +DC Cable from CSV
   const [totalMinus, setTotalMinus] = useState(0); // Total -DC Cable from CSV
   const [completedPlus, setCompletedPlus] = useState(0); // Selected +DC Cable
@@ -502,8 +975,16 @@ export default function BaseModule({
   const [historySortBy, setHistorySortBy] = useState('date'); // 'date', 'workers', 'cable'
   const [historySortOrder, setHistorySortOrder] = useState('desc'); // 'asc', 'desc'
   
-  // Note Mode state
-  const [noteMode, setNoteMode] = useState(false);
+  // Note Mode state - PUNCH_LIST always starts in punch mode
+  const [noteMode, setNoteMode] = useState(isPL);
+  
+  // PUNCH_LIST: Ensure punch mode is always active
+  useEffect(() => {
+    if (isPL && !noteMode) {
+      setNoteMode(true);
+    }
+  }, [isPL, noteMode]);
+  
   const initialNotes = (() => {
     const saved = localStorage.getItem('cew_notes');
     return saved ? JSON.parse(saved) : [];
@@ -517,6 +998,330 @@ export default function BaseModule({
   const canUndoNotes = notesState.past.length > 0;
   const canRedoNotes = notesState.future.length > 0;
   const NOTES_HISTORY_LIMIT = 50;
+
+  // ─────────────────────────────────────────────────────────────────
+  // PUNCH LIST: Contractor (Taşeron) Management + Isometric View
+  // ─────────────────────────────────────────────────────────────────
+  const PL_CONTRACTORS_KEY = 'cew_pl_contractors';
+  const PL_PUNCHES_KEY = 'cew_pl_punches';
+  // Green (#22c55e) is reserved for completed punches - not available for contractors
+  // 8 distinct, easily distinguishable colors (no green/teal tones)
+  const DEFAULT_PUNCH_COLORS = [
+    '#ef4444', // Red
+    '#f97316', // Orange
+    '#eab308', // Yellow
+    '#3b82f6', // Blue
+    '#8b5cf6', // Purple
+    '#ec4899', // Pink
+    '#06b6d4', // Cyan
+    '#78716c', // Stone/Gray
+  ];
+  
+  // Special color for completed punches
+  const PUNCH_COMPLETED_COLOR = '#22c55e';
+
+  // Contractors: { id, name, color }
+  const [plContractors, setPlContractors] = useState(() => {
+    try {
+      const saved = localStorage.getItem(PL_CONTRACTORS_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch (_e) {
+      return [];
+    }
+  });
+
+  // Punch points: { id, lat, lng, contractorId, text, photoDataUrl, photoName, tableId?, createdAt, punchNumber }
+  const [plPunches, setPlPunches] = useState(() => {
+    try {
+      const saved = localStorage.getItem(PL_PUNCHES_KEY);
+      if (!saved) return [];
+      const punches = JSON.parse(saved);
+      // Ensure all punches have a punchNumber (migrate old punches)
+      let maxNum = 0;
+      punches.forEach(p => {
+        if (p.punchNumber) maxNum = Math.max(maxNum, p.punchNumber);
+      });
+      // Assign numbers to punches without one
+      punches.forEach((p) => {
+        if (!p.punchNumber) {
+          maxNum++;
+          p.punchNumber = maxNum;
+        }
+      });
+      return punches;
+    } catch (_e) {
+      return [];
+    }
+  });
+  
+  // Punch counter for permanent numbering - always starts from max existing punchNumber
+  const PL_COUNTER_KEY = 'punch_list_counter';
+  const [plPunchCounter, setPlPunchCounter] = useState(() => {
+    try {
+      // Always calculate from existing punches to ensure continuity
+      const savedPunches = localStorage.getItem(PL_PUNCHES_KEY);
+      if (savedPunches) {
+        const punches = JSON.parse(savedPunches);
+        const maxNum = Math.max(0, ...punches.map(p => p.punchNumber || 0));
+        return maxNum;
+      }
+      return 0;
+    } catch (_e) {
+      return 0;
+    }
+  });
+  
+  // Ref to track current counter value for async handlers
+  const plPunchCounterRef = useRef(plPunchCounter);
+  
+  // Keep counter ref in sync with state
+  useEffect(() => {
+    plPunchCounterRef.current = plPunchCounter;
+  }, [plPunchCounter]);
+  
+  // Persist punch counter
+  useEffect(() => {
+    try {
+      localStorage.setItem(PL_COUNTER_KEY, String(plPunchCounter));
+    } catch (_e) {
+      void _e;
+    }
+  }, [plPunchCounter]);
+
+  // Currently selected contractor for new punches
+  const [plSelectedContractorId, setPlSelectedContractorId] = useState(null);
+  const plSelectedContractorIdRef = useRef(null); // Ref to track selected contractor for async handlers
+  
+  // Keep contractor ref in sync with state
+  useEffect(() => {
+    plSelectedContractorIdRef.current = plSelectedContractorId;
+  }, [plSelectedContractorId]);
+
+  // Contractor management dropdown state
+  const [plContractorDropdownOpen, setPlContractorDropdownOpen] = useState(false);
+  const plContractorDropdownOpenRef = useRef(false); // Ref to track dropdown state for async handlers
+  const [plNewContractorName, setPlNewContractorName] = useState('');
+  const [plNewContractorColor, setPlNewContractorColor] = useState(DEFAULT_PUNCH_COLORS[0]);
+  const [plShowAddContractorForm, setPlShowAddContractorForm] = useState(false); // Show add form when contractors exist
+  
+  // Ref to capture hamburger menu state at mousedown time (before App.jsx closes it)
+  const plHamburgerWasOpenOnMouseDownRef = useRef(false);
+  
+  // Contractor editing state - must be declared before useEffect that references it
+  const [plEditingContractor, setPlEditingContractor] = useState(null); // contractor being edited
+  const [plEditContractorName, setPlEditContractorName] = useState('');
+  const [plEditContractorColor, setPlEditContractorColor] = useState('');
+  
+  // Helper to get first available (unused) color
+  const getFirstAvailableColor = useCallback(() => {
+    const usedColors = new Set(plContractors.map(c => c.color));
+    return DEFAULT_PUNCH_COLORS.find(clr => !usedColors.has(clr)) || DEFAULT_PUNCH_COLORS[0];
+  }, [plContractors]);
+  
+  // Auto-select first available color when dropdown opens
+  useEffect(() => {
+    if (plContractorDropdownOpen && !plEditingContractor) {
+      setPlNewContractorColor(getFirstAvailableColor());
+    }
+  }, [plContractorDropdownOpen, plEditingContractor, getFirstAvailableColor]);
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    plContractorDropdownOpenRef.current = plContractorDropdownOpen;
+  }, [plContractorDropdownOpen]);
+
+  // Isometric view state (when clicking a table)
+  const [plIsometricTableId, setPlIsometricTableId] = useState(null); // tableId being viewed
+  const [plIsometricOpen, setPlIsometricOpen] = useState(false);
+
+  // Punch editing popup
+  const [plEditingPunch, setPlEditingPunch] = useState(null); // punch object being edited
+  const [plPunchText, setPlPunchText] = useState('');
+  const [plPunchContractorId, setPlPunchContractorId] = useState(null);
+  const [plPunchPhotoDataUrl, setPlPunchPhotoDataUrl] = useState(null);
+  const [plPunchPhotoName, setPlPunchPhotoName] = useState('');
+  const [plPopupPosition, setPlPopupPosition] = useState(null); // {x, y} screen coords for dynamic positioning
+  const plPunchPhotoInputRef = useRef(null);
+  const plPunchMarkersRef = useRef({}); // id -> marker
+  const plIsoInnerRef = useRef(null); // ref for isometric inner container (for fit button)
+  
+  // Selected punches (for box selection and deletion)
+  const [plSelectedPunches, setPlSelectedPunches] = useState(new Set());
+  
+  // Drag state for moving punches
+  const plDraggingPunchRef = useRef(null); // { punchId, startLatLng, marker }
+
+  // Persist contractors
+  useEffect(() => {
+    try {
+      localStorage.setItem(PL_CONTRACTORS_KEY, JSON.stringify(plContractors));
+    } catch (_e) {
+      void _e;
+    }
+  }, [plContractors]);
+
+  // Persist punches
+  useEffect(() => {
+    try {
+      localStorage.setItem(PL_PUNCHES_KEY, JSON.stringify(plPunches));
+    } catch (_e) {
+      void _e;
+    }
+  }, [plPunches]);
+
+  // Add contractor
+  const plAddContractor = useCallback((name, color) => {
+    if (!name?.trim()) return null;
+    const id = `contractor_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    // Always uppercase contractor names
+    const newC = { id, name: name.trim().toUpperCase(), color: color || DEFAULT_PUNCH_COLORS[0] };
+    setPlContractors(prev => [...prev, newC]);
+    return newC;
+  }, []);
+
+  // Remove contractor
+  const plRemoveContractor = useCallback((contractorId) => {
+    setPlContractors(prev => prev.filter(c => c.id !== contractorId));
+  }, []);
+
+  // Update contractor (name and/or color) - always uppercase names
+  const plUpdateContractor = useCallback((contractorId, name, color) => {
+    setPlContractors(prev => prev.map(c => 
+      c.id === contractorId 
+        ? { ...c, name: (name?.trim() || c.name).toUpperCase(), color: color || c.color }
+        : c
+    ));
+  }, []);
+
+  // Get contractor by ID
+  const plGetContractor = useCallback((contractorId) => {
+    return plContractors.find(c => c.id === contractorId) || null;
+  }, [plContractors]);
+
+  // Create punch point (no popup on create - user clicks on dot to edit)
+  // Returns null if no contractor selected (caller should show warning)
+  const plCreatePunch = useCallback((latlng, tableId = null) => {
+    // Must have contractor selected - use ref for current value
+    const contractorId = plSelectedContractorIdRef.current;
+    if (!contractorId) {
+      return null; // Signal that punch cannot be created
+    }
+    // Get next punch number using ref (always current) and increment both ref and state
+    const nextNumber = plPunchCounterRef.current + 1;
+    plPunchCounterRef.current = nextNumber; // Update ref immediately for next call
+    setPlPunchCounter(nextNumber); // Update state for persistence
+    
+    const punch = {
+      id: `punch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      lat: latlng.lat,
+      lng: latlng.lng,
+      contractorId: contractorId,
+      text: '',
+      photoDataUrl: null,
+      photoName: '',
+      tableId: tableId || null,
+      createdAt: new Date().toISOString(),
+      punchNumber: nextNumber // Permanent number - never changes even if others are deleted
+    };
+    setPlPunches(prev => [...prev, punch]);
+    // Don't open popup - user clicks on dot to edit
+    return punch;
+  }, []); // No dependencies - uses refs for current values
+  
+  // Move punch to new location
+  const plMovePunch = useCallback((punchId, newLatLng) => {
+    setPlPunches(prev => prev.map(p =>
+      p.id === punchId
+        ? { ...p, lat: newLatLng.lat, lng: newLatLng.lng }
+        : p
+    ));
+  }, []);
+  
+  // Delete multiple punches (for selection delete)
+  const plDeleteSelectedPunches = useCallback(() => {
+    if (plSelectedPunches.size === 0) return;
+    const count = plSelectedPunches.size;
+    if (!window.confirm(`Are you sure you want to delete ${count} selected punch item${count > 1 ? 's' : ''}?`)) return;
+    setPlPunches(prev => prev.filter(p => !plSelectedPunches.has(p.id)));
+    if (plEditingPunch && plSelectedPunches.has(plEditingPunch.id)) {
+      setPlEditingPunch(null);
+    }
+    setPlSelectedPunches(new Set());
+  }, [plSelectedPunches, plEditingPunch]);
+
+  // Save punch
+  const plSavePunch = useCallback(() => {
+    if (!plEditingPunch) return;
+    setPlPunches(prev => prev.map(p =>
+      p.id === plEditingPunch.id
+        ? { ...p, text: plPunchText, contractorId: plPunchContractorId, photoDataUrl: plPunchPhotoDataUrl, photoName: plPunchPhotoName }
+        : p
+    ));
+    setPlEditingPunch(null);
+    setPlPunchText('');
+    setPlPunchContractorId(null);
+    setPlPunchPhotoDataUrl(null);
+    setPlPunchPhotoName('');
+  }, [plEditingPunch, plPunchText, plPunchContractorId, plPunchPhotoDataUrl, plPunchPhotoName]);
+
+  // Delete punch
+  const plDeletePunch = useCallback((punchId) => {
+    if (!window.confirm('Are you sure you want to delete this punch item?')) return;
+    setPlPunches(prev => prev.filter(p => p.id !== punchId));
+    if (plEditingPunch?.id === punchId) {
+      setPlEditingPunch(null);
+    }
+  }, [plEditingPunch]);
+  
+  // Mark punch as completed (done)
+  const plMarkPunchCompleted = useCallback((punchId) => {
+    if (!window.confirm('Are you sure you want to mark this punch as completed?')) return;
+    setPlPunches(prev => prev.map(p =>
+      p.id === punchId ? { ...p, completed: true, completedAt: new Date().toISOString() } : p
+    ));
+    // Close popup if this punch is being edited
+    if (plEditingPunch?.id === punchId) {
+      setPlEditingPunch(null);
+      setPlPunchText('');
+      setPlPunchContractorId(null);
+      setPlPunchPhotoDataUrl(null);
+      setPlPunchPhotoName('');
+    }
+  }, [plEditingPunch]);
+
+  // Mark punch as uncompleted
+  const plMarkPunchUncompleted = useCallback((punchId) => {
+    if (!window.confirm('Are you sure you want to mark this punch as incomplete?')) return;
+    setPlPunches(prev => prev.map(p =>
+      p.id === punchId ? { ...p, completed: false, completedAt: null } : p
+    ));
+  }, []);
+
+  // Photo lightbox state for enlarged view
+  const [plPhotoLightbox, setPlPhotoLightbox] = useState(null); // { url, name, x, y }
+
+  // Handle punch photo selection
+  const handlePlPunchPhotoSelected = useCallback((file) => {
+    if (!file) return;
+    if (!file.type?.startsWith('image/')) {
+      alert('Please select an image file.');
+      return;
+    }
+    const maxBytes = 1.5 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      alert('Image is too large. Please select an image under 1.5MB.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : null;
+      if (dataUrl) {
+        setPlPunchPhotoDataUrl(dataUrl);
+        setPlPunchPhotoName(file.name || '');
+      }
+    };
+    reader.readAsDataURL(file);
+  }, []);
 
   // ─────────────────────────────────────────────────────────────
   // GLOBAL UNDO/REDO (modules + sub-modes)
@@ -576,8 +1381,11 @@ export default function BaseModule({
     setNotesState((s) => {
       const next = typeof updater === 'function' ? updater(s.present) : updater;
       if (next === s.present) return s;
-      const past = [...s.past, s.present].slice(-NOTES_HISTORY_LIMIT);
-      return { past, present: next, future: [] };
+      return {
+        past: [...s.past, s.present].slice(-NOTES_HISTORY_LIMIT),
+        present: next,
+        future: [],
+      };
     });
   };
 
@@ -588,7 +1396,7 @@ export default function BaseModule({
       return {
         past: s.past.slice(0, -1),
         present: previous,
-        future: [s.present, ...s.future]
+        future: [s.present, ...s.future].slice(0, NOTES_HISTORY_LIMIT),
       };
     });
   };
@@ -634,6 +1442,7 @@ export default function BaseModule({
   const notePhotoInputRef = useRef(null);
   const noteMarkersRef = useRef({}); // id -> marker
   const markerClickedRef = useRef(false); // Track if a marker was just clicked
+  const polygonClickedRef = useRef(false); // Track if a polygon click was already handled by layer events
 
   // LV: inv_id daily completion tracking (click inv_id labels to mark completed for today)
   const getTodayYmd = () => new Date().toISOString().split('T')[0];
@@ -670,6 +1479,395 @@ export default function BaseModule({
       void _e;
     }
   }, [isLV, lvStorageKey, lvCompletedInvIds]);
+
+  // PTEP: Sub-mode selection (like MC4) - 'tabletotable' or 'parameter'
+  const [ptepSubMode, setPtepSubMode] = useState('tabletotable'); // 'tabletotable' | 'parameter'
+  const ptepSubModeRef = useRef(ptepSubMode);
+  useEffect(() => {
+    ptepSubModeRef.current = ptepSubMode;
+  }, [ptepSubMode]);
+
+  // PTEP: table-to-table completion tracking (click lines to mark completed)
+  const ptepTodayYmd = getTodayYmd();
+  const ptepStorageKeyTT = `cew:ptep:tabletotable:${ptepTodayYmd}`;
+  const ptepStorageKeyParam = `cew:ptep:parameter:${ptepTodayYmd}`;
+  const ptepStorageKeyParamParts = `cew:ptep:parameter_parts:${ptepTodayYmd}`;
+  const [ptepCompletedTableToTable, setPtepCompletedTableToTable] = useState(() => new Set());
+  const ptepCompletedTableToTableRef = useRef(ptepCompletedTableToTable);
+  const [ptepTotalTableToTable, setPtepTotalTableToTable] = useState(0);
+  const ptepTableToTableByIdRef = useRef({}); // uniqueId -> featureLayer
+
+  // PTEP: Undo/Redo history for table-to-table
+  const ptepTTHistoryRef = useRef({ past: [], future: [] });
+  const ptepTTPrevSnapshotRef = useRef([]);
+  const ptepTTHistorySuspendRef = useRef(false);
+  const [ptepTTHistoryTick, setPtepTTHistoryTick] = useState(0);
+
+  // PTEP: parameter completion tracking (MVF-style partial selection: store selected PART geometries)
+  // parts: [{ id, uid, lineIndex, startM, endM, coords:[[lat,lng],...], meters }]
+  const [ptepSelectedParameterParts, setPtepSelectedParameterParts] = useState(() => []);
+  const ptepSelectedParameterPartsRef = useRef(ptepSelectedParameterParts);
+  const ptepParameterSelectedLayerRef = useRef(null); // L.LayerGroup for selected green parts
+  const ptepLegacyCompletedParameterIdsRef = useRef(null); // Set<string> | null (migration from old full-line IDs)
+  const [ptepTotalParameterMeters, setPtepTotalParameterMeters] = useState(0);
+  const ptepParameterByIdRef = useRef({}); // uniqueId -> featureLayer
+  const ptepParameterLenByIdRef = useRef({}); // uniqueId -> length in meters
+
+  // PTEP: Undo/Redo history for parameter parts
+  const ptepParamHistoryRef = useRef({ past: [], future: [] });
+  const ptepParamPrevSnapshotRef = useRef([]);
+  const ptepParamHistorySuspendRef = useRef(false);
+  const [ptepParamHistoryTick, setPtepParamHistoryTick] = useState(0);
+
+  // ======== DATP (DC&AC Trench Progress) ========
+  // Storage key for persistence
+  const datpStorageKey = `datp_completed_parts_${String(activeMode?.key || 'DATP')}`;
+  // parts: [{ id, uid, lineIndex, startM, endM, coords:[[lat,lng],...], meters }]
+  const [datpSelectedTrenchParts, setDatpSelectedTrenchParts] = useState(() => []);
+  const datpSelectedTrenchPartsRef = useRef(datpSelectedTrenchParts);
+  const datpTrenchSelectedLayerRef = useRef(null); // L.LayerGroup for selected green parts
+  const [datpTotalTrenchMeters, setDatpTotalTrenchMeters] = useState(0);
+  const datpTrenchByIdRef = useRef({}); // uniqueId -> featureLayer
+  const datpTrenchLenByIdRef = useRef({}); // uniqueId -> length in meters
+  const datpSvgRendererRef = useRef(null); // dedicated SVG renderer for trench lines
+
+  // DATP: Undo/Redo history for trench parts
+  const datpHistoryRef = useRef({ past: [], future: [] });
+  const datpPrevSnapshotRef = useRef([]);
+  const datpHistorySuspendRef = useRef(false);
+  const [datpHistoryTick, setDatpHistoryTick] = useState(0);
+
+  useEffect(() => {
+    ptepCompletedTableToTableRef.current = ptepCompletedTableToTable;
+  }, [ptepCompletedTableToTable]);
+
+  useEffect(() => {
+    ptepSelectedParameterPartsRef.current = ptepSelectedParameterParts;
+  }, [ptepSelectedParameterParts]);
+
+  useEffect(() => {
+    datpSelectedTrenchPartsRef.current = datpSelectedTrenchParts;
+  }, [datpSelectedTrenchParts]);
+
+  // Track DATP trench parts changes for undo/redo
+  useEffect(() => {
+    if (!isDATP) return;
+    if (datpHistorySuspendRef.current) return;
+    const current = JSON.stringify(datpSelectedTrenchParts || []);
+    const prev = JSON.stringify(datpPrevSnapshotRef.current || []);
+    if (current === prev) return;
+    datpHistoryRef.current.past = [...datpHistoryRef.current.past, datpPrevSnapshotRef.current || []].slice(-HISTORY_LIMIT);
+    datpHistoryRef.current.future = [];
+    datpPrevSnapshotRef.current = datpSelectedTrenchParts || [];
+    setDatpHistoryTick((t) => t + 1);
+  }, [isDATP, datpSelectedTrenchParts]);
+
+  // Track PTEP table-to-table changes for undo/redo
+  useEffect(() => {
+    if (!isPTEP) return;
+    if (ptepTTHistorySuspendRef.current) return;
+    const current = Array.from(ptepCompletedTableToTable || new Set()).sort();
+    const prev = ptepTTPrevSnapshotRef.current || [];
+    if (JSON.stringify(current) === JSON.stringify(prev)) return;
+    ptepTTHistoryRef.current.past = [...ptepTTHistoryRef.current.past, prev].slice(-HISTORY_LIMIT);
+    ptepTTHistoryRef.current.future = [];
+    ptepTTPrevSnapshotRef.current = current;
+    setPtepTTHistoryTick((t) => t + 1);
+  }, [isPTEP, ptepCompletedTableToTable]);
+
+  // Track PTEP parameter parts changes for undo/redo
+  useEffect(() => {
+    if (!isPTEP) return;
+    if (ptepParamHistorySuspendRef.current) return;
+    const current = JSON.stringify(ptepSelectedParameterParts || []);
+    const prev = JSON.stringify(ptepParamPrevSnapshotRef.current || []);
+    if (current === prev) return;
+    ptepParamHistoryRef.current.past = [...ptepParamHistoryRef.current.past, ptepParamPrevSnapshotRef.current || []].slice(-HISTORY_LIMIT);
+    ptepParamHistoryRef.current.future = [];
+    ptepParamPrevSnapshotRef.current = ptepSelectedParameterParts || [];
+    setPtepParamHistoryTick((t) => t + 1);
+  }, [isPTEP, ptepSelectedParameterParts]);
+
+  // Load PTEP table-to-table completions from localStorage
+  useEffect(() => {
+    if (!isPTEP) return;
+    try {
+      const raw = localStorage.getItem(ptepStorageKeyTT);
+      const arr = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(arr)) setPtepCompletedTableToTable(new Set(arr));
+      else setPtepCompletedTableToTable(new Set());
+    } catch (_e) {
+      void _e;
+      setPtepCompletedTableToTable(new Set());
+    }
+  }, [isPTEP, ptepStorageKeyTT]);
+
+  // Load PTEP parameter PART completions from localStorage
+  useEffect(() => {
+    if (!isPTEP) return;
+    try {
+      const rawParts = localStorage.getItem(ptepStorageKeyParamParts);
+      const parts = rawParts ? JSON.parse(rawParts) : [];
+      if (Array.isArray(parts)) {
+        setPtepSelectedParameterParts(parts);
+        ptepLegacyCompletedParameterIdsRef.current = null;
+        return;
+      }
+      setPtepSelectedParameterParts([]);
+    } catch (_e) {
+      void _e;
+      setPtepSelectedParameterParts([]);
+    }
+    // Back-compat: if old full-line storage exists (array of ids), migrate after geojson loads.
+    try {
+      const rawLegacy = localStorage.getItem(ptepStorageKeyParam);
+      const arr = rawLegacy ? JSON.parse(rawLegacy) : [];
+      if (Array.isArray(arr) && arr.length > 0) {
+        ptepLegacyCompletedParameterIdsRef.current = new Set(arr.map(String));
+      } else {
+        ptepLegacyCompletedParameterIdsRef.current = null;
+      }
+    } catch (_e) {
+      void _e;
+      ptepLegacyCompletedParameterIdsRef.current = null;
+    }
+  }, [isPTEP, ptepStorageKeyParamParts, ptepStorageKeyParam]);
+
+  // PTEP: One-time migration from legacy full-line IDs -> full-length PARTs
+  useEffect(() => {
+    if (!isPTEP) return;
+    const legacy = ptepLegacyCompletedParameterIdsRef.current;
+    if (!legacy || legacy.size === 0) return;
+    const byId = ptepParameterByIdRef.current || {};
+    const toAdd = [];
+    legacy.forEach((uid) => {
+      const layer = byId[String(uid)];
+      if (!layer || typeof layer.getLatLngs !== 'function') return;
+      const lines = asLineStrings(layer.getLatLngs());
+      lines.forEach((lineLL, lineIndex) => {
+        if (!Array.isArray(lineLL) || lineLL.length < 2) return;
+        const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+        const totalM = cumData?.cum?.[cumData.cum.length - 1] || 0;
+        if (!(totalM > 0)) return;
+        const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: 0, endM: totalM });
+        if (!coords || coords.length < 2) return;
+        toAdd.push({
+          id: `${String(uid)}:${lineIndex}:0.00-${totalM.toFixed(2)}`,
+          uid: String(uid),
+          lineIndex,
+          startM: 0,
+          endM: totalM,
+          coords,
+          meters: totalM,
+        });
+      });
+    });
+    if (toAdd.length > 0) setPtepSelectedParameterParts(toAdd);
+    ptepLegacyCompletedParameterIdsRef.current = null;
+  }, [isPTEP, ptepTotalParameterMeters]);
+
+  // Save PTEP table-to-table completions to localStorage and update styles
+  useEffect(() => {
+    if (!isPTEP) return;
+    try {
+      localStorage.setItem(ptepStorageKeyTT, JSON.stringify(Array.from(ptepCompletedTableToTable)));
+    } catch (_e) {
+      void _e;
+    }
+    // Update styles and interactivity for all table-to-table features
+    const byId = ptepTableToTableByIdRef.current || {};
+    const isActive = ptepSubModeRef.current === 'tabletotable';
+    Object.keys(byId).forEach((uid) => {
+      const layer = byId[uid];
+      if (layer && typeof layer.setStyle === 'function') {
+        const isDone = ptepCompletedTableToTable.has(uid);
+        layer.setStyle({
+          color: isDone ? '#22c55e' : '#3b82f6',
+          weight: 2.2,
+          opacity: isActive ? 1 : 0,
+          dashArray: isDone ? null : '6 4',
+          lineCap: 'round',
+          lineJoin: 'round',
+        });
+        // Disable/enable interactivity based on sub-mode
+        if (layer.options) {
+          layer.options.interactive = isActive;
+        }
+        // Also update the underlying path element's pointer-events
+        try {
+          if (layer._path) {
+            layer._path.style.pointerEvents = isActive ? 'auto' : 'none';
+          }
+        } catch (_e) { void _e; }
+      }
+    });
+  }, [isPTEP, ptepStorageKeyTT, ptepCompletedTableToTable, ptepSubMode]);
+
+  // Save PTEP parameter PART completions to localStorage and update base styles/interactivity
+  useEffect(() => {
+    if (!isPTEP) return;
+    try {
+      localStorage.setItem(ptepStorageKeyParamParts, JSON.stringify(ptepSelectedParameterParts || []));
+    } catch (_e) {
+      void _e;
+    }
+
+    const byId = ptepParameterByIdRef.current || {};
+    const isActive = ptepSubModeRef.current === 'parameter';
+    Object.keys(byId).forEach((uid) => {
+      const layer = byId[uid];
+      if (layer && typeof layer.setStyle === 'function') {
+        layer.setStyle({
+          color: '#facc15',
+          weight: 1.5,
+          opacity: isActive ? 1 : 0,
+        });
+        if (layer.options) {
+          layer.options.interactive = isActive;
+        }
+        try {
+          if (layer._path) {
+            layer._path.style.pointerEvents = isActive ? 'auto' : 'none';
+          }
+        } catch (_e) {
+          void _e;
+        }
+      }
+    });
+  }, [isPTEP, ptepStorageKeyParamParts, ptepSelectedParameterParts, ptepSubMode]);
+
+  // PTEP: Render selected parameter PARTS as green overlay (MVF-style)
+  useEffect(() => {
+    if (!isPTEP) return;
+    const map = mapRef.current;
+    if (!map) return;
+    try {
+      if (!ptepParameterSelectedLayerRef.current) {
+        ptepParameterSelectedLayerRef.current = L.layerGroup().addTo(map);
+      }
+      const lg = ptepParameterSelectedLayerRef.current;
+      lg.clearLayers();
+      if (ptepSubModeRef.current !== 'parameter') return;
+      const parts = ptepSelectedParameterPartsRef.current || [];
+      parts.forEach((p) => {
+        const coords = p?.coords;
+        if (!Array.isArray(coords) || coords.length < 2) return;
+        const line = L.polyline(coords, {
+          color: '#22c55e',
+          weight: 3,
+          opacity: 1,
+          interactive: false,
+          pane: 'ptepParameterSelectedPane',
+        });
+        lg.addLayer(line);
+      });
+    } catch (_e) {
+      void _e;
+    }
+  }, [isPTEP, ptepSubMode, ptepSelectedParameterParts]);
+
+  // PTEP: Update pane-level pointer-events and visibility based on sub-mode
+  // This ensures inactive layers are both non-interactive AND hidden
+  useEffect(() => {
+    if (!isPTEP) return;
+    const map = mapRef.current;
+    if (!map) return;
+
+    try {
+      const ttPane = map.getPane('ptepTableToTablePane');
+      const paramPane = map.getPane('ptepParameterPane');
+
+      if (ttPane) {
+        ttPane.style.pointerEvents = ptepSubMode === 'tabletotable' ? 'auto' : 'none';
+        ttPane.style.opacity = ptepSubMode === 'tabletotable' ? '1' : '0';
+      }
+      if (paramPane) {
+        paramPane.style.pointerEvents = ptepSubMode === 'parameter' ? 'auto' : 'none';
+        paramPane.style.opacity = ptepSubMode === 'parameter' ? '1' : '0';
+      }
+    } catch (_e) {
+      void _e;
+    }
+  }, [isPTEP, ptepSubMode]);
+
+  // ======== DATP (DC&AC Trench Progress) Effects ========
+  // Load DATP trench parts from localStorage
+  useEffect(() => {
+    if (!isDATP) return;
+    try {
+      const raw = localStorage.getItem(datpStorageKey);
+      const parts = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parts)) {
+        setDatpSelectedTrenchParts(parts);
+      } else {
+        setDatpSelectedTrenchParts([]);
+      }
+    } catch (_e) {
+      void _e;
+      setDatpSelectedTrenchParts([]);
+    }
+  }, [isDATP, datpStorageKey]);
+
+  // Save DATP trench parts to localStorage
+  useEffect(() => {
+    if (!isDATP) return;
+    try {
+      localStorage.setItem(datpStorageKey, JSON.stringify(datpSelectedTrenchParts || []));
+    } catch (_e) {
+      void _e;
+    }
+  }, [isDATP, datpStorageKey, datpSelectedTrenchParts]);
+
+  // DATP: Render selected trench PARTS as green overlay
+  useEffect(() => {
+    if (!isDATP) return;
+    const map = mapRef.current;
+    if (!map) return;
+    try {
+      if (!datpTrenchSelectedLayerRef.current) {
+        datpTrenchSelectedLayerRef.current = L.layerGroup().addTo(map);
+      }
+      const lg = datpTrenchSelectedLayerRef.current;
+      lg.clearLayers();
+      const parts = datpSelectedTrenchPartsRef.current || [];
+      parts.forEach((p) => {
+        const coords = p?.coords;
+        if (!Array.isArray(coords) || coords.length < 2) return;
+        const line = L.polyline(coords, {
+          color: datpCompletedLineColor,
+          weight: 2.5,
+          opacity: 1,
+          interactive: false,
+          pane: 'datpTrenchSelectedPane',
+        });
+        lg.addLayer(line);
+      });
+    } catch (_e) {
+      void _e;
+    }
+  }, [isDATP, datpSelectedTrenchParts, datpCompletedLineColor]);
+
+  // Compute completed DATP trench meters
+  const datpCompletedTrenchMeters = useMemo(() => {
+    const parts = datpSelectedTrenchParts || [];
+    let sum = 0;
+    for (const p of parts) {
+      const m = Number(p?.meters);
+      if (Number.isFinite(m) && m > 0) sum += m;
+    }
+    return sum;
+  }, [datpSelectedTrenchParts]);
+
+  // Compute completed parameter meters
+  const ptepCompletedParameterMeters = useMemo(() => {
+    const parts = ptepSelectedParameterParts || [];
+    let sum = 0;
+    for (const p of parts) {
+      const m = Number(p?.meters);
+      if (Number.isFinite(m) && m > 0) sum += m;
+    }
+    return sum;
+  }, [ptepSelectedParameterParts]);
 
   // MC4: panel-end progress tracking (two ends per panel: left/right)
   const MC4_PANEL_STATES = {
@@ -1013,43 +2211,144 @@ export default function BaseModule({
     setMvtTermHistoryTick((t) => t + 1);
   }, [setMvtTerminationByStation]);
 
+  // PTEP: Undo/Redo functions for table-to-table
+  const ptepTTCanUndo = isPTEP && ptepSubMode === 'tabletotable' && ptepTTHistoryRef.current.past.length > 0;
+  const ptepTTCanRedo = isPTEP && ptepSubMode === 'tabletotable' && ptepTTHistoryRef.current.future.length > 0;
+  const ptepTTUndo = useCallback(() => {
+    const h = ptepTTHistoryRef.current;
+    if (!h.past.length) return;
+    const current = Array.from(ptepCompletedTableToTableRef.current || new Set()).sort();
+    const previous = h.past[h.past.length - 1] || [];
+    h.past = h.past.slice(0, -1);
+    h.future = [current, ...h.future].slice(0, HISTORY_LIMIT);
+    ptepTTHistorySuspendRef.current = true;
+    ptepTTPrevSnapshotRef.current = previous;
+    setPtepCompletedTableToTable(new Set(previous));
+    setPtepTTHistoryTick((t) => t + 1);
+    setTimeout(() => { ptepTTHistorySuspendRef.current = false; }, 0);
+  }, [setPtepCompletedTableToTable]);
+
+  const ptepTTRedo = useCallback(() => {
+    const h = ptepTTHistoryRef.current;
+    if (!h.future.length) return;
+    const current = Array.from(ptepCompletedTableToTableRef.current || new Set()).sort();
+    const next = h.future[0] || [];
+    h.future = h.future.slice(1);
+    h.past = [...h.past, current].slice(-HISTORY_LIMIT);
+    ptepTTHistorySuspendRef.current = true;
+    ptepTTPrevSnapshotRef.current = next;
+    setPtepCompletedTableToTable(new Set(next));
+    setPtepTTHistoryTick((t) => t + 1);
+    setTimeout(() => { ptepTTHistorySuspendRef.current = false; }, 0);
+  }, [setPtepCompletedTableToTable]);
+
+  // PTEP: Undo/Redo functions for parameter
+  const ptepParamCanUndo = isPTEP && ptepSubMode === 'parameter' && ptepParamHistoryRef.current.past.length > 0;
+  const ptepParamCanRedo = isPTEP && ptepSubMode === 'parameter' && ptepParamHistoryRef.current.future.length > 0;
+  const ptepParamUndo = useCallback(() => {
+    const h = ptepParamHistoryRef.current;
+    if (!h.past.length) return;
+    const current = ptepSelectedParameterPartsRef.current || [];
+    const previous = h.past[h.past.length - 1] || [];
+    h.past = h.past.slice(0, -1);
+    h.future = [current, ...h.future].slice(0, HISTORY_LIMIT);
+    ptepParamHistorySuspendRef.current = true;
+    ptepParamPrevSnapshotRef.current = previous;
+    setPtepSelectedParameterParts(previous);
+    setPtepParamHistoryTick((t) => t + 1);
+    setTimeout(() => { ptepParamHistorySuspendRef.current = false; }, 0);
+  }, [setPtepSelectedParameterParts]);
+
+  const ptepParamRedo = useCallback(() => {
+    const h = ptepParamHistoryRef.current;
+    if (!h.future.length) return;
+    const current = ptepSelectedParameterPartsRef.current || [];
+    const next = h.future[0] || [];
+    h.future = h.future.slice(1);
+    h.past = [...h.past, current].slice(-HISTORY_LIMIT);
+    ptepParamHistorySuspendRef.current = true;
+    ptepParamPrevSnapshotRef.current = next;
+    setPtepSelectedParameterParts(next);
+    setPtepParamHistoryTick((t) => t + 1);
+    setTimeout(() => { ptepParamHistorySuspendRef.current = false; }, 0);
+  }, [setPtepSelectedParameterParts]);
+
+  // DATP: Undo/Redo functions for trench parts
+  const datpCanUndo = isDATP && datpHistoryRef.current.past.length > 0;
+  const datpCanRedo = isDATP && datpHistoryRef.current.future.length > 0;
+  const datpUndo = useCallback(() => {
+    const h = datpHistoryRef.current;
+    if (!h.past.length) return;
+    const current = datpSelectedTrenchPartsRef.current || [];
+    const previous = h.past[h.past.length - 1] || [];
+    h.past = h.past.slice(0, -1);
+    h.future = [current, ...h.future].slice(0, HISTORY_LIMIT);
+    datpHistorySuspendRef.current = true;
+    datpPrevSnapshotRef.current = previous;
+    setDatpSelectedTrenchParts(previous);
+    setDatpHistoryTick((t) => t + 1);
+    setTimeout(() => { datpHistorySuspendRef.current = false; }, 0);
+  }, [setDatpSelectedTrenchParts]);
+
+  const datpRedo = useCallback(() => {
+    const h = datpHistoryRef.current;
+    if (!h.future.length) return;
+    const current = datpSelectedTrenchPartsRef.current || [];
+    const next = h.future[0] || [];
+    h.future = h.future.slice(1);
+    h.past = [...h.past, current].slice(-HISTORY_LIMIT);
+    datpHistorySuspendRef.current = true;
+    datpPrevSnapshotRef.current = next;
+    setDatpSelectedTrenchParts(next);
+    setDatpHistoryTick((t) => t + 1);
+    setTimeout(() => { datpHistorySuspendRef.current = false; }, 0);
+  }, [setDatpSelectedTrenchParts]);
+
   const globalCanUndo = noteMode
     ? canUndoNotes
     : (isMC4 ? mc4CanUndo
       : isLVTT ? lvttCanUndo
         : isMVT ? mvtCanUndo
-          : isLV ? lvInvCanUndo
-            : isMVF ? mvfPartsCanUndo
-              : selectionCanUndo);
+          : isDATP ? datpCanUndo
+            : isPTEP ? (ptepSubMode === 'tabletotable' ? ptepTTCanUndo : ptepParamCanUndo)
+              : isLV ? lvInvCanUndo
+                : isMVF ? mvfPartsCanUndo
+                  : selectionCanUndo);
 
   const globalCanRedo = noteMode
     ? canRedoNotes
     : (isMC4 ? mc4CanRedo
       : isLVTT ? lvttCanRedo
         : isMVT ? mvtCanRedo
-          : isLV ? lvInvCanRedo
-            : isMVF ? mvfPartsCanRedo
-              : selectionCanRedo);
+          : isDATP ? datpCanRedo
+            : isPTEP ? (ptepSubMode === 'tabletotable' ? ptepTTCanRedo : ptepParamCanRedo)
+              : isLV ? lvInvCanRedo
+                : isMVF ? mvfPartsCanRedo
+                  : selectionCanRedo);
 
   const globalUndo = useCallback(() => {
     if (noteMode) return void undoNotes();
     if (isMC4) return void mc4Undo();
     if (isLVTT) return void lvttUndo();
     if (isMVT) return void mvtUndo();
+    if (isDATP) return void datpUndo();
+    if (isPTEP) return void (ptepSubModeRef.current === 'tabletotable' ? ptepTTUndo() : ptepParamUndo());
     if (isLV) return void lvInvUndo();
     if (isMVF) return void mvfPartsUndo();
     return void selectionUndo();
-  }, [noteMode, undoNotes, isMC4, mc4Undo, isLVTT, lvttUndo, isMVT, mvtUndo, isLV, lvInvUndo, isMVF, mvfPartsUndo, selectionUndo]);
+  }, [noteMode, undoNotes, isMC4, mc4Undo, isLVTT, lvttUndo, isMVT, mvtUndo, isDATP, datpUndo, isPTEP, ptepTTUndo, ptepParamUndo, isLV, lvInvUndo, isMVF, mvfPartsUndo, selectionUndo]);
 
   const globalRedo = useCallback(() => {
     if (noteMode) return void redoNotes();
     if (isMC4) return void mc4Redo();
     if (isLVTT) return void lvttRedo();
     if (isMVT) return void mvtRedo();
+    if (isDATP) return void datpRedo();
+    if (isPTEP) return void (ptepSubModeRef.current === 'tabletotable' ? ptepTTRedo() : ptepParamRedo());
     if (isLV) return void lvInvRedo();
     if (isMVF) return void mvfPartsRedo();
     return void selectionRedo();
-  }, [noteMode, redoNotes, isMC4, mc4Redo, isLVTT, lvttRedo, isMVT, mvtRedo, isLV, lvInvRedo, isMVF, mvfPartsRedo, selectionRedo]);
+  }, [noteMode, redoNotes, isMC4, mc4Redo, isLVTT, lvttRedo, isMVT, mvtRedo, isDATP, datpRedo, isPTEP, ptepTTRedo, ptepParamRedo, isLV, lvInvRedo, isMVF, mvfPartsRedo, selectionRedo]);
 
   useEffect(() => {
     if (!isMC4) return;
@@ -1501,6 +2800,26 @@ export default function BaseModule({
             .toFixed(6)},${bounds.getWest().toFixed(6)},${bounds.getNorth().toFixed(6)},${bounds.getEast().toFixed(6)}`
         : `${zoom}|${bounds.getSouth().toFixed(5)},${bounds.getWest().toFixed(5)},${bounds.getNorth().toFixed(5)},${bounds.getEast().toFixed(5)}`;
       if (key === lastStringLabelKeyRef.current) return;
+      
+      // Clear canvas before redrawing to prevent ghost text artifacts on zoom/pan
+      try {
+        const renderer = stringTextRendererRef.current;
+        if (renderer) {
+          // Try Leaflet's _clear method first
+          if (typeof renderer._clear === 'function') {
+            renderer._clear();
+          }
+          // Also manually clear the canvas context if available
+          const ctx = renderer._ctx;
+          const container = renderer._container;
+          if (ctx && container) {
+            ctx.clearRect(0, 0, container.width, container.height);
+          }
+        }
+      } catch (_e) {
+        void _e;
+      }
+      
       lastStringLabelKeyRef.current = key;
 
       // Query candidates using the spatial grid if available; otherwise fall back to scanning.
@@ -1623,6 +2942,12 @@ export default function BaseModule({
       const runTotal = cursorCandidates ? cursorCandidates.length : total;
       // MVT: slightly larger labels for SS / counter / TESTED only
       const mvtBaseSizeLocal = isMVT ? (Number(stringTextBaseSizeCfg) * 1.25) : Number(stringTextBaseSizeCfg);
+
+      // DCCT: Get test data and filter state for coloring
+      const dcctTestResults = isDCCT ? (dcctTestDataRef.current || {}) : null;
+      const dcctActiveFilter = isDCCT ? dcctFilterRef.current : null;
+      const dcctMapIdsSet = isDCCT ? (dcctMapIdsRef.current || new Set()) : null;
+
       for (let k = 0; k < runTotal; k++) {
         if (count >= maxCount) break;
         const idx = cursorCandidates ? cursorCandidates[k] : (iterateIndices ? iterateIndices[k] : k);
@@ -1633,6 +2958,8 @@ export default function BaseModule({
         // MVT: SS label color depends on manual counter; the counter itself is a separate clickable label.
         let nextText = pt.text;
         let nextTextColor = stringTextColorCfg;
+        let nextOpacity = 1.0;
+
         if (isMVT && mvtCountsByStation) {
           const raw = String(pt.text || '').trim();
           const norm = normalizeId(raw);
@@ -1641,6 +2968,28 @@ export default function BaseModule({
             // MVT rule: 3/3 => GREEN, otherwise WHITE (not red)
             nextTextColor = terminated === 3 ? 'rgba(34,197,94,0.98)' : 'rgba(255,255,255,0.98)';
           }
+        }
+
+        // DCCT: Color labels based on test results (passed=green, failed=red, not_tested=gray)
+        if (isDCCT && dcctTestResults) {
+          const norm = pt.stringId || normalizeId(pt.text);
+          const testResult = dcctTestResults[norm];
+
+          // Determine status: passed, failed, or not_tested
+          // NOTE: If there's no CSV row for this ID, testResult is undefined => not_tested.
+          const status = testResult === 'passed' ? 'passed' : testResult === 'failed' ? 'failed' : 'not_tested';
+          
+          // Color based on status
+          if (status === 'passed') {
+            nextTextColor = 'rgba(5,150,105,0.96)'; // Softer green
+          } else if (status === 'failed') {
+            nextTextColor = 'rgba(239,68,68,0.98)'; // Red
+          } else {
+            nextTextColor = 'rgba(148,163,184,0.98)'; // Gray (not tested)
+          }
+          
+          // Apply filter: dim labels that don't match the active filter
+          // NOTE: In DCCT we keep other labels stable; counter click only highlights the counter itself.
         }
 
         // Create once, then reuse
@@ -2095,6 +3444,14 @@ export default function BaseModule({
     lastStringLabelKeyRef.current = '';
     scheduleStringTextLabelUpdate();
   }, [isMVT, mvtCsvVersion, scheduleStringTextLabelUpdate]);
+
+  // DCCT: refresh labels when filter or test data changes
+  useEffect(() => {
+    if (!isDCCT) return;
+    if (!mapRef.current || !stringTextLayerRef.current) return;
+    lastStringLabelKeyRef.current = '';
+    scheduleStringTextLabelUpdate();
+  }, [isDCCT, dcctFilter, dcctTestData, dcctMapIds, scheduleStringTextLabelUpdate]);
 
   // MVT: close popups when leaving the mode.
   useEffect(() => {
@@ -2858,8 +4215,15 @@ export default function BaseModule({
       }
       
       marker.on('click', (e) => {
-        e.originalEvent?.stopPropagation();
-        L.DomEvent.stopPropagation(e);
+        try {
+          const oe = e?.originalEvent;
+          if (oe) {
+            L.DomEvent.stopPropagation(oe);
+            L.DomEvent.preventDefault(oe);
+          }
+        } catch (_e) {
+          void _e;
+        }
         markerClickedRef.current = true;
         
         // Open popup immediately when marker is clicked
@@ -2877,14 +4241,354 @@ export default function BaseModule({
       });
       
       marker.on('mousedown', (e) => {
-        e.originalEvent?.stopPropagation();
-        L.DomEvent.stopPropagation(e);
+        try {
+          const oe = e?.originalEvent;
+          if (oe) {
+            L.DomEvent.stopPropagation(oe);
+            L.DomEvent.preventDefault(oe);
+          }
+        } catch (_e) {
+          void _e;
+        }
       });
       
       marker.addTo(mapRef.current);
       noteMarkersRef.current[note.id] = marker;
     });
   }, [notes, selectedNotes, noteMode]);
+
+  // ─────────────────────────────────────────────────────────────────
+  // PUNCH LIST: Render punch markers on map (contractor-colored)
+  // Including isometric punches placed randomly inside their table polygon
+  // ─────────────────────────────────────────────────────────────────
+  // Store stable random positions for isometric punches
+  const plIsoPunchPositionsRef = useRef({}); // punchId -> {lat, lng}
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+    if (!isPL) {
+      // Not PUNCH_LIST mode: clear any punch markers
+      Object.values(plPunchMarkersRef.current).forEach(m => m.remove());
+      plPunchMarkersRef.current = {};
+      return;
+    }
+
+    const escapeHtml = (s) =>
+      String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+
+    // Helper: Generate random point inside polygon bounds with margin
+    const getRandomPointInPolygonBounds = (layer, seed) => {
+      try {
+        const bounds = layer.getBounds();
+        if (!bounds) return null;
+        const sw = bounds.getSouthWest();
+        const ne = bounds.getNorthEast();
+        // Add margin (10% inward from edges)
+        const latRange = ne.lat - sw.lat;
+        const lngRange = ne.lng - sw.lng;
+        const margin = 0.15;
+        const minLat = sw.lat + latRange * margin;
+        const maxLat = ne.lat - latRange * margin;
+        const minLng = sw.lng + lngRange * margin;
+        const maxLng = ne.lng - lngRange * margin;
+        // Use seed for pseudo-random but stable position
+        const seededRandom = (s) => {
+          const x = Math.sin(s) * 10000;
+          return x - Math.floor(x);
+        };
+        const lat = minLat + seededRandom(seed) * (maxLat - minLat);
+        const lng = minLng + seededRandom(seed * 2 + 1) * (maxLng - minLng);
+        return { lat, lng };
+      } catch (_e) {
+        return null;
+      }
+    };
+
+    // Build tableId -> layer lookup
+    const tableIdToLayer = {};
+    Object.entries(polygonById.current).forEach(([uniqueId, info]) => {
+      if (info?.layer?.feature?.properties?.tableId) {
+        const tableId = info.layer.feature.properties.tableId;
+        tableIdToLayer[tableId] = info.layer;
+      }
+    });
+
+    // Clear existing punch markers
+    Object.values(plPunchMarkersRef.current).forEach(m => m.remove());
+    plPunchMarkersRef.current = {};
+
+    // Create markers for all punch points
+    plPunches.forEach((punch, punchIndex) => {
+      const contractor = plGetContractor(punch.contractorId);
+      // Use green for completed punches, otherwise contractor color
+      const color = punch.completed ? PUNCH_COMPLETED_COLOR : (contractor?.color || '#888888');
+
+      // Determine lat/lng: if isometric punch (lat=0, lng=0, has tableId), use random point in table polygon
+      let markerLat = punch.lat;
+      let markerLng = punch.lng;
+
+      const isIsoPunch = punch.tableId && punch.isoX != null && punch.isoY != null && punch.lat === 0 && punch.lng === 0;
+      if (isIsoPunch) {
+        // Check if we already have a stable position for this punch
+        if (plIsoPunchPositionsRef.current[punch.id]) {
+          const pos = plIsoPunchPositionsRef.current[punch.id];
+          markerLat = pos.lat;
+          markerLng = pos.lng;
+        } else {
+          // Generate new random position inside table polygon
+          const tableLayer = tableIdToLayer[punch.tableId];
+          if (tableLayer) {
+            // Use punch id hash as seed for stable random position
+            let seed = 0;
+            for (let i = 0; i < punch.id.length; i++) {
+              seed = ((seed << 5) - seed) + punch.id.charCodeAt(i);
+              seed = seed & seed;
+            }
+            const randomPos = getRandomPointInPolygonBounds(tableLayer, seed);
+            if (randomPos) {
+              markerLat = randomPos.lat;
+              markerLng = randomPos.lng;
+              plIsoPunchPositionsRef.current[punch.id] = randomPos;
+            } else {
+              // Fallback: use table center
+              try {
+                const center = tableLayer.getBounds().getCenter();
+                markerLat = center.lat;
+                markerLng = center.lng;
+                plIsoPunchPositionsRef.current[punch.id] = { lat: markerLat, lng: markerLng };
+              } catch (_e) {
+                return; // Skip this punch if we can't place it
+              }
+            }
+          } else {
+            return; // Skip: no table layer found
+          }
+        }
+      }
+
+      // Skip if no valid position
+      if (!markerLat || !markerLng) return;
+
+      const isSelected = plSelectedPunches.has(punch.id);
+      const isEditing = plEditingPunch?.id === punch.id;
+      // Use permanent punch number (never changes even when other punches deleted)
+      const punchNumber = punch.punchNumber || (punchIndex + 1);
+      const dotIcon = L.divIcon({
+        className: 'custom-punch-pin',
+        html: `
+          <div class="punch-dot-hit ${isSelected ? 'selected' : ''} ${isEditing ? 'editing' : ''}" style="--punch-color: ${color};">
+            <div class="punch-dot-core" style="background:${color};${isSelected ? 'box-shadow: 0 0 0 4px rgba(255,255,255,0.6), 0 0 12px rgba(255,255,255,0.4);' : ''}"></div>
+            <span class="punch-number">${punchNumber}</span>
+          </div>
+        `,
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+        popupAnchor: [0, -9]
+      });
+
+      const marker = L.marker([markerLat, markerLng], {
+        icon: dotIcon,
+        interactive: true,
+        riseOnHover: true,
+        draggable: false // We handle drag manually for better control
+      });
+
+      // Tooltip
+      const hasText = Boolean(punch.text?.trim());
+      const hasPhoto = Boolean(punch.photoDataUrl);
+      if (hasText || hasPhoto || contractor || punch.tableId) {
+        let tooltipContent = '';
+        // Show tableId for isometric punches
+        if (punch.tableId) {
+          tooltipContent += `<span style="color:#fbbf24;font-size:10px">[${escapeHtml(punch.tableId)}]</span> `;
+        }
+        if (contractor) {
+          tooltipContent += `<strong style="color:${color}">[${escapeHtml(contractor.name)}]</strong>`;
+        }
+        if (hasText) {
+          const compact = punch.text.replace(/\s+/g, ' ').trim();
+          const snippet = compact.length > 60 ? `${compact.slice(0, 60)}…` : compact;
+          tooltipContent += (tooltipContent ? ' ' : '') + escapeHtml(snippet);
+        }
+        if (!tooltipContent && hasPhoto) {
+          tooltipContent = 'Fotoğraf var';
+        }
+        if (tooltipContent) {
+          marker.bindTooltip(tooltipContent, {
+            direction: 'top',
+            opacity: 0.98,
+            className: 'punch-tooltip',
+            offset: [0, -9],
+            sticky: false
+          });
+          marker.on('mouseover', () => {
+            if (!plDraggingPunchRef.current) marker.openTooltip();
+          });
+          marker.on('mouseout', () => marker.closeTooltip());
+        }
+      }
+
+      // Variables for drag detection
+      let mouseDownTime = 0;
+      let mouseDownPos = null;
+      let isDragging = false;
+      const DRAG_THRESHOLD = 150; // ms to start drag
+      const MOVE_THRESHOLD = 5; // pixels to detect movement
+
+      // Mousedown: start potential drag
+      marker.on('mousedown', (e) => {
+        try {
+          const oe = e?.originalEvent;
+          if (oe) {
+            L.DomEvent.stopPropagation(oe);
+            L.DomEvent.preventDefault(oe);
+          }
+          // Only left click for drag
+          if (oe?.button !== 0) return;
+          
+          mouseDownTime = Date.now();
+          mouseDownPos = { x: oe.clientX, y: oe.clientY };
+          isDragging = false;
+          
+          // Start drag after threshold
+          const dragStartTimer = setTimeout(() => {
+            if (mouseDownPos) {
+              isDragging = true;
+              plDraggingPunchRef.current = {
+                punchId: punch.id,
+                marker: marker,
+                startLatLng: marker.getLatLng()
+              };
+              marker.closeTooltip?.();
+              // Visual feedback
+              marker.getElement()?.classList.add('dragging');
+            }
+          }, DRAG_THRESHOLD);
+          
+          // Store timer ref for cleanup
+          marker._dragStartTimer = dragStartTimer;
+        } catch (_e) {
+          void _e;
+        }
+      });
+
+      // Click: select or open edit (if not dragging)
+      marker.on('click', (e) => {
+        try {
+          const oe = e?.originalEvent;
+          if (oe) {
+            L.DomEvent.stopPropagation(oe);
+            L.DomEvent.preventDefault(oe);
+          }
+        } catch (_e) {
+          void _e;
+        }
+        
+        // Clear drag timer
+        if (marker._dragStartTimer) {
+          clearTimeout(marker._dragStartTimer);
+          marker._dragStartTimer = null;
+        }
+        
+        // If we were dragging, don't process click
+        if (isDragging || plDraggingPunchRef.current) {
+          isDragging = false;
+          return;
+        }
+        
+        markerClickedRef.current = true;
+        marker.closeTooltip?.();
+        
+        // Shift+click: toggle selection
+        const shiftKey = e?.originalEvent?.shiftKey;
+        if (shiftKey) {
+          setPlSelectedPunches(prev => {
+            const next = new Set(prev);
+            if (next.has(punch.id)) {
+              next.delete(punch.id);
+            } else {
+              next.add(punch.id);
+            }
+            return next;
+          });
+        } else {
+          // Normal click: if table punch, open isometric; else open edit popup
+          if (punch.tableId) {
+            setPlIsometricTableId(punch.tableId);
+            setPlIsometricOpen(true);
+          } else {
+            // No table - open edit popup directly
+            // Get screen position from click event for dynamic popup positioning
+            const clickX = e?.originalEvent?.clientX || window.innerWidth / 2;
+            const clickY = e?.originalEvent?.clientY || window.innerHeight / 2;
+            setPlPopupPosition({ x: clickX, y: clickY });
+            setPlEditingPunch(punch);
+            setPlPunchText(punch.text || '');
+            setPlPunchContractorId(punch.contractorId);
+            setPlPunchPhotoDataUrl(punch.photoDataUrl || null);
+            setPlPunchPhotoName(punch.photoName || '');
+          }
+        }
+        
+        setTimeout(() => {
+          markerClickedRef.current = false;
+        }, 200);
+      });
+
+      marker.addTo(mapRef.current);
+      plPunchMarkersRef.current[punch.id] = marker;
+    });
+  }, [isPL, plPunches, plContractors, plGetContractor, plSelectedPunches, plEditingPunch]);
+  
+  // Handle punch drag - global mousemove and mouseup
+  useEffect(() => {
+    if (!isPL) return;
+    
+    const handleMouseMove = (e) => {
+      if (!plDraggingPunchRef.current) return;
+      const { marker } = plDraggingPunchRef.current;
+      if (!marker || !mapRef.current) return;
+      
+      try {
+        const newLatLng = mapRef.current.mouseEventToLatLng(e);
+        marker.setLatLng(newLatLng);
+      } catch (_e) {
+        void _e;
+      }
+    };
+    
+    const handleMouseUp = (e) => {
+      if (!plDraggingPunchRef.current) return;
+      const { punchId, marker, startLatLng } = plDraggingPunchRef.current;
+      
+      try {
+        marker.getElement()?.classList.remove('dragging');
+        const newLatLng = marker.getLatLng();
+        
+        // Only update if actually moved
+        if (newLatLng.lat !== startLatLng.lat || newLatLng.lng !== startLatLng.lng) {
+          plMovePunch(punchId, newLatLng);
+        }
+      } catch (_e) {
+        void _e;
+      }
+      
+      plDraggingPunchRef.current = null;
+    };
+    
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isPL, plMovePunch]);
   
   // Handle Delete key for selected notes, Escape to close popup, and Ctrl+Z / Ctrl+Y for undo/redo (notes)
   useEffect(() => {
@@ -2920,17 +4624,29 @@ export default function BaseModule({
         setNoteDate('');
         setNotePhotoDataUrl(null);
         setNotePhotoName('');
+        // Also clear punch selection
+        if (isPL) {
+          setPlSelectedPunches(new Set());
+        }
       }
-      if (e.key === 'Delete' && noteMode && selectedNotes.size > 0) {
+      
+      // Delete selected notes
+      if (e.key === 'Delete' && noteMode && selectedNotes.size > 0 && !isPL) {
         const toDelete = new Set(selectedNotes);
         setNotes(prev => prev.filter(n => !toDelete.has(n.id)));
         setSelectedNotes(new Set());
+      }
+      
+      // Delete selected punches (PUNCH_LIST mode)
+      if (e.key === 'Delete' && isPL && noteMode && plSelectedPunches.size > 0) {
+        e.preventDefault();
+        plDeleteSelectedPunches();
       }
     };
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [noteMode, selectedNotes, globalUndo, globalRedo, setNotes]);
+  }, [noteMode, selectedNotes, globalUndo, globalRedo, setNotes, isPL, plSelectedPunches, plDeleteSelectedPunches]);
   
   // Create new note at click position (no popup on create)
   const createNote = (latlng) => {
@@ -3159,6 +4875,89 @@ export default function BaseModule({
           });
           setMvfSegments(list);
           mvfSegmentLenByKeyRef.current = lenByKey;
+        } else if (csvFormat === 'dcct_riso') {
+          // DCCT: DC Cable Testing Progress CSV format
+          // Columns: ID, Insulation Resistance (-), Insulation Resistance (+), remark
+          // remark can be PASSED or FAILED
+          const lines = text.split(/\r?\n/).filter((l) => l && l.trim());
+          if (lines.length <= 1) {
+            setDcctTestData({});
+            setDcctCsvTotals({ total: 0, passed: 0, failed: 0 });
+            dcctRisoByIdRef.current = {};
+            return;
+          }
+
+          const header = (lines[0] || '').split(',').map((h) => h.trim().toLowerCase());
+          const idIdx = header.findIndex((h) => h === 'id');
+          const remarkIdx = header.findIndex((h) => h === 'remark');
+          const minusIdx = header.findIndex((h) => h.includes('insulation') && h.includes('(-'));
+          const plusIdx = header.findIndex((h) => h.includes('insulation') && h.includes('(+)'));
+
+          const testResults = {}; // normalizedId -> 'passed' | 'failed'
+          const risoById = {}; // normalizedId -> { plus, minus, status, remarkRaw, originalId }
+          let passedCount = 0;
+          let failedCount = 0;
+          const uniqueIds = new Set();
+
+          for (let i = 1; i < lines.length; i++) {
+            const line = lines[i];
+            if (!line || !line.trim()) continue;
+            const parts = line.split(',');
+            const rawId = idIdx >= 0 ? parts[idIdx] : parts[0];
+            const rawRemark = remarkIdx >= 0 ? parts[remarkIdx] : parts[parts.length - 1];
+            const rawMinus = minusIdx >= 0 ? parts[minusIdx] : (parts.length >= 2 ? parts[1] : '');
+            const rawPlus = plusIdx >= 0 ? parts[plusIdx] : (parts.length >= 3 ? parts[2] : '');
+
+            const id = normalizeId(rawId);
+            const originalId = String(rawId || '').trim(); // Preserve original format
+            const remarkRaw = String(rawRemark || '').trim();
+            const remark = remarkRaw.toLowerCase();
+
+            if (!id) continue;
+
+            // Only count unique IDs for totals
+            if (!uniqueIds.has(id)) {
+              uniqueIds.add(id);
+              // Determine test result (use first occurrence if duplicate rows exist)
+              let status = null;
+              if (remark === 'passed' || remark === 'pass') {
+                status = 'passed';
+                testResults[id] = 'passed';
+                passedCount++;
+              } else if (remark === 'failed' || remark === 'fail') {
+                status = 'failed';
+                testResults[id] = 'failed';
+                failedCount++;
+              }
+
+              risoById[id] = {
+                plus: String(rawPlus ?? '').trim(),
+                minus: String(rawMinus ?? '').trim(),
+                status,
+                remarkRaw,
+                originalId,
+              };
+            }
+          }
+
+          setDcctTestData(testResults);
+          dcctRisoByIdRef.current = risoById;
+          setDcctCsvTotals({
+            total: uniqueIds.size,
+            passed: passedCount,
+            failed: failedCount,
+          });
+
+          // DCCT doesn't use lengthData
+          setLengthData({});
+          setTotalPlus(0);
+          setTotalMinus(0);
+          setMvfSegments([]);
+          mvfSegmentLenByKeyRef.current = {};
+          setSelectedPolygons(new Set());
+          setCompletedPlus(0);
+          setCompletedMinus(0);
+          return;
         } else {
           // Unknown format; keep empty
         }
@@ -3185,6 +4984,22 @@ export default function BaseModule({
 
   // Calculate counters when selection changes
   useEffect(() => {
+    // Weighted counters (module-specific): sum per-polygon workUnits instead of CSV meters.
+    // Used by MODULE_INSTALLATION_PROGRES_TRACKING.
+    if (activeMode?.workUnitWeights) {
+      let units = 0;
+      const seen = new Set();
+      selectedPolygons.forEach((polygonId) => {
+        const polygonInfo = polygonById.current?.[polygonId];
+        const key = String(polygonInfo?.dedupeKey || polygonId);
+        if (seen.has(key)) return;
+        seen.add(key);
+        units += Number(polygonInfo?.workUnits) || 0;
+      });
+      setCompletedPlus(units);
+      setCompletedMinus(0);
+      return;
+    }
     if (isLV) {
       // LV uses inv_id click tracking, not polygon selection.
       setCompletedPlus(0);
@@ -3225,6 +5040,8 @@ export default function BaseModule({
 
   // Update ONLY changed polygon colors (performance optimization)
   useEffect(() => {
+    // DCCT: polygon colors are controlled by pass/fail status, not selection.
+    if (isDCCT) return;
     const prevSelected = prevSelectedRef.current;
     const currentSelected = selectedPolygons;
     
@@ -3246,6 +5063,7 @@ export default function BaseModule({
       const polygonInfo = polygonById.current[polygonId];
       if (polygonInfo && polygonInfo.layer && polygonInfo.layer.setStyle) {
         const isSelected = currentSelected.has(polygonId);
+        const keepFillForHover = !!isPL;
         // IMPORTANT: when unselecting, restore the exact base style used by the layer
         // so it doesn't appear "whiter" after toggling.
         polygonInfo.layer.setStyle(
@@ -3253,22 +5071,104 @@ export default function BaseModule({
             ? {
                 color: '#22c55e',
                 weight: 2,
-                fill: false,
+                fill: keepFillForHover,
                 fillOpacity: 0
               }
             : {
                 color: 'rgba(255,255,255,0.35)',
                 weight: 1.05,
-                fill: false,
+                fill: keepFillForHover,
                 fillOpacity: 0
               }
         );
+
+        // PUNCH_LIST: never allow selection updates to disable hover interactivity.
+        if (isPL) {
+          try {
+            polygonInfo.layer.options.interactive = true;
+          } catch (_e) {
+            void _e;
+          }
+        }
       }
     });
     
     // Save current selection for next comparison
     prevSelectedRef.current = new Set(currentSelected);
-  }, [selectedPolygons]);
+  }, [isDCCT, isPL, selectedPolygons]);
+
+  // DCCT: color full-table polygon outlines based on CSV test result (same tone as ID labels).
+  useEffect(() => {
+    if (!isDCCT) return;
+
+    const results = dcctTestDataRef.current || {};
+    const panels = polygonById.current || {};
+
+    // DCCT stroke tuning: keep outlines readable but not overly thick.
+    const DCCT_STROKE = {
+      baseWeight: 0.75,
+      statusWeight: 1.25,
+      highlightWeight: 1.85,
+      dimWeight: 0.5,
+    };
+
+    const defaultStyle = {
+      color: 'rgba(255,255,255,0.35)',
+      weight: DCCT_STROKE.baseWeight,
+      fill: false,
+      fillOpacity: 0,
+    };
+
+    const activeFilter = dcctFilterRef.current;
+
+    try {
+      Object.keys(panels).forEach((pid) => {
+        const info = panels[pid];
+        const layer = info?.layer;
+        if (!layer || typeof layer.setStyle !== 'function') return;
+        const sid = normalizeId(info?.stringId);
+        const r = sid ? results[sid] : null;
+
+        // Determine status
+        const status = r === 'passed' ? 'passed' : r === 'failed' ? 'failed' : 'not_tested';
+
+        // Base colors
+        let color = defaultStyle.color;
+        let weight = defaultStyle.weight;
+        if (status === 'passed') {
+          color = 'rgba(5,150,105,0.96)';
+          weight = DCCT_STROKE.statusWeight;
+        } else if (status === 'failed') {
+          color = 'rgba(239,68,68,0.98)';
+          weight = DCCT_STROKE.statusWeight;
+        }
+
+        // Apply filter highlight/dim
+        let opacity = 1.0;
+        if (activeFilter) {
+          const matches = activeFilter === status;
+          if (matches) {
+            // Highlight matching tables
+            weight = DCCT_STROKE.highlightWeight;
+            opacity = 1.0;
+          } else {
+            // Dim non-matching tables
+            opacity = 0.12;
+            weight = DCCT_STROKE.dimWeight;
+          }
+        }
+
+        layer.setStyle({
+          ...defaultStyle,
+          color,
+          weight,
+          opacity,
+        });
+      });
+    } catch (_e) {
+      void _e;
+    }
+  }, [isDCCT, dcctTestData, dcctFilter, stringMatchVersion]);
 
   const fetchAllGeoJson = async () => {
     if (!mapRef.current) return;
@@ -3324,6 +5224,10 @@ export default function BaseModule({
     mvfPrevSelectedTrenchRef.current = new Set();
     setMvfSelectedTrenchIds(new Set());
     setMvfSelectedTrenchParts([]);
+    // DATP: clear trench refs on reload
+    datpTrenchByIdRef.current = {};
+    datpTrenchLenByIdRef.current = {};
+    setDatpTotalTrenchMeters(0);
     
     const allBounds = L.latLngBounds();
     let totalFeatures = 0;
@@ -3444,6 +5348,15 @@ export default function BaseModule({
               allBounds.extend([lat, lng]);
             }
           });
+
+          // DCCT: Collect all map IDs from string_text for Not Tested calculation
+          if (isDCCT) {
+            const mapIds = new Set();
+            stringTextPointsRef.current.forEach((pt) => {
+              if (pt.stringId) mapIds.add(pt.stringId);
+            });
+            setDcctMapIds(mapIds);
+          }
           
           stringLayer.addTo(mapRef.current);
           layersRef.current.push(stringLayer);
@@ -3478,6 +5391,623 @@ export default function BaseModule({
         
         // Special handling for full.geojson - tables will be selectable (MultiPolygon)
         if (file.name === 'full') {
+          // PUNCH_LIST: if full layer is backed by full_plot.geojson (LineString segments),
+          // build table polygons in-memory so selections work per-table (click + selection box).
+          if (isPL) {
+            const hasLines = (data?.features || []).some((f) => f?.geometry?.type === 'LineString');
+            if (hasLines) {
+              try {
+                const rawLines = (data?.features || []).filter(
+                  (f) => f?.geometry?.type === 'LineString' && Array.isArray(f?.geometry?.coordinates) && f.geometry.coordinates.length >= 2
+                );
+
+                const quantile = (arr, q) => {
+                  const a = (arr || []).filter((n) => typeof n === 'number' && Number.isFinite(n));
+                  if (a.length === 0) return 0;
+                  a.sort((x, y) => x - y);
+                  const i = (a.length - 1) * q;
+                  const lo = Math.floor(i);
+                  const hi = Math.ceil(i);
+                  if (lo === hi) return a[lo];
+                  const t = i - lo;
+                  return a[lo] * (1 - t) + a[hi] * t;
+                };
+
+                const plotCodeOfLayer = (layer) => {
+                  const match = String(layer || '').match(/plot([A-G])_(east|west)/i);
+                  if (!match) return 'XX';
+                  const letter = String(match[1] || '').toUpperCase();
+                  const dir = String(match[2] || '').toLowerCase() === 'east' ? 'E' : 'W';
+                  return `${letter}${dir}`;
+                };
+
+                const slopeFromLineSegments = (layerLines) => {
+                  // Axial mean angle (0..pi) using doubled-angle trick.
+                  let sumC = 0;
+                  let sumS = 0;
+                  for (const ln of layerLines || []) {
+                    const coords = ln?.geometry?.coordinates;
+                    if (!Array.isArray(coords) || coords.length < 2) continue;
+                    const a = coords[0];
+                    const b = coords[coords.length - 1];
+                    const dx = Number(b?.[0]) - Number(a?.[0]);
+                    const dy = Number(b?.[1]) - Number(a?.[1]);
+                    if (!Number.isFinite(dx) || !Number.isFinite(dy)) continue;
+                    const w = Math.hypot(dx, dy);
+                    if (!Number.isFinite(w) || w <= 0) continue;
+                    const ang = Math.atan2(dy, dx);
+                    const angAxial = ((ang % Math.PI) + Math.PI) % Math.PI;
+                    sumC += Math.cos(2 * angAxial) * w;
+                    sumS += Math.sin(2 * angAxial) * w;
+                  }
+                  const mean = 0.5 * Math.atan2(sumS, sumC);
+                  const slope = Math.tan(mean);
+                  return Number.isFinite(slope) ? slope : 0;
+                };
+
+                const coordKey = (c) => {
+                  const x = Number(c?.[0]);
+                  const y = Number(c?.[1]);
+                  if (!Number.isFinite(x) || !Number.isFinite(y)) return '';
+                  return `${x.toFixed(9)},${y.toFixed(9)}`;
+                };
+
+                const byLayer = new Map();
+                for (const line of rawLines) {
+                  const layer = String(line?.properties?.layer || '');
+                  if (!layer) continue;
+                  if (!byLayer.has(layer)) byLayer.set(layer, []);
+                  byLayer.get(layer).push(line);
+                }
+
+                const polygonFeatures = [];
+
+                // If some segments can't be polygonized, keep them as non-interactive lines
+                // (prevents "missing" tables in plots like plotC).
+                const residualLineFeatures = [];
+
+                for (const [layer, layerLines] of byLayer.entries()) {
+                  const endpointToIdx = new Map();
+                  const used = new Array(layerLines.length).fill(false);
+                  const blocked = new Array(layerLines.length).fill(false);
+
+                  const pushEndpoint = (k, idx) => {
+                    if (!k) return;
+                    const arr = endpointToIdx.get(k);
+                    if (arr) arr.push(idx);
+                    else endpointToIdx.set(k, [idx]);
+                  };
+
+                  for (let i = 0; i < layerLines.length; i++) {
+                    const coords = layerLines[i]?.geometry?.coordinates;
+                    const a = coords?.[0];
+                    const b = coords?.[coords.length - 1];
+                    pushEndpoint(coordKey(a), i);
+                    pushEndpoint(coordKey(b), i);
+                  }
+
+                  for (let i = 0; i < layerLines.length; i++) {
+                    if (used[i] || blocked[i]) continue;
+                    const coords0 = layerLines[i]?.geometry?.coordinates;
+                    const a0 = coords0?.[0];
+                    const b0 = coords0?.[coords0.length - 1];
+                    const startKey = coordKey(a0);
+                    let lastKey = coordKey(b0);
+                    if (!startKey || !lastKey) {
+                      used[i] = true;
+                      continue;
+                    }
+
+                    const ring = [
+                      [a0[0], a0[1]],
+                      [b0[0], b0[1]],
+                    ];
+                    const attemptIdx = [i];
+                    used[i] = true;
+
+                    let safety = layerLines.length + 5;
+                    while (lastKey !== startKey && safety-- > 0) {
+                      const candidates = endpointToIdx.get(lastKey) || [];
+                      let nextIdx = -1;
+                      let bestCos = -Infinity;
+                      const prev = ring[ring.length - 2];
+                      const cur = ring[ring.length - 1];
+                      const prevDx = Number(cur?.[0]) - Number(prev?.[0]);
+                      const prevDy = Number(cur?.[1]) - Number(prev?.[1]);
+                      const prevLen = Math.hypot(prevDx, prevDy) || 1;
+
+                      for (const cIdx of candidates) {
+                        if (used[cIdx] || blocked[cIdx]) continue;
+                        const coordsN = layerLines[cIdx]?.geometry?.coordinates;
+                        const aN = coordsN?.[0];
+                        const bN = coordsN?.[coordsN.length - 1];
+                        const aK = coordKey(aN);
+                        const bK = coordKey(bN);
+                        if (!aK || !bK) continue;
+
+                        let nextPt = null;
+                        if (aK === lastKey) nextPt = bN;
+                        else if (bK === lastKey) nextPt = aN;
+                        else continue;
+
+                        const candDx = Number(nextPt?.[0]) - Number(cur?.[0]);
+                        const candDy = Number(nextPt?.[1]) - Number(cur?.[1]);
+                        const candLen = Math.hypot(candDx, candDy);
+                        if (!Number.isFinite(candLen) || candLen <= 0) continue;
+
+                        const cos = (prevDx * candDx + prevDy * candDy) / (prevLen * candLen);
+                        // avoid immediate backtrack
+                        if (cos < -0.99) continue;
+                        if (cos > bestCos) {
+                          bestCos = cos;
+                          nextIdx = cIdx;
+                        }
+                      }
+                      if (nextIdx < 0) break;
+
+                      const coordsN = layerLines[nextIdx]?.geometry?.coordinates;
+                      const aN = coordsN?.[0];
+                      const bN = coordsN?.[coordsN.length - 1];
+                      const aK = coordKey(aN);
+                      const bK = coordKey(bN);
+                      if (!aK || !bK) {
+                        // do not consume the segment; mark start as blocked and retry later
+                        break;
+                      }
+
+                      if (aK === lastKey) {
+                        ring.push([bN[0], bN[1]]);
+                        lastKey = bK;
+                      } else if (bK === lastKey) {
+                        ring.push([aN[0], aN[1]]);
+                        lastKey = aK;
+                      } else {
+                        // shouldn't happen; abort this attempt without consuming segments
+                        break;
+                      }
+                      used[nextIdx] = true;
+                      attemptIdx.push(nextIdx);
+                    }
+
+                    if (lastKey === startKey && ring.length >= 4) {
+                      const first = ring[0];
+                      const last = ring[ring.length - 1];
+                      if (!last || last[0] !== first[0] || last[1] !== first[1]) {
+                        ring.push([first[0], first[1]]);
+                      }
+
+                      // Simple centroid (average of vertices). Good enough for ordering.
+                      let cx = 0;
+                      let cy = 0;
+                      const n = Math.max(1, ring.length - 1);
+                      for (let k = 0; k < ring.length - 1; k++) {
+                        cx += Number(ring[k][0]) || 0;
+                        cy += Number(ring[k][1]) || 0;
+                      }
+                      cx /= n;
+                      cy /= n;
+
+                      polygonFeatures.push({
+                        type: 'Feature',
+                        properties: {
+                          ...(layerLines[i]?.properties || {}),
+                          layer,
+                          __pl_cx: cx,
+                          __pl_cy: cy,
+                        },
+                        geometry: {
+                          type: 'Polygon',
+                          coordinates: [ring],
+                        },
+                      });
+                    } else {
+                      // Failed to close a ring; release segments so they can be used by another start.
+                      // Block this start edge to avoid retry loops.
+                      for (const idx of attemptIdx) used[idx] = false;
+                      blocked[i] = true;
+                    }
+                  }
+
+                  // Second pass (PL): polygonize any remaining segments by connected-components + convex hull.
+                  // This recovers tables whose edges don't chain cleanly (common in plotC).
+                  try {
+                    const PREC = 8;
+                    const keyOfXY = (x, y) => {
+                      const xx = Number(x);
+                      const yy = Number(y);
+                      if (!Number.isFinite(xx) || !Number.isFinite(yy)) return '';
+                      return `${xx.toFixed(PREC)},${yy.toFixed(PREC)}`;
+                    };
+
+                    const pointAgg = new Map(); // key -> {sx, sy, n}
+                    const edgeEnds = new Array(layerLines.length); // idx -> {aK,bK}
+                    const addPt = (k, x, y) => {
+                      if (!k) return;
+                      const cur = pointAgg.get(k);
+                      if (cur) {
+                        cur.sx += x;
+                        cur.sy += y;
+                        cur.n += 1;
+                      } else {
+                        pointAgg.set(k, { sx: x, sy: y, n: 1 });
+                      }
+                    };
+
+                    for (let i = 0; i < layerLines.length; i++) {
+                      const coords = layerLines[i]?.geometry?.coordinates;
+                      if (!Array.isArray(coords) || coords.length < 2) continue;
+                      const a = coords[0];
+                      const b = coords[coords.length - 1];
+                      const ax = Number(a?.[0]);
+                      const ay = Number(a?.[1]);
+                      const bx = Number(b?.[0]);
+                      const by = Number(b?.[1]);
+                      if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) continue;
+                      const aK = keyOfXY(ax, ay);
+                      const bK = keyOfXY(bx, by);
+                      edgeEnds[i] = { aK, bK };
+                      addPt(aK, ax, ay);
+                      addPt(bK, bx, by);
+                    }
+
+                    const pointOfKey = (k) => {
+                      const agg = pointAgg.get(k);
+                      if (!agg || !agg.n) return null;
+                      return { x: agg.sx / agg.n, y: agg.sy / agg.n };
+                    };
+
+                    const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+                    const convexHull = (pts) => {
+                      const p = (pts || []).filter(Boolean);
+                      if (p.length < 3) return [];
+                      p.sort((u, v) => (u.x === v.x ? u.y - v.y : u.x - v.x));
+                      const lower = [];
+                      for (const pt of p) {
+                        while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], pt) <= 0) {
+                          lower.pop();
+                        }
+                        lower.push(pt);
+                      }
+                      const upper = [];
+                      for (let i = p.length - 1; i >= 0; i--) {
+                        const pt = p[i];
+                        while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], pt) <= 0) {
+                          upper.pop();
+                        }
+                        upper.push(pt);
+                      }
+                      upper.pop();
+                      lower.pop();
+                      return lower.concat(upper);
+                    };
+
+                    const adj = new Map(); // nodeKey -> edgeIdx[]
+                    const addAdj = (k, idx) => {
+                      if (!k) return;
+                      const arr = adj.get(k);
+                      if (arr) arr.push(idx);
+                      else adj.set(k, [idx]);
+                    };
+
+                    for (let i = 0; i < layerLines.length; i++) {
+                      if (used[i]) continue;
+                      const ends = edgeEnds[i];
+                      if (!ends?.aK || !ends?.bK) continue;
+                      addAdj(ends.aK, i);
+                      addAdj(ends.bK, i);
+                    }
+
+                    const visitedEdge = new Set();
+                    for (let i = 0; i < layerLines.length; i++) {
+                      if (used[i] || visitedEdge.has(i)) continue;
+                      const ends0 = edgeEnds[i];
+                      if (!ends0?.aK || !ends0?.bK) continue;
+
+                      // BFS edges via node adjacency
+                      const queue = [i];
+                      const compEdges = [];
+                      const compNodes = new Set();
+                      while (queue.length) {
+                        const eIdx = queue.pop();
+                        if (eIdx == null || visitedEdge.has(eIdx) || used[eIdx]) continue;
+                        visitedEdge.add(eIdx);
+                        const ends = edgeEnds[eIdx];
+                        if (!ends?.aK || !ends?.bK) continue;
+                        compEdges.push(eIdx);
+                        compNodes.add(ends.aK);
+                        compNodes.add(ends.bK);
+                        const neighA = adj.get(ends.aK) || [];
+                        const neighB = adj.get(ends.bK) || [];
+                        for (const nIdx of neighA) if (!visitedEdge.has(nIdx) && !used[nIdx]) queue.push(nIdx);
+                        for (const nIdx of neighB) if (!visitedEdge.has(nIdx) && !used[nIdx]) queue.push(nIdx);
+                      }
+
+                      // Heuristic: tables are small components (a few segments)
+                      if (compEdges.length < 3 || compEdges.length > 16) continue;
+
+                      const pts = Array.from(compNodes)
+                        .map(pointOfKey)
+                        .filter(Boolean);
+
+                      if (pts.length < 3) continue;
+                      const hull = convexHull(pts);
+                      if (!hull || hull.length < 3) continue;
+
+                      const ring = hull.map((p) => [p.x, p.y]);
+                      ring.push([ring[0][0], ring[0][1]]);
+
+                      // centroid for ordering
+                      let cx = 0;
+                      let cy = 0;
+                      const n = Math.max(1, ring.length - 1);
+                      for (let k = 0; k < ring.length - 1; k++) {
+                        cx += Number(ring[k][0]) || 0;
+                        cy += Number(ring[k][1]) || 0;
+                      }
+                      cx /= n;
+                      cy /= n;
+
+                      polygonFeatures.push({
+                        type: 'Feature',
+                        properties: {
+                          ...(layerLines[compEdges[0]]?.properties || {}),
+                          layer,
+                          __pl_cx: cx,
+                          __pl_cy: cy,
+                        },
+                        geometry: {
+                          type: 'Polygon',
+                          coordinates: [ring],
+                        },
+                      });
+
+                      // consume these edges
+                      for (const eIdx of compEdges) used[eIdx] = true;
+                    }
+                  } catch (_e) {
+                    void _e;
+                  }
+
+                  // Add any remaining segments as residual lines (non-interactive)
+                  for (let i = 0; i < layerLines.length; i++) {
+                    if (used[i]) continue;
+                    residualLineFeatures.push({
+                      type: 'Feature',
+                      properties: {
+                        ...(layerLines[i]?.properties || {}),
+                        layer,
+                        __pl_residualLine: true,
+                      },
+                      geometry: layerLines[i]?.geometry,
+                    });
+                  }
+                }
+
+                // Assign deterministic table IDs for Punch List:
+                // - group by plot layer
+                // - rows: north->south
+                // - columns: screen right->left
+                const byPlotPolys = new Map();
+                for (const f of polygonFeatures) {
+                  const layer = String(f?.properties?.layer || '');
+                  if (!layer) continue;
+                  if (!byPlotPolys.has(layer)) byPlotPolys.set(layer, []);
+                  byPlotPolys.get(layer).push(f);
+                }
+
+                const ORDER_ZOOM = 20;
+                for (const [layer, feats] of byPlotPolys.entries()) {
+                  const plotCode = plotCodeOfLayer(layer);
+                  const layerLines = byLayer.get(layer) || [];
+                  const slope = slopeFromLineSegments(layerLines);
+
+                  const items = feats
+                    .map((f) => {
+                      const cx = Number(f?.properties?.__pl_cx);
+                      const cy = Number(f?.properties?.__pl_cy);
+                      if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
+                      const b = cy - slope * cx;
+                      const pt = L.CRS.EPSG3857.latLngToPoint(L.latLng(cy, cx), ORDER_ZOOM);
+                      return {
+                        feature: f,
+                        cx,
+                        cy,
+                        b,
+                        sx: Number(pt?.x) || 0,
+                        sy: Number(pt?.y) || 0,
+                      };
+                    })
+                    .filter(Boolean);
+
+                  if (items.length === 0) continue;
+                  items.sort((a, b) => b.b - a.b);
+
+                  const gaps = [];
+                  for (let i = 1; i < items.length; i++) {
+                    gaps.push(items[i - 1].b - items[i].b);
+                  }
+                  const gapMed = quantile(gaps, 0.5);
+                  // Empirically stable for this dataset: median gap is intra-row;
+                  // row breaks are much larger when slope is derived from segment orientations.
+                  const rowGapThreshold = Math.max(1e-6, gapMed * 8);
+
+                  const rows = [];
+                  let current = [items[0]];
+                  for (let i = 1; i < items.length; i++) {
+                    const g = items[i - 1].b - items[i].b;
+                    if (g > rowGapThreshold) {
+                      rows.push(current);
+                      current = [items[i]];
+                    } else {
+                      current.push(items[i]);
+                    }
+                  }
+                  rows.push(current);
+
+                  // Order rows north->south by average screen Y (smaller = more north)
+                  rows.sort((ra, rb) => {
+                    const ay = ra.reduce((s, it) => s + it.sy, 0) / Math.max(1, ra.length);
+                    const byy = rb.reduce((s, it) => s + it.sy, 0) / Math.max(1, rb.length);
+                    return ay - byy;
+                  });
+
+                  rows.forEach((rowItems, rowIdx) => {
+                    // Columns: numbering direction depends on plot side.
+                    // Screen right = west.
+                    // - *_west: start from screen right (west) => right->left
+                    // - *_east: start from screen left (east) => left->right
+                    const isEastPlot = /_east$/i.test(String(layer || ''));
+                    rowItems.sort((a, b) => (isEastPlot ? a.sx - b.sx : b.sx - a.sx));
+                    rowItems.forEach((it, colIdx) => {
+                      it.feature.properties.tableId = `${plotCode}${rowIdx + 1}-${colIdx + 1}`;
+                      it.feature.properties.row = rowIdx + 1;
+                      it.feature.properties.col = colIdx + 1;
+                    });
+                  });
+                }
+
+                // Strip internal helper props
+                for (const f of polygonFeatures) {
+                  if (f?.properties) {
+                    delete f.properties.__pl_cx;
+                    delete f.properties.__pl_cy;
+                  }
+                }
+
+                // Only swap in polygons if conversion looks successful; otherwise keep lines
+                // so we don't accidentally drop most tables from the map.
+                const minExpected = Math.max(50, Math.floor(rawLines.length / 8));
+                if (polygonFeatures.length >= minExpected) {
+                  data = {
+                    ...data,
+                    type: 'FeatureCollection',
+                    features: [...polygonFeatures, ...residualLineFeatures],
+                  };
+                }
+              } catch (_e) {
+                void _e;
+              }
+            }
+          }
+
+          // TABLE_INSTALLATION_PROGRESS: count tables (2 panels = 1 table)
+          if (isTIP) {
+            const threshold = activeMode?.tableAreaThreshold || 50; // m²
+            
+            // Calculate polygon area in m² using Shoelace formula
+            const calcAreaM2 = (coords) => {
+              try {
+                let ring = coords;
+                while (Array.isArray(ring) && ring.length > 0 && Array.isArray(ring[0]) && Array.isArray(ring[0][0])) {
+                  ring = ring[0];
+                }
+                if (!Array.isArray(ring) || ring.length < 3) return 0;
+                let area = 0;
+                for (let i = 0; i < ring.length - 1; i++) {
+                  area += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
+                }
+                const avgLat = ring[0]?.[1] || 50;
+                const latFactor = Math.cos(avgLat * Math.PI / 180);
+                return Math.abs(area) / 2 * 111319.9 * 111319.9 * latFactor;
+              } catch (_e) {
+                return 0;
+              }
+            };
+            
+            // Calculate centroid for each panel
+            const getCentroid = (coords) => {
+              try {
+                let ring = coords;
+                while (Array.isArray(ring) && ring.length > 0 && Array.isArray(ring[0]) && Array.isArray(ring[0][0])) {
+                  ring = ring[0];
+                }
+                if (!Array.isArray(ring) || ring.length < 3) return null;
+                let cx = 0, cy = 0;
+                ring.forEach(p => { cx += p[0]; cy += p[1]; });
+                return [cx / ring.length, cy / ring.length];
+              } catch (_e) {
+                return null;
+              }
+            };
+            
+            // Build panel info array
+            const panels = (data.features || []).map((feature, idx) => ({
+              idx,
+              area: calcAreaM2(feature?.geometry?.coordinates),
+              centroid: getCentroid(feature?.geometry?.coordinates),
+            })).filter(p => p.centroid);
+            
+            // Pair panels by proximity (panels that form a table are very close)
+            const PAIR_THRESHOLD = 0.00008; // ~8m in degrees
+            const used = new Set();
+            const pairs = []; // [{idx1, idx2, area}]
+            
+            for (let i = 0; i < panels.length; i++) {
+              if (used.has(i)) continue;
+              const p1 = panels[i];
+              let minDist = Infinity, minJ = -1;
+              
+              for (let j = i + 1; j < panels.length; j++) {
+                if (used.has(j)) continue;
+                const p2 = panels[j];
+                const dist = Math.sqrt(
+                  Math.pow(p1.centroid[0] - p2.centroid[0], 2) + 
+                  Math.pow(p1.centroid[1] - p2.centroid[1], 2)
+                );
+                if (dist < minDist) {
+                  minDist = dist;
+                  minJ = j;
+                }
+              }
+              
+              if (minJ >= 0 && minDist < PAIR_THRESHOLD) {
+                used.add(i);
+                used.add(minJ);
+                // Combined area of both panels
+                const combinedArea = p1.area + panels[minJ].area;
+                pairs.push({ idx1: panels[i].idx, idx2: panels[minJ].idx, area: combinedArea });
+              }
+            }
+            
+            // Count tables by size (combined area of both panels)
+            let smallTables = 0;
+            let bigTables = 0;
+            const combinedThreshold = threshold * 2; // Both panels combined
+            
+            pairs.forEach(pair => {
+              if (pair.area < combinedThreshold) {
+                smallTables++;
+              } else {
+                bigTables++;
+              }
+            });
+            
+            // Also count unpaired panels as half tables (shouldn't happen normally)
+            const unpairedCount = panels.length - used.size;
+            if (unpairedCount > 0) {
+              // Add unpaired as individual (likely edge cases)
+              panels.forEach((p, i) => {
+                if (!used.has(i)) {
+                  if (p.area < threshold) smallTables += 0.5;
+                  else bigTables += 0.5;
+                }
+              });
+            }
+            
+            setTableSmallCount(Math.round(smallTables));
+            setTableBigCount(Math.round(bigTables));
+            
+            // Store panel pairs by feature index (will map to polygonId after layer creation)
+            // tipFeaturePairs: featureIndex -> partnerFeatureIndex
+            const tipFeaturePairs = new Map();
+            pairs.forEach(pair => {
+              tipFeaturePairs.set(pair.idx1, pair.idx2);
+              tipFeaturePairs.set(pair.idx2, pair.idx1);
+            });
+            // Store for use in onEachFeature
+            tipPanelPairsRef.current = { featurePairs: tipFeaturePairs, polygonPairs: new Map() };
+          }
+          
           // LVTT: tables must NOT be selectable; draw only.
           if (isLVTT) {
             const fullLayer = L.geoJSON(data, {
@@ -3498,27 +6028,103 @@ export default function BaseModule({
             continue;
           }
 
+          // LVIB: tables (full.geojson) must NOT be selectable; only lv_box and inv_box are selectable
+          if (isLVIB) {
+            const fullLayer = L.geoJSON(data, {
+              renderer: canvasRenderer,
+              interactive: false,
+              style: () => ({
+                color: 'rgba(255,255,255,0.35)',
+                weight: 1.05,
+                fill: false,
+                fillOpacity: 0,
+              }),
+            });
+            fullLayer.addTo(mapRef.current);
+            layersRef.current.push(fullLayer);
+            if (fullLayer.getBounds().isValid()) {
+              allBounds.extend(fullLayer.getBounds());
+            }
+            continue;
+          }
+
+          // TIP: Track feature index for panel pairing
+          let tipFeatureIndex = 0;
+          const tipFeatureToPolygonId = new Map(); // featureIndex -> polygonId
+          
           const fullLayer = L.geoJSON(data, {
             renderer: canvasRenderer,
             interactive: true,
             
+            // PL needs a filled (but invisible) hit-area so hover works over the whole table,
+            // even after selection/unselection style updates.
             style: () => ({
               color: 'rgba(255,255,255,0.35)',
               weight: 1.05,
-              fill: false,
+              fill: !!isPL,
               fillOpacity: 0,
             }),
             
             onEachFeature: (feature, featureLayer) => {
+              const currentFeatureIdx = tipFeatureIndex++;
               const gType = feature?.geometry?.type;
               const isPoly = gType === 'Polygon' || gType === 'MultiPolygon';
               const isLine = gType === 'LineString';
               // MC4 panel logic only applies to polygons (panels). DC selection can include other shapes.
               if (!gType || (!isPoly && !(isLine && !isMC4))) return;
 
+              // PUNCH_LIST: residual lines are only a visual fallback (never selectable)
+              if (isPL && isLine) {
+                try {
+                  featureLayer.options.interactive = false;
+                } catch (_e) {
+                  void _e;
+                }
+                return;
+              }
+
+              // PUNCH_LIST: show deterministic table ID on hover
+              if (isPL && isPoly) {
+                const tableId = String(feature?.properties?.tableId || '');
+                if (tableId) {
+                  try {
+                    featureLayer.bindTooltip(tableId, {
+                      permanent: false,
+                      sticky: true,
+                      direction: 'top',
+                      opacity: 0.95,
+                      className: 'punch-list-tooltip',
+                    });
+
+                    // Be explicit: keep tooltip hover behavior stable even if other handlers run.
+                    featureLayer.on('mouseover', () => {
+                      try {
+                        featureLayer.openTooltip();
+                      } catch (_e) {
+                        void _e;
+                      }
+                    });
+                    featureLayer.on('mouseout', () => {
+                      try {
+                        featureLayer.closeTooltip();
+                      } catch (_e) {
+                        void _e;
+                      }
+                    });
+                  } catch (_e) {
+                    void _e;
+                  }
+                }
+              }
+
               // Assign unique ID to this panel/polygon
               const uniqueId = `polygon_${polygonIdCounter.current++}`;
               featureLayer._uniquePolygonId = uniqueId;
+              
+              // TIP: Map feature index to polygon ID for panel pairing
+              if (isTIP) {
+                tipFeatureToPolygonId.set(currentFeatureIdx, uniqueId);
+              }
 
               // Store reference (will be updated with stringId and size later)
               polygonById.current[uniqueId] = {
@@ -3673,11 +6279,82 @@ export default function BaseModule({
               }
 
               // DC/LV DEFAULT: Add click events - left click to select
+              if (isDCCT && isPoly) {
+                featureLayer.on('click', (e) => {
+                  // Stop all propagation to prevent double-firing
+                  try {
+                    const oe = e?.originalEvent;
+                    if (oe) {
+                      L.DomEvent.stop(oe);
+                      oe.stopImmediatePropagation?.();
+                    }
+                  } catch (_e) {
+                    void _e;
+                  }
+                  if (noteMode) return;
+
+                  const polygonId = featureLayer._uniquePolygonId;
+                  const polygonInfo = polygonId ? polygonById.current?.[polygonId] : null;
+                  const sidRaw = polygonInfo?.stringId || '';
+                  const sid = normalizeId(sidRaw);
+                  if (!sid) return;
+                  let center = null;
+                  try {
+                    if (typeof featureLayer.getBounds === 'function') center = featureLayer.getBounds().getCenter();
+                  } catch (_e) {
+                    void _e;
+                    center = null;
+                  }
+                  const pos = center || e?.latlng;
+                  if (!pos) return;
+                  dcctToggleTestOverlay(sid, pos);
+                });
+                return;
+              }
+
               featureLayer.on('click', (e) => {
-                L.DomEvent.stopPropagation(e);
+                try {
+                  const oe = e?.originalEvent;
+                  if (oe) {
+                    L.DomEvent.stopPropagation(oe);
+                    L.DomEvent.preventDefault(oe);
+                  }
+                } catch (_e) {
+                  void _e;
+                }
+                polygonClickedRef.current = true;
+
+                // PUNCH_LIST MODE: clicking a table always opens isometric view
+                if (isPL) {
+                  const tableId = featureLayer.feature?.properties?.tableId;
+                  if (tableId) {
+                    setPlIsometricTableId(tableId);
+                    setPlIsometricOpen(true);
+                  }
+                  return;
+                }
+
                 if (noteMode) return;
                 const polygonId = featureLayer._uniquePolygonId;
                 if (polygonId) {
+                  // TIP: Select/unselect both panels of a table together
+                  if (isTIP) {
+                    const partnerPolygonId = tipPanelPairsRef.current?.polygonPairs?.get(polygonId);
+                    setSelectedPolygons(prev => {
+                      const next = new Set(prev);
+                      const isSelected = next.has(polygonId);
+                      if (isSelected) {
+                        next.delete(polygonId);
+                        if (partnerPolygonId) next.delete(partnerPolygonId);
+                      } else {
+                        next.add(polygonId);
+                        if (partnerPolygonId) next.add(partnerPolygonId);
+                      }
+                      return next;
+                    });
+                    return;
+                  }
+                  
                   // For small tables: select all polygons with same string ID
                   const polygonInfo = polygonById.current[polygonId];
                   if (polygonInfo && polygonInfo.stringId && polygonInfo.isSmallTable) {
@@ -3713,10 +6390,30 @@ export default function BaseModule({
               });
               
               featureLayer.on('contextmenu', (e) => {
-                L.DomEvent.stopPropagation(e);
+                try {
+                  const oe = e?.originalEvent;
+                  if (oe) {
+                    L.DomEvent.stopPropagation(oe);
+                    L.DomEvent.preventDefault(oe);
+                  }
+                } catch (_e) {
+                  void _e;
+                }
                 if (noteMode) return;
                 const polygonId = featureLayer._uniquePolygonId;
                 if (polygonId) {
+                  // TIP: Unselect both panels of a table together
+                  if (isTIP && tipPanelPairsRef.current?.polygonPairs) {
+                    const partnerPolygonId = tipPanelPairsRef.current.polygonPairs.get(polygonId);
+                    setSelectedPolygons(prev => {
+                      const next = new Set(prev);
+                      next.delete(polygonId);
+                      if (partnerPolygonId) next.delete(partnerPolygonId);
+                      return next;
+                    });
+                    return;
+                  }
+                  
                   // For small tables: unselect all polygons with same string ID
                   const polygonInfo = polygonById.current[polygonId];
                   if (polygonInfo && polygonInfo.stringId && polygonInfo.isSmallTable) {
@@ -3744,6 +6441,22 @@ export default function BaseModule({
             }
           });
           
+          // TIP: Build polygonPairs map from feature pairs (bidirectional)
+          if (isTIP && tipPanelPairsRef.current?.featurePairs) {
+            const polygonPairs = new Map();
+            tipPanelPairsRef.current.featurePairs.forEach((partnerIdx, featureIdx) => {
+              const polygonId = tipFeatureToPolygonId.get(featureIdx);
+              const partnerPolygonId = tipFeatureToPolygonId.get(partnerIdx);
+              if (polygonId && partnerPolygonId) {
+                // Bidirectional mapping
+                polygonPairs.set(polygonId, partnerPolygonId);
+                polygonPairs.set(partnerPolygonId, polygonId);
+              }
+            });
+            tipPanelPairsRef.current.polygonPairs = polygonPairs;
+            console.log('TIP: Built polygonPairs map with', polygonPairs.size, 'entries');
+          }
+          
           fullLayer.addTo(mapRef.current);
           layersRef.current.push(fullLayer);
           
@@ -3753,18 +6466,328 @@ export default function BaseModule({
           continue;
         }
 
+        // LVIB: Special handling for lv_box and inv_box (clickable, selectable)
+        if (isLVIB && (file.name === 'lv_box' || file.name === 'inv_box')) {
+          const boxType = file.name === 'lv_box' ? 'lvBox' : 'invBox';
+          const featureCount = data.features?.length || 0;
+          
+          // Set total counts
+          if (boxType === 'lvBox') {
+            setLvibLvBoxTotal(featureCount);
+          } else {
+            setLvibInvBoxTotal(featureCount);
+          }
+          
+          const boxLayer = L.geoJSON(data, {
+            renderer: canvasRenderer,
+            interactive: true,
+            style: (feature) => {
+              // LVIB: IDs must be stable. These files include properties.fid.
+              const fid = feature?.properties?.fid ?? feature?.properties?.FID ?? feature?.properties?.id ?? feature?.id;
+              const polygonId = `${boxType}_${String(fid)}`;
+              const selectedSet = boxType === 'lvBox' ? lvibSelectedLvBoxesRef.current : lvibSelectedInvBoxesRef.current;
+              const isSelected = selectedSet.has(polygonId);
+              
+              if (isSelected) {
+                return {
+                  color: '#16a34a',
+                  weight: 4.0,
+                  opacity: 1,
+                  fill: true,
+                  fillColor: '#22c55e',
+                  fillOpacity: 0.75
+                };
+              }
+              return {
+                color: '#dc2626',
+                weight: 3.2,
+                opacity: 1,
+                fill: true,
+                fillColor: '#ef4444',
+                fillOpacity: 0.3
+              };
+            },
+            onEachFeature: (feature, featureLayer) => {
+              // LVIB: IDs must be stable and match the style() path.
+              // Prefer CAD-exported feature.properties.fid.
+              const fidRaw = feature?.properties?.fid ?? feature?.properties?.FID ?? feature?.properties?.id ?? feature?.id;
+              // If fid is missing, derive a deterministic fallback from geometry.
+              // (Still stable within a session and avoids the “1 click = 4 count” bug from random IDs.)
+              const fid =
+                fidRaw != null
+                  ? String(fidRaw)
+                  : (() => {
+                      try {
+                        const g = feature?.geometry;
+                        const coords = g?.coordinates;
+                        const head = Array.isArray(coords) ? JSON.stringify(coords).slice(0, 160) : '';
+                        return `geom_${head.length}_${head}`;
+                      } catch {
+                        return 'geom_unknown';
+                      }
+                    })();
+              const polygonId = `${boxType}_${fid}`;
+              
+              // Store box type mapping
+              lvibBoxTypeRef.current.set(polygonId, boxType);
+              
+              // Store in polygonById for selection box support
+              polygonById.current[polygonId] = {
+                layer: featureLayer,
+                boxType: boxType,
+                polygonId: polygonId
+              };
+              
+              featureLayer.on('click', (e) => {
+                try {
+                  if (e?.originalEvent) {
+                    L.DomEvent.stopPropagation(e.originalEvent);
+                    L.DomEvent.preventDefault(e.originalEvent);
+                  }
+                } catch (_e) { void _e; }
+                
+                // Only allow selection if this box type matches current sub-mode
+                const currentSubMode = lvibSubModeRef.current;
+                if (currentSubMode !== boxType) return;
+                
+                const isRightClick = e?.originalEvent?.button === 2;
+                const setSelected = boxType === 'lvBox' ? setLvibSelectedLvBoxes : setLvibSelectedInvBoxes;
+                
+                setSelected(prev => {
+                  const next = new Set(prev);
+                  if (isRightClick) {
+                    next.delete(polygonId);
+                  } else {
+                    if (next.has(polygonId)) {
+                      next.delete(polygonId);
+                    } else {
+                      next.add(polygonId);
+                    }
+                  }
+                  return next;
+                });
+                
+                // Update style
+                boxLayer.resetStyle(featureLayer);
+              });
+            }
+          });
+          
+          // Store layer reference for style updates
+          if (boxType === 'lvBox') {
+            lvibLvBoxLayerRef.current = boxLayer;
+          } else {
+            lvibInvBoxLayerRef.current = boxLayer;
+          }
+          
+          boxLayer.addTo(mapRef.current);
+          layersRef.current.push(boxLayer);
+          
+          if (boxLayer.getBounds().isValid()) {
+            allBounds.extend(boxLayer.getBounds());
+          }
+          
+          // Add LV/INV text labels inside boxes using the SAME rendering system/options as inv_id labels.
+          // This ensures identical zoom scaling, stroke, and optional background plate behavior.
+          const boxLabel = boxType === 'lvBox' ? 'LV' : 'INV';
+          const invScale = typeof activeMode?.invIdTextScale === 'number' ? activeMode.invIdTextScale : 1;
+          const invBase = typeof activeMode?.invIdTextBaseSize === 'number' ? activeMode.invIdTextBaseSize : 19;
+          const invRefZoom = typeof activeMode?.invIdTextRefZoom === 'number' ? activeMode.invIdTextRefZoom : 20;
+          const invTextStyle = activeMode?.invIdTextStyle || '600';
+          const invMinFs = typeof activeMode?.invIdTextMinFontSize === 'number' ? activeMode.invIdTextMinFontSize : null;
+          const invMaxFs = typeof activeMode?.invIdTextMaxFontSize === 'number' ? activeMode.invIdTextMaxFontSize : null;
+          const invStrokeColor = activeMode?.invIdTextStrokeColor || 'rgba(0,0,0,0.88)';
+          const invStrokeWidthFactor =
+            typeof activeMode?.invIdTextStrokeWidthFactor === 'number' ? activeMode.invIdTextStrokeWidthFactor : 1.45;
+          const invBgColor = activeMode?.invIdTextBgColor || null;
+          const invBgPaddingX = typeof activeMode?.invIdTextBgPaddingX === 'number' ? activeMode.invIdTextBgPaddingX : 0;
+          const invBgPaddingY = typeof activeMode?.invIdTextBgPaddingY === 'number' ? activeMode.invIdTextBgPaddingY : 0;
+          const invBgStrokeColor = activeMode?.invIdTextBgStrokeColor || null;
+          const invBgStrokeWidth = typeof activeMode?.invIdTextBgStrokeWidth === 'number' ? activeMode.invIdTextBgStrokeWidth : 0;
+          const invBgCornerRadius =
+            typeof activeMode?.invIdTextBgCornerRadius === 'number' ? activeMode.invIdTextBgCornerRadius : 0;
+          const invMinTextZoom = typeof activeMode?.invIdTextMinTextZoom === 'number' ? activeMode.invIdTextMinTextZoom : null;
+          const invMinBgZoom = typeof activeMode?.invIdTextMinBgZoom === 'number' ? activeMode.invIdTextMinBgZoom : null;
+
+          const baseSize = invBase * invScale;
+          const radius = 22 * invScale;
+          const features = data.features || [];
+          features.forEach((feature) => {
+            if (!feature.geometry) return;
+            let center = null;
+            if (feature.geometry.type === 'Polygon' && feature.geometry.coordinates?.[0]) {
+              const coords = feature.geometry.coordinates[0];
+              let sumLat = 0, sumLng = 0;
+              coords.forEach(([lng, lat]) => {
+                sumLat += lat;
+                sumLng += lng;
+              });
+              center = [sumLat / coords.length, sumLng / coords.length];
+            } else if (feature.geometry.type === 'MultiPolygon' && feature.geometry.coordinates?.[0]?.[0]) {
+              const coords = feature.geometry.coordinates[0][0];
+              let sumLat = 0, sumLng = 0;
+              coords.forEach(([lng, lat]) => {
+                sumLat += lat;
+                sumLng += lng;
+              });
+              center = [sumLat / coords.length, sumLng / coords.length];
+            }
+            if (!center) return;
+
+            const textMarker = L.textLabel(center, {
+              text: boxLabel,
+              renderer: canvasRenderer,
+              textBaseSize: baseSize,
+              refZoom: invRefZoom,
+              textStyle: invTextStyle,
+              textColor: 'rgba(250,204,21,0.98)', // Yellow - visible on red boxes
+              textStrokeColor: invStrokeColor,
+              textStrokeWidthFactor: invStrokeWidthFactor,
+              minFontSize: invMinFs,
+              maxFontSize: invMaxFs,
+              bgColor: invBgColor,
+              bgPaddingX: invBgPaddingX,
+              bgPaddingY: invBgPaddingY,
+              bgStrokeColor: invBgStrokeColor,
+              bgStrokeWidth: invBgStrokeWidth,
+              bgCornerRadius: invBgCornerRadius,
+              minTextZoom: invMinTextZoom,
+              minBgZoom: invMinBgZoom,
+              interactive: false,
+              radius,
+            });
+            textMarker.addTo(mapRef.current);
+            layersRef.current.push(textMarker);
+          });
+          
+          continue;
+        }
+
         // Standard processing for other GeoJSON files
         // LV: inv_id labels are clickable (daily completion). Other modules can opt into LV-style label appearance.
         const invLabelMode = file.name === 'inv_id' && (isLV || isLVTT || activeMode?.invIdLabelMode);
         const invInteractive = (isLV || isLVTT) && file.name === 'inv_id';
         const mvfTrenchInteractive = isMVF && file.name === 'mv_trench';
+        // PTEP: both earthing_tabletotable and earthing_parameter are interactive
+        const ptepTableToTableInteractive = isPTEP && file.name === 'earthing_tabletotable';
+        const ptepParameterInteractive = isPTEP && file.name === 'earthing_parameter';
+        // DATP: trench lines are interactive for selection
+        const datpTrenchInteractive = isDATP && file.name === 'trench';
         // MVT: we don't want table selection interactions in this mode.
         const disableInteractions = (isMVT || isLVTT) && (file.name === 'full' || file.name === 'subs');
+
+        // For PTEP earthing_tabletotable and earthing_parameter, force an SVG pane above canvas so clicks work under preferCanvas.
+        const ptepPaneName = ptepTableToTableInteractive ? 'ptepTableToTablePane' : (ptepParameterInteractive ? 'ptepParameterPane' : undefined);
+        // For DATP trench, also use SVG pane
+        const datpPaneName = datpTrenchInteractive ? 'datpTrenchPane' : undefined;
+        const useRenderer = ptepTableToTableInteractive
+          ? (ptepTableToTableSvgRendererRef.current || L.svg({ pane: 'ptepTableToTablePane' }))
+          : ptepParameterInteractive
+          ? (ptepParameterSvgRendererRef.current || L.svg({ pane: 'ptepParameterPane' }))
+          : datpTrenchInteractive
+          ? (datpSvgRendererRef.current || L.svg({ pane: 'datpTrenchPane' }))
+          : canvasRenderer;
+
         const layer = L.geoJSON(data, {
-          renderer: canvasRenderer,
-          interactive: !disableInteractions && (invInteractive || mvfTrenchInteractive),
+          pane: ptepPaneName || datpPaneName,
+          renderer: useRenderer,
+          interactive: !disableInteractions && (invInteractive || mvfTrenchInteractive || ptepTableToTableInteractive || ptepParameterInteractive || datpTrenchInteractive),
+          bubblingMouseEvents: !(ptepTableToTableInteractive || ptepParameterInteractive || datpTrenchInteractive),
           
-          style: () => {
+          style: (feature) => {
+            // PTEP: earthing_full = background only (dim), but boundry layer = red
+            if (isPTEP && file.name === 'earthing_full') {
+              const layerName = String(feature?.properties?.layer || '').toLowerCase();
+              if (layerName === 'boundry' || layerName === 'boundary') {
+                return {
+                  color: '#ef4444',
+                  weight: 2.5,
+                  opacity: 1,
+                  fill: false,
+                  fillOpacity: 0,
+                };
+              }
+              return {
+                color: 'rgba(255,255,255,0.26)',
+                weight: 0.78,
+                fill: false,
+                fillOpacity: 0
+              };
+            }
+            // PTEP: earthing_parameter = YELLOW lines (HIDDEN if tabletotable sub-mode is active)
+            if (ptepParameterInteractive) {
+              const isActive = ptepSubModeRef.current === 'parameter';
+              return {
+                color: '#facc15',
+                weight: 1.5,
+                opacity: isActive ? 1 : 0,
+                fill: false,
+                fillOpacity: 0
+              };
+            }
+            // PTEP: earthing_tabletotable = BLUE dashed lines (HIDDEN if parameter sub-mode is active)
+            // Blue = uncompleted, Green = completed
+            if (ptepTableToTableInteractive) {
+              // Check if this feature is already completed
+              const fid = feature?.properties?.handle ?? feature?.properties?.fid ?? feature?.properties?.FID ?? feature?.properties?.id ?? feature?.id;
+              const uniqueId = `tt_${String(fid)}`;
+              const isDone = ptepCompletedTableToTableRef.current?.has(uniqueId);
+              const isActive = ptepSubModeRef.current === 'tabletotable';
+              return {
+                color: isDone ? '#00ff00' : '#3b82f6',
+                weight: isDone ? 6 : 2.2,
+                opacity: isActive ? 1 : 0,
+                dashArray: isDone ? null : '6 4',
+                lineCap: 'round',
+                lineJoin: 'round',
+                fill: false,
+                fillOpacity: 0
+              };
+            }
+            // LVIB mode: lv_box and inv_box with red color
+            if (isLVIB && (file.name === 'lv_box' || file.name === 'inv_box')) {
+              return {
+                color: '#dc2626',
+                weight: 3.2,
+                fill: true,
+                fillColor: '#ef4444',
+                fillOpacity: 0.3
+              };
+            }
+            // DATP (DC&AC Trench Progress): apply colors from config
+            if (isDATP) {
+              // Use colors from geojsonFiles config
+              const layerName = file.name?.toLowerCase();
+              if (layerName === 'boundry' || layerName === 'boundary') {
+                // Boundary - RED (thinner)
+                return {
+                  color: '#ef4444',
+                  weight: 2,
+                  opacity: 1,
+                  fill: false,
+                  fillOpacity: 0,
+                };
+              }
+              if (layerName === 'trench') {
+                // Trench lines - use config color (default BLUE)
+                return {
+                  color: file.color || datpTrenchLineColor,
+                  weight: Number(file.weight) || 1.8,
+                  opacity: 1,
+                  fill: false,
+                  fillOpacity: 0,
+                };
+              }
+              if (layerName === 'full') {
+                // Full panels - dim white background
+                return {
+                  color: 'rgba(255,255,255,0.26)',
+                  weight: 0.78,
+                  fill: false,
+                  fillOpacity: 0
+                };
+              }
+            }
             // Restore the "dim white" look for all layers, with a stronger LV box outline.
             if (file.name === 'lv_box') {
               return {
@@ -4018,6 +7041,177 @@ export default function BaseModule({
           },
           
           onEachFeature: (feature, featureLayer) => {
+            // PTEP: table-to-table click handler (toggle white/green)
+            if (ptepTableToTableInteractive && featureLayer && typeof featureLayer.on === 'function') {
+              const fid = feature?.properties?.handle ?? feature?.properties?.fid ?? feature?.properties?.FID ?? feature?.properties?.id ?? feature?.id;
+              const uniqueId = `tt_${String(fid)}`;
+              featureLayer._ptepUniqueId = uniqueId;
+              ptepTableToTableByIdRef.current[uniqueId] = featureLayer;
+              
+              // Ensure layer is interactive
+              if (featureLayer.options) {
+                featureLayer.options.interactive = true;
+              }
+              
+              featureLayer.on('click', (e) => {
+                try {
+                  if (e?.originalEvent) {
+                    L.DomEvent.stopPropagation(e.originalEvent);
+                    L.DomEvent.preventDefault(e.originalEvent);
+                  }
+                } catch (_e) {
+                  void _e;
+                }
+                if (noteMode) return;
+                // Only allow selection when tabletotable sub-mode is active
+                if (ptepSubModeRef.current !== 'tabletotable') return;
+                
+                const isRightClick = e?.originalEvent?.button === 2;
+                setPtepCompletedTableToTable((prev) => {
+                  const next = new Set(prev);
+                  if (isRightClick) {
+                    // Right-click: deselect
+                    next.delete(uniqueId);
+                  } else {
+                    // Left-click: toggle
+                    if (next.has(uniqueId)) {
+                      next.delete(uniqueId);
+                    } else {
+                      next.add(uniqueId);
+                    }
+                  }
+                  return next;
+                });
+              });
+            }
+
+            // PTEP: parameter click handler (toggle normal/green, track meters)
+            if (ptepParameterInteractive && featureLayer && typeof featureLayer.on === 'function') {
+              const fid = feature?.properties?.handle ?? feature?.properties?.fid ?? feature?.properties?.id ?? feature?.id;
+              const uniqueId = `param_${String(fid)}`;
+              featureLayer._ptepParamUniqueId = uniqueId;
+              ptepParameterByIdRef.current[uniqueId] = featureLayer;
+
+              // Compute line length in meters
+              try {
+                const geom = feature?.geometry;
+                let meters = 0;
+                const addLineMeters = (coords) => {
+                  if (!Array.isArray(coords) || coords.length < 2) return;
+                  let prev = null;
+                  for (const c of coords) {
+                    const lng = c?.[0];
+                    const lat = c?.[1];
+                    if (typeof lat !== 'number' || typeof lng !== 'number') continue;
+                    const ll = L.latLng(lat, lng);
+                    if (prev) {
+                      meters += prev.distanceTo(ll);
+                    }
+                    prev = ll;
+                  }
+                };
+                if (geom?.type === 'LineString') addLineMeters(geom.coordinates);
+                else if (geom?.type === 'MultiLineString') (geom.coordinates || []).forEach(addLineMeters);
+                ptepParameterLenByIdRef.current[uniqueId] = meters;
+              } catch (_e) {
+                void _e;
+                ptepParameterLenByIdRef.current[uniqueId] = 0;
+              }
+              
+              // Ensure layer is interactive
+              if (featureLayer.options) {
+                featureLayer.options.interactive = true;
+              }
+              
+              featureLayer.on('click', (e) => {
+                try {
+                  if (e?.originalEvent) {
+                    L.DomEvent.stopPropagation(e.originalEvent);
+                    L.DomEvent.preventDefault(e.originalEvent);
+                  }
+                } catch (_e) {
+                  void _e;
+                }
+                if (noteMode) return;
+                // Only allow selection when parameter sub-mode is active
+                if (ptepSubModeRef.current !== 'parameter') return;
+
+                const isRightClick = e?.originalEvent?.button === 2;
+                setPtepSelectedParameterParts((prev) => {
+                  const parts = Array.isArray(prev) ? prev : [];
+
+                  // Right-click: remove all selected parts for this feature
+                  if (isRightClick) {
+                    return parts.filter((p) => String(p?.uid || '') !== uniqueId);
+                  }
+
+                  // Left-click: toggle FULL coverage for this feature
+                  const kept = parts.filter((p) => String(p?.uid || '') !== uniqueId);
+
+                  // Determine whether this feature is already fully covered
+                  let fullyCovered = true;
+                  try {
+                    const lines = asLineStrings(featureLayer.getLatLngs());
+                    const byLine = new Map(); // lineIndex -> merged intervals
+                    parts.forEach((p) => {
+                      if (String(p?.uid || '') !== uniqueId) return;
+                      const li = Number(p?.lineIndex);
+                      const a = Number(p?.startM);
+                      const b = Number(p?.endM);
+                      if (!Number.isFinite(li) || !Number.isFinite(a) || !Number.isFinite(b)) return;
+                      const lo = Math.min(a, b);
+                      const hi = Math.max(a, b);
+                      if (!(hi > lo)) return;
+                      if (!byLine.has(li)) byLine.set(li, []);
+                      byLine.get(li).push([lo, hi]);
+                    });
+                    lines.forEach((lineLL, lineIndex) => {
+                      if (!Array.isArray(lineLL) || lineLL.length < 2) return;
+                      const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+                      const totalM = cumData?.cum?.[cumData.cum.length - 1] || 0;
+                      if (!(totalM > 0)) return;
+                      const merged = mergeIntervals(byLine.get(lineIndex) || []);
+                      const ok = merged.length === 1 && merged[0][0] <= 0.2 && merged[0][1] >= totalM - 0.2;
+                      if (!ok) fullyCovered = false;
+                    });
+                  } catch (_e) {
+                    void _e;
+                    fullyCovered = false;
+                  }
+
+                  // If fully covered -> toggle off (remove all parts)
+                  if (fullyCovered) return kept;
+
+                  // Otherwise -> set full coverage parts
+                  const toAdd = [];
+                  try {
+                    const lines = asLineStrings(featureLayer.getLatLngs());
+                    lines.forEach((lineLL, lineIndex) => {
+                      if (!Array.isArray(lineLL) || lineLL.length < 2) return;
+                      const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+                      const totalM = cumData?.cum?.[cumData.cum.length - 1] || 0;
+                      if (!(totalM > 0)) return;
+                      const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: 0, endM: totalM });
+                      if (!coords || coords.length < 2) return;
+                      toAdd.push({
+                        id: `${uniqueId}:${lineIndex}:0.00-${totalM.toFixed(2)}`,
+                        uid: uniqueId,
+                        lineIndex,
+                        startM: 0,
+                        endM: totalM,
+                        coords,
+                        meters: totalM,
+                      });
+                    });
+                  } catch (_e) {
+                    void _e;
+                  }
+
+                  return toAdd.length > 0 ? [...kept, ...toAdd] : kept;
+                });
+              });
+            }
+            
             // MVF: allow selecting mv_trench segments (click toggles green)
             if (mvfTrenchInteractive && featureLayer && typeof featureLayer.on === 'function') {
               const fidRaw = feature?.properties?.fid;
@@ -4085,6 +7279,134 @@ export default function BaseModule({
               });
             }
 
+            // DATP: allow selecting dc_trench lines (MVF-style partial selection)
+            if (datpTrenchInteractive && featureLayer && typeof featureLayer.on === 'function') {
+              const fid = feature?.properties?.handle ?? feature?.properties?.fid ?? feature?.properties?.id ?? feature?.id ?? `datp_${Math.random().toString(36).slice(2)}`;
+              const uniqueId = `datp_${String(fid)}`;
+              featureLayer._datpTrenchId = uniqueId;
+              datpTrenchByIdRef.current[uniqueId] = featureLayer;
+
+              // Compute line length in meters
+              try {
+                const geom = feature?.geometry;
+                let meters = 0;
+                const addLineMeters = (coords) => {
+                  if (!Array.isArray(coords) || coords.length < 2) return;
+                  let prev = null;
+                  for (const c of coords) {
+                    const lng = c?.[0];
+                    const lat = c?.[1];
+                    if (typeof lat !== 'number' || typeof lng !== 'number') continue;
+                    const ll = L.latLng(lat, lng);
+                    if (prev) {
+                      meters += prev.distanceTo(ll);
+                    }
+                    prev = ll;
+                  }
+                };
+                if (geom?.type === 'LineString') addLineMeters(geom.coordinates);
+                else if (geom?.type === 'MultiLineString') (geom.coordinates || []).forEach(addLineMeters);
+                datpTrenchLenByIdRef.current[uniqueId] = meters;
+                // Accumulate total as we process each feature
+                setDatpTotalTrenchMeters((prev) => prev + meters);
+              } catch (_e) {
+                void _e;
+                datpTrenchLenByIdRef.current[uniqueId] = 0;
+              }
+
+              // Ensure layer is interactive
+              if (featureLayer.options) {
+                featureLayer.options.interactive = true;
+              }
+
+              // Click handler for DATP trench (similar to PTEP parameter)
+              featureLayer.on('click', (e) => {
+                try {
+                  if (e?.originalEvent) {
+                    L.DomEvent.stopPropagation(e.originalEvent);
+                    L.DomEvent.preventDefault(e.originalEvent);
+                  }
+                } catch (_e) {
+                  void _e;
+                }
+                if (noteMode) return;
+
+                const isRightClick = e?.originalEvent?.button === 2;
+                setDatpSelectedTrenchParts((prev) => {
+                  const parts = Array.isArray(prev) ? prev : [];
+
+                  // Right-click: remove all selected parts for this feature
+                  if (isRightClick) {
+                    return parts.filter((p) => String(p?.uid || '') !== uniqueId);
+                  }
+
+                  // Left-click: toggle FULL coverage for this feature
+                  const kept = parts.filter((p) => String(p?.uid || '') !== uniqueId);
+
+                  // Determine whether this feature is already fully covered
+                  let fullyCovered = true;
+                  try {
+                    const lines = asLineStrings(featureLayer.getLatLngs());
+                    const byLine = new Map();
+                    parts.forEach((p) => {
+                      if (String(p?.uid || '') !== uniqueId) return;
+                      const li = Number(p?.lineIndex);
+                      const a = Number(p?.startM);
+                      const b = Number(p?.endM);
+                      if (!Number.isFinite(li) || !Number.isFinite(a) || !Number.isFinite(b)) return;
+                      const lo = Math.min(a, b);
+                      const hi = Math.max(a, b);
+                      if (!(hi > lo)) return;
+                      if (!byLine.has(li)) byLine.set(li, []);
+                      byLine.get(li).push([lo, hi]);
+                    });
+                    lines.forEach((lineLL, lineIndex) => {
+                      if (!Array.isArray(lineLL) || lineLL.length < 2) return;
+                      const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+                      const totalM = cumData?.cum?.[cumData.cum.length - 1] || 0;
+                      if (!(totalM > 0)) return;
+                      const merged = mergeIntervals(byLine.get(lineIndex) || []);
+                      const ok = merged.length === 1 && merged[0][0] <= 0.2 && merged[0][1] >= totalM - 0.2;
+                      if (!ok) fullyCovered = false;
+                    });
+                  } catch (_e) {
+                    void _e;
+                    fullyCovered = false;
+                  }
+
+                  // If fully covered -> toggle off (remove all parts)
+                  if (fullyCovered) return kept;
+
+                  // Not fully covered -> add full coverage
+                  const toAdd = [];
+                  try {
+                    const lines = asLineStrings(featureLayer.getLatLngs());
+                    lines.forEach((lineLL, lineIndex) => {
+                      if (!Array.isArray(lineLL) || lineLL.length < 2) return;
+                      const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+                      const totalM = cumData?.cum?.[cumData.cum.length - 1] || 0;
+                      if (!(totalM > 0)) return;
+                      const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: 0, endM: totalM });
+                      if (!coords || coords.length < 2) return;
+                      toAdd.push({
+                        id: `${uniqueId}:${lineIndex}:0.00-${totalM.toFixed(2)}`,
+                        uid: uniqueId,
+                        lineIndex,
+                        startM: 0,
+                        endM: totalM,
+                        coords,
+                        meters: totalM,
+                      });
+                    });
+                  } catch (_e) {
+                    void _e;
+                  }
+
+                  return toAdd.length > 0 ? [...kept, ...toAdd] : kept;
+                });
+              });
+            }
+
             if (feature.properties?.text && feature.geometry.type !== 'Point') {
               
               let center;
@@ -4116,6 +7438,34 @@ export default function BaseModule({
             }
           }
         }).addTo(mapRef.current);
+        
+        // PTEP: Count total table-to-table features
+        if (isPTEP && file.name === 'earthing_tabletotable' && data?.features?.length) {
+          setPtepTotalTableToTable(data.features.length);
+        }
+
+        // PTEP: Compute total parameter meters from stored lengths
+        if (isPTEP && file.name === 'earthing_parameter' && data?.features?.length) {
+          // Sum up all the meters we calculated in onEachFeature
+          setTimeout(() => {
+            let totalMeters = 0;
+            Object.values(ptepParameterLenByIdRef.current).forEach((m) => {
+              totalMeters += m || 0;
+            });
+            setPtepTotalParameterMeters(totalMeters);
+          }, 100);
+        }
+
+        // DATP: Compute total trench meters from stored lengths
+        if (isDATP && file.name === 'trench' && data?.features?.length) {
+          setTimeout(() => {
+            let totalMeters = 0;
+            Object.values(datpTrenchLenByIdRef.current).forEach((m) => {
+              totalMeters += m || 0;
+            });
+            setDatpTotalTrenchMeters(totalMeters);
+          }, 100);
+        }
         
         layersRef.current.push(layer);
         if (layer.getBounds().isValid()) {
@@ -4165,7 +7515,10 @@ export default function BaseModule({
       const grid = new Map(); // key -> [{stringId, latLng}]
       const seen = new Set();
       for (const p of stringTextPointsRef.current) {
-        if (!p?.stringId || seen.has(p.stringId)) continue;
+        if (!p?.stringId) continue;
+        // In DCCT, keep duplicate points (same stringId can appear twice in source)
+        // so each overlapping/compound table polygon can still find a good candidate.
+        if (!isDCCT && seen.has(p.stringId)) continue;
         seen.add(p.stringId);
         const iLat = Math.floor(p.lat / GRID_CELL_DEG);
         const iLng = Math.floor(p.lng / GRID_CELL_DEG);
@@ -4233,6 +7586,12 @@ export default function BaseModule({
           layer.eachLayer(featureLayer => {
             if (featureLayer.feature && featureLayer.getBounds) {
               try {
+                // IMPORTANT: only match string IDs to selectable table polygons from full.geojson.
+                // Other layers (lv_box, subs, etc.) can be huge and would steal assignments,
+                // leaving tables unmatched (and thus different stroke tones in DCCT).
+                const uid = featureLayer._uniquePolygonId;
+                if (!uid || !polygonById.current?.[uid]) return;
+
                 const bounds = featureLayer.getBounds();
                 const center = bounds.getCenter();
                 const geometry = featureLayer.feature?.geometry;
@@ -4240,6 +7599,26 @@ export default function BaseModule({
                 const boundsHeight = bounds.getNorthWest().distanceTo(bounds.getSouthWest());
                 const diag = Math.sqrt(boundsWidth * boundsWidth + boundsHeight * boundsHeight);
                 const isSmallTable = diag < 25;
+
+                // Many CAD exports contain exact duplicate polygons.
+                // For weighted-counter modes, we must count each physical table once.
+                const dedupeKey = (() => {
+                  try {
+                    const sw = bounds.getSouthWest();
+                    const ne = bounds.getNorthEast();
+                    if (!sw || !ne) return '';
+                    // 7 decimals is ~1cm-ish; plenty to collapse exact duplicates but not nearby tables.
+                    return `${sw.lat.toFixed(7)}:${sw.lng.toFixed(7)}:${ne.lat.toFixed(7)}:${ne.lng.toFixed(7)}`;
+                  } catch (_e) {
+                    void _e;
+                    return '';
+                  }
+                })();
+
+                // Persist on polygon record for later selection/counter de-duplication.
+                if (uid && polygonById.current?.[uid]) {
+                  polygonById.current[uid].dedupeKey = dedupeKey;
+                }
                 
                 polygonInfos.push({
                   featureLayer,
@@ -4247,7 +7626,8 @@ export default function BaseModule({
                   center,
                   geometry,
                   diag,
-                  isSmallTable
+                  isSmallTable,
+                  dedupeKey,
                 });
               } catch (_e) { void _e; }
             }
@@ -4256,6 +7636,121 @@ export default function BaseModule({
       });
       
       polygonInfos.sort((a, b) => b.diag - a.diag);
+
+      // MODULE_INSTALLATION_PROGRES_TRACKING (and other potential weighted-counter modules):
+      // Classify table sizes from full.geojson into 3 buckets (long/medium/short) using
+      // the most-common longest-edge lengths. This is robust to tiny outliers (e.g. stray micro-polygons)
+      // that would otherwise steal a k-means cluster and collapse 14/13 into one group.
+      if (activeMode?.workUnitWeights && polygonInfos.length) {
+        try {
+          const weights = activeMode.workUnitWeights;
+          const wLong = Number(weights?.long);
+          const wMed = Number(weights?.medium);
+          const wShort = Number(weights?.short);
+          if (Number.isFinite(wLong) && Number.isFinite(wMed) && Number.isFinite(wShort)) {
+            const map = mapRef.current;
+            const longestEdgeOf = (featureLayer) => {
+              if (!map || !featureLayer || typeof featureLayer.getLatLngs !== 'function') return 0;
+              let ll = featureLayer.getLatLngs();
+              // Drill down to an array of LatLngs representing the outer ring.
+              while (Array.isArray(ll) && ll.length && Array.isArray(ll[0])) ll = ll[0];
+              while (Array.isArray(ll) && ll.length && Array.isArray(ll[0])) ll = ll[0];
+              const ring = Array.isArray(ll) ? ll : null;
+              if (!ring || ring.length < 2) return 0;
+              let max = 0;
+              for (let i = 0; i < ring.length - 1; i++) {
+                const a = ring[i];
+                const b = ring[i + 1];
+                if (!a || !b) continue;
+                try {
+                  const d = L.latLng(a.lat, a.lng).distanceTo(L.latLng(b.lat, b.lng));
+                  if (Number.isFinite(d) && d > max) max = d;
+                } catch (_e) {
+                  void _e;
+                }
+              }
+              // If the ring isn't explicitly closed, also measure last->first.
+              try {
+                const first = ring[0];
+                const last = ring[ring.length - 1];
+                if (first && last) {
+                  const d = L.latLng(first.lat, first.lng).distanceTo(L.latLng(last.lat, last.lng));
+                  if (Number.isFinite(d) && d > max) max = d;
+                }
+              } catch (_e) {
+                void _e;
+              }
+              return max;
+            };
+
+            // Build a histogram of longest-edge lengths (bucketed) and pick the top-3 most common buckets.
+            // Bucket size 0.1m is tight enough given CAD-derived data.
+            const bucketStep = 0.1;
+            const bucketOf = (val) => (Math.round(val / bucketStep) * bucketStep);
+            const counts = new Map();
+
+            polygonInfos.forEach((p) => {
+              const e = longestEdgeOf(p?.featureLayer);
+              p.longestEdge = e;
+              // Ignore degenerate shapes (e.g. 0.2m micro-features)
+              if (!(e > 1)) return;
+              const b = bucketOf(e);
+              counts.set(b, (counts.get(b) || 0) + 1);
+            });
+
+            const reps = Array.from(counts.entries())
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 3)
+              .map(([edge]) => Number(edge))
+              .filter((v) => Number.isFinite(v) && v > 0)
+              .sort((a, b) => b - a);
+
+            if (reps.length === 3) {
+              const repWeights = new Map([
+                [reps[0], wLong],
+                [reps[1], wMed],
+                [reps[2], wShort],
+              ]);
+
+              const nearestRep = (val) => {
+                let best = reps[0];
+                let bestDist = Math.abs(val - reps[0]);
+                for (let i = 1; i < reps.length; i++) {
+                  const d = Math.abs(val - reps[i]);
+                  if (d < bestDist) {
+                    best = reps[i];
+                    bestDist = d;
+                  }
+                }
+                return best;
+              };
+
+              let totalUnits = 0;
+              const seenKeys = new Set();
+              polygonInfos.forEach((p) => {
+                const uid = p?.featureLayer?._uniquePolygonId;
+                if (!uid || !polygonById.current?.[uid]) return;
+                const e = Number(p?.longestEdge) || 0;
+                if (!(e > 0)) return;
+                const rep = nearestRep(e);
+                const units = Number(repWeights.get(rep)) || 0;
+                polygonById.current[uid].workUnits = units;
+
+                const key = String(polygonById.current?.[uid]?.dedupeKey || uid);
+                if (!seenKeys.has(key)) {
+                  seenKeys.add(key);
+                  totalUnits += units;
+                }
+              });
+
+              setTotalPlus(totalUnits);
+              setTotalMinus(0);
+            }
+          }
+        } catch (_e) {
+          void _e;
+        }
+      }
 
       const total = polygonInfos.length;
       const chunkSize = 80; // smaller chunks to keep first render responsive
@@ -4271,7 +7766,10 @@ export default function BaseModule({
 
           const candidates = queryStringCandidates(bounds, center, isSmallTable);
           for (const c of candidates) {
-            if (!isSmallTable && assignedToLargeTable.has(c.stringId)) continue;
+            // Only enforce unique assignment in non-DCCT modes.
+            // In DCCT we want all overlapping table outlines to share the same status color
+            // (otherwise you see a lighter mixed tone from green+default overlays).
+            if (!isDCCT && !isSmallTable && assignedToLargeTable.has(c.stringId)) continue;
             const distToCenter = center.distanceTo(c.latLng);
             const insideBounds = bounds.contains(c.latLng);
             if (insideBounds) {
@@ -4311,7 +7809,7 @@ export default function BaseModule({
               polygonById.current[uniqueId].stringId = finalId;
               polygonById.current[uniqueId].isSmallTable = isSmallTable;
             }
-            if (!isSmallTable) {
+            if (!isDCCT && !isSmallTable) {
               assignedToLargeTable.add(finalId);
             }
           }
@@ -4527,7 +8025,9 @@ export default function BaseModule({
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     // MVT: no table work in this mode; disable box selection / global mouse capture so labels are clickable.
-    if (isMVT || isLVTT) return;
+    // PUNCH_LIST: disable box selection only in normal mode.
+    // Note mode relies on these handlers for click-to-create and box-to-select notes.
+    if (isMVT || isLVTT || (isPL && !noteMode)) return;
     
     const map = mapRef.current;
     const container = map.getContainer();
@@ -4538,7 +8038,10 @@ export default function BaseModule({
       return Boolean(
         t.closest?.('.custom-note-pin') ||
           t.closest?.('.note-dot-hit') ||
-          t.closest?.('.note-dot-core')
+          t.closest?.('.note-dot-core') ||
+          t.closest?.('.custom-punch-pin') ||
+          t.closest?.('.punch-dot-hit') ||
+          t.closest?.('.punch-dot-core')
       );
     };
     
@@ -4551,6 +8054,12 @@ export default function BaseModule({
     const onMouseDown = (e) => {
       if (e.button !== 0 && e.button !== 2) return; // Left or right click
 
+      // PUNCH_LIST: Capture hamburger menu state NOW (before App.jsx's document listener closes it)
+      // This must be done at mousedown because App.jsx closes menu on mousedown
+      if (isPL) {
+        plHamburgerWasOpenOnMouseDownRef.current = !!window.__cewHamburgerMenuOpen;
+      }
+
       // Prevent "clicking a note marker creates a new note" bug
       if (noteMode && isNoteMarkerDomTarget(e)) {
         return;
@@ -4558,6 +8067,7 @@ export default function BaseModule({
       
       // Reset marker click flag at start of new interaction
       markerClickedRef.current = false;
+      polygonClickedRef.current = false;
 
       // Leaflet can throw here if the map pane isn't fully initialized (or was just torn down during a mode switch).
       let startLatLng = null;
@@ -4575,6 +8085,17 @@ export default function BaseModule({
         isRightClick: e.button === 2,
         isDrag: false
       };
+
+      // PUNCH_LIST: box selection should not leak into Leaflet's own handlers.
+      // When Leaflet also processes the same drag, canvas hover can get stuck after box select.
+      if (isPL && !noteMode) {
+        try {
+          e.preventDefault();
+          e.stopPropagation();
+        } catch (_e) {
+          void _e;
+        }
+      }
       try { map.dragging?.disable?.(); } catch (_e) { void _e; }
     };
     
@@ -4609,40 +8130,116 @@ export default function BaseModule({
           weight: 2,
           fillColor: boxColor,
           fillOpacity: 0.2,
-          dashArray: '5, 5'
+          dashArray: '5, 5',
+          interactive: false,
         }).addTo(map);
       }
     };
     
-    const onMouseUp = () => {
+    const onMouseUp = (e) => {
       if (!draggingRef.current) return;
+
+      // ═══════════════════════════════════════════════════════════════════
+      // MENU OPEN CHECK: If any menu WAS open when mousedown started, don't create punch
+      // We use the ref captured at mousedown because App.jsx closes hamburger on mousedown
+      // ═══════════════════════════════════════════════════════════════════
+      const wasHamburgerMenuOpen = plHamburgerWasOpenOnMouseDownRef.current === true;
+      const isContractorDropdownOpen = plContractorDropdownOpenRef.current === true;
       
-      map.dragging.enable();
+      // Reset the hamburger flag for next interaction
+      plHamburgerWasOpenOnMouseDownRef.current = false;
+      
+      if (wasHamburgerMenuOpen || isContractorDropdownOpen) {
+        // Close contractor dropdown if open
+        if (isContractorDropdownOpen) {
+          setPlContractorDropdownOpen(false);
+        }
+        // Hamburger menu closes itself via App.jsx document listener
+        // Clean up drag state and exit - don't do anything else
+        draggingRef.current = null;
+        if (boxRectRef.current) {
+          try { boxRectRef.current.remove(); } catch (_e) { void _e; }
+          boxRectRef.current = null;
+        }
+        try { map.dragging.enable(); } catch (_e) { void _e; }
+        return;
+      }
+      // ═══════════════════════════════════════════════════════════════════
+
+      // Always restore map dragging, even if selection logic throws.
+      try {
+        map.dragging.enable();
+      } catch (_e) {
+        void _e;
+      }
       
       const wasDrag = draggingRef.current.isDrag;
       const isRightClick = draggingRef.current.isRightClick;
       const clickLatLng = draggingRef.current.start;
+
+      // PUNCH_LIST: stop the mouseup from bubbling into Leaflet after a box-select drag.
+      if (isPL && wasDrag && !noteMode) {
+        try {
+          e?.preventDefault?.();
+          e?.stopPropagation?.();
+        } catch (_e) {
+          void _e;
+        }
+      }
       
       // Handle box selection (drag)
       if (boxRectRef.current && wasDrag) {
         const bounds = boxRectRef.current.getBounds();
         
         if (noteMode) {
-          // NOTE MODE: Select only notes within bounds
-          const notesInBounds = notes.filter(note => 
-            bounds.contains(L.latLng(note.lat, note.lng))
-          );
-          
-          if (notesInBounds.length > 0) {
-            setSelectedNotes(prev => {
-              const next = new Set(prev);
-              if (isRightClick) {
-                notesInBounds.forEach(n => next.delete(n.id));
-              } else {
-                notesInBounds.forEach(n => next.add(n.id));
+          // PUNCH_LIST MODE: Select punches within bounds
+          if (isPL) {
+            const punchesInBounds = plPunches.filter(punch => {
+              // Get punch position (handle isometric punches with random positions)
+              let pLat = punch.lat;
+              let pLng = punch.lng;
+              
+              // If isometric punch with stored position, use that
+              if (punch.tableId && punch.isoX != null && punch.isoY != null && punch.lat === 0 && punch.lng === 0) {
+                const storedPos = plIsoPunchPositionsRef.current?.[punch.id];
+                if (storedPos) {
+                  pLat = storedPos.lat;
+                  pLng = storedPos.lng;
+                }
               }
-              return next;
+              
+              if (!pLat || !pLng) return false;
+              return bounds.contains(L.latLng(pLat, pLng));
             });
+            
+            if (punchesInBounds.length > 0) {
+              setPlSelectedPunches(prev => {
+                const next = new Set(prev);
+                if (isRightClick) {
+                  punchesInBounds.forEach(p => next.delete(p.id));
+                } else {
+                  punchesInBounds.forEach(p => next.add(p.id));
+                }
+                return next;
+              });
+            }
+          } else {
+            // NOTE MODE: Select only notes within bounds
+            const notesInBounds = notes.filter(note => 
+              bounds.contains(L.latLng(note.lat, note.lng))
+            );
+            
+            if (notesInBounds.length > 0) {
+              setSelectedNotes(prev => {
+                const next = new Set(prev);
+                if (isRightClick) {
+                  notesInBounds.forEach(n => next.delete(n.id));
+                } else {
+                  notesInBounds.forEach(n => next.add(n.id));
+                }
+                return next;
+              });
+            }
           }
         } else {
           // MVF MODE: Box select ONLY mv_trench (avoid selecting tables/other layers)
@@ -5053,6 +8650,344 @@ export default function BaseModule({
                 mc4PushHistory(changes);
               }
             }
+          } else if (isPTEP) {
+            // PTEP MODE: Box select only the ACTIVE sub-mode dataset
+            const activePtepSubMode = ptepSubModeRef.current;
+            const isPtepParamMode = activePtepSubMode === 'parameter';
+            const map = mapRef.current;
+
+            if (isPtepParamMode) {
+              // PARAMETER-EARTHING: MVF-style PART selection/erase
+              const byId = ptepParameterByIdRef.current || {};
+
+              if (isRightClick) {
+                // Right-click drag: erase only the portion inside the box
+                setPtepSelectedParameterParts((prev) => {
+                  const parts = Array.isArray(prev) ? prev : [];
+                  if (parts.length === 0) return parts;
+
+                  const groups = new Map(); // key uid:lineIndex -> parts[]
+                  parts.forEach((p) => {
+                    const uid = String(p?.uid || '');
+                    const lineIndex = Number(p?.lineIndex);
+                    const a = Number(p?.startM);
+                    const b = Number(p?.endM);
+                    if (!uid || !Number.isFinite(lineIndex) || !Number.isFinite(a) || !Number.isFinite(b)) {
+                      const k = `__raw__:${Math.random()}`;
+                      groups.set(k, [p]);
+                      return;
+                    }
+                    const k = `${uid}:${lineIndex}`;
+                    if (!groups.has(k)) groups.set(k, []);
+                    groups.get(k).push(p);
+                  });
+
+                  const out = [];
+                  for (const [k, arr] of groups.entries()) {
+                    if (k.startsWith('__raw__')) {
+                      out.push(...arr);
+                      continue;
+                    }
+                    const [uid, lineIndexStr] = k.split(':');
+                    const lineIndex = Number(lineIndexStr);
+                    const layer = byId[uid];
+                    if (!layer || typeof layer.getLatLngs !== 'function') {
+                      out.push(...arr);
+                      continue;
+                    }
+                    const lines = asLineStrings(layer.getLatLngs());
+                    const lineLL = lines[lineIndex];
+                    if (!lineLL || lineLL.length < 2) {
+                      out.push(...arr);
+                      continue;
+                    }
+                    const eraseIntervals = computeIntervalsInBox({ L, map, bounds, lineLatLngs: lineLL, minMeters: 0.5 });
+                    if (!eraseIntervals.length) {
+                      out.push(...arr);
+                      continue;
+                    }
+                    const eraseMerged = mergeIntervals(eraseIntervals);
+                    const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+
+                    arr.forEach((p) => {
+                      const startM = Number(p.startM);
+                      const endM = Number(p.endM);
+                      const lo = Math.min(startM, endM);
+                      const hi = Math.max(startM, endM);
+                      const remainIntervals = subtractInterval([lo, hi], eraseMerged, 0.2);
+                      remainIntervals.forEach(([a, b]) => {
+                        const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: a, endM: b });
+                        if (!coords || coords.length < 2) return;
+                        out.push({
+                          ...p,
+                          id: `${uid}:${lineIndex}:${a.toFixed(2)}-${b.toFixed(2)}`,
+                          uid,
+                          lineIndex,
+                          startM: a,
+                          endM: b,
+                          coords,
+                          meters: Math.max(0, b - a),
+                        });
+                      });
+                    });
+                  }
+                  return out;
+                });
+              } else {
+                // Left-click drag: add only the portion inside the box
+                setPtepSelectedParameterParts((prev) => {
+                  const parts = Array.isArray(prev) ? prev : [];
+                  const toAdd = [];
+
+                  // Covered intervals per uid:lineIndex
+                  const coveredIntervalsByKey = new Map();
+                  parts.forEach((p) => {
+                    const uid = String(p?.uid || '');
+                    const lineIndex = Number(p?.lineIndex);
+                    const a = Number(p?.startM);
+                    const b = Number(p?.endM);
+                    if (!uid || !Number.isFinite(lineIndex) || !Number.isFinite(a) || !Number.isFinite(b)) return;
+                    const lo = Math.min(a, b);
+                    const hi = Math.max(a, b);
+                    if (!(hi > lo)) return;
+                    const key = `${uid}:${lineIndex}`;
+                    if (!coveredIntervalsByKey.has(key)) coveredIntervalsByKey.set(key, []);
+                    coveredIntervalsByKey.get(key).push([lo, hi]);
+                  });
+                  for (const [key, arr] of coveredIntervalsByKey.entries()) coveredIntervalsByKey.set(key, mergeIntervals(arr));
+
+                  Object.keys(byId).forEach((uid) => {
+                    const layer = byId[uid];
+                    if (!layer || typeof layer.getBounds !== 'function' || typeof layer.getLatLngs !== 'function') return;
+                    try {
+                      const lb = layer.getBounds();
+                      if (!lb || !bounds.intersects(lb)) return;
+                    } catch (_e) {
+                      void _e;
+                      return;
+                    }
+                    const lines = asLineStrings(layer.getLatLngs());
+                    lines.forEach((lineLL, lineIndex) => {
+                      if (!lineLL || lineLL.length < 2) return;
+                      const key = `${uid}:${lineIndex}`;
+                      const candidates = computeIntervalsInBox({ L, map, bounds, lineLatLngs: lineLL, minMeters: 0.5 });
+                      if (!candidates.length) return;
+                      let covered = coveredIntervalsByKey.get(key) || [];
+                      const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+                      candidates.forEach(([a, b]) => {
+                        const newInts = subtractInterval([a, b], covered, 0.2);
+                        if (!newInts.length) return;
+                        covered = mergeIntervals([...covered, ...newInts]);
+                        coveredIntervalsByKey.set(key, covered);
+                        newInts.forEach(([x, y]) => {
+                          const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: x, endM: y });
+                          if (!coords || coords.length < 2) return;
+                          toAdd.push({
+                            id: `${uid}:${lineIndex}:${x.toFixed(2)}-${y.toFixed(2)}`,
+                            uid,
+                            lineIndex,
+                            startM: x,
+                            endM: y,
+                            coords,
+                            meters: Math.max(0, y - x),
+                          });
+                        });
+                      });
+                    });
+                  });
+
+                  return toAdd.length > 0 ? [...parts, ...toAdd] : parts;
+                });
+              }
+            } else {
+              // TABLE-TO-TABLE: keep existing whole-feature selection by bounds
+              const tableToTableFeatures = ptepTableToTableByIdRef.current || {};
+              const idsInBounds = [];
+
+              const lineIntersectsBounds = (layer) => {
+                if (!layer || !map) return false;
+                try {
+                  const layerBounds = layer.getBounds();
+                  if (!layerBounds || !bounds.intersects(layerBounds)) return false;
+                  let coords = null;
+                  if (typeof layer.getLatLngs === 'function') {
+                    coords = layer.getLatLngs();
+                  }
+                  if (!coords) return false;
+                  while (Array.isArray(coords) && coords.length && Array.isArray(coords[0]) && !coords[0].lat) {
+                    coords = coords.flat();
+                  }
+                  for (const ll of coords) {
+                    if (ll && ll.lat != null && ll.lng != null) {
+                      if (bounds.contains(ll)) return true;
+                    }
+                  }
+                  return false;
+                } catch (_e) {
+                  void _e;
+                  return false;
+                }
+              };
+
+              Object.keys(tableToTableFeatures).forEach((uniqueId) => {
+                const layer = tableToTableFeatures[uniqueId];
+                if (!layer) return;
+                if (lineIntersectsBounds(layer)) idsInBounds.push(uniqueId);
+              });
+
+              if (idsInBounds.length > 0) {
+                setPtepCompletedTableToTable((prev) => {
+                  const next = new Set(prev);
+                  if (isRightClick) idsInBounds.forEach((id) => next.delete(id));
+                  else idsInBounds.forEach((id) => next.add(id));
+                  return next;
+                });
+              }
+            }
+          } else if (isDATP) {
+            // DATP MODE: Box select trench lines (MVF-style PART selection/erase)
+            const byId = datpTrenchByIdRef.current || {};
+            const map = mapRef.current;
+
+            if (isRightClick) {
+              // Right-click drag: erase only the portion inside the box
+              setDatpSelectedTrenchParts((prev) => {
+                const parts = Array.isArray(prev) ? prev : [];
+                if (parts.length === 0) return parts;
+
+                const groups = new Map(); // key uid:lineIndex -> parts[]
+                parts.forEach((p) => {
+                  const uid = String(p?.uid || '');
+                  const lineIndex = Number(p?.lineIndex);
+                  const a = Number(p?.startM);
+                  const b = Number(p?.endM);
+                  if (!uid || !Number.isFinite(lineIndex) || !Number.isFinite(a) || !Number.isFinite(b)) {
+                    const k = `__raw__:${Math.random()}`;
+                    groups.set(k, [p]);
+                    return;
+                  }
+                  const k = `${uid}:${lineIndex}`;
+                  if (!groups.has(k)) groups.set(k, []);
+                  groups.get(k).push(p);
+                });
+
+                const out = [];
+                for (const [k, arr] of groups.entries()) {
+                  if (k.startsWith('__raw__')) {
+                    out.push(...arr);
+                    continue;
+                  }
+                  const [uid, lineIndexStr] = k.split(':');
+                  const lineIndex = Number(lineIndexStr);
+                  const layer = byId[uid];
+                  if (!layer || typeof layer.getLatLngs !== 'function') {
+                    out.push(...arr);
+                    continue;
+                  }
+                  const lines = asLineStrings(layer.getLatLngs());
+                  const lineLL = lines[lineIndex];
+                  if (!lineLL || lineLL.length < 2) {
+                    out.push(...arr);
+                    continue;
+                  }
+                  const eraseIntervals = computeIntervalsInBox({ L, map, bounds, lineLatLngs: lineLL, minMeters: 0.5 });
+                  if (!eraseIntervals.length) {
+                    out.push(...arr);
+                    continue;
+                  }
+                  const eraseMerged = mergeIntervals(eraseIntervals);
+                  const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+
+                  arr.forEach((p) => {
+                    const startM = Number(p.startM);
+                    const endM = Number(p.endM);
+                    const lo = Math.min(startM, endM);
+                    const hi = Math.max(startM, endM);
+                    const remainIntervals = subtractInterval([lo, hi], eraseMerged, 0.2);
+                    remainIntervals.forEach(([a, b]) => {
+                      const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: a, endM: b });
+                      if (!coords || coords.length < 2) return;
+                      out.push({
+                        ...p,
+                        id: `${uid}:${lineIndex}:${a.toFixed(2)}-${b.toFixed(2)}`,
+                        uid,
+                        lineIndex,
+                        startM: a,
+                        endM: b,
+                        coords,
+                        meters: Math.max(0, b - a),
+                      });
+                    });
+                  });
+                }
+                return out;
+              });
+            } else {
+              // Left-click drag: add only the portion inside the box
+              setDatpSelectedTrenchParts((prev) => {
+                const parts = Array.isArray(prev) ? prev : [];
+                const toAdd = [];
+
+                // Covered intervals per uid:lineIndex
+                const coveredIntervalsByKey = new Map();
+                parts.forEach((p) => {
+                  const uid = String(p?.uid || '');
+                  const lineIndex = Number(p?.lineIndex);
+                  const a = Number(p?.startM);
+                  const b = Number(p?.endM);
+                  if (!uid || !Number.isFinite(lineIndex) || !Number.isFinite(a) || !Number.isFinite(b)) return;
+                  const lo = Math.min(a, b);
+                  const hi = Math.max(a, b);
+                  if (!(hi > lo)) return;
+                  const key = `${uid}:${lineIndex}`;
+                  if (!coveredIntervalsByKey.has(key)) coveredIntervalsByKey.set(key, []);
+                  coveredIntervalsByKey.get(key).push([lo, hi]);
+                });
+                for (const [key, arr] of coveredIntervalsByKey.entries()) coveredIntervalsByKey.set(key, mergeIntervals(arr));
+
+                Object.keys(byId).forEach((uid) => {
+                  const layer = byId[uid];
+                  if (!layer || typeof layer.getBounds !== 'function' || typeof layer.getLatLngs !== 'function') return;
+                  try {
+                    const lb = layer.getBounds();
+                    if (!lb || !bounds.intersects(lb)) return;
+                  } catch (_e) {
+                    void _e;
+                    return;
+                  }
+                  const lines = asLineStrings(layer.getLatLngs());
+                  lines.forEach((lineLL, lineIndex) => {
+                    if (!lineLL || lineLL.length < 2) return;
+                    const key = `${uid}:${lineIndex}`;
+                    const candidates = computeIntervalsInBox({ L, map, bounds, lineLatLngs: lineLL, minMeters: 0.5 });
+                    if (!candidates.length) return;
+                    let covered = coveredIntervalsByKey.get(key) || [];
+                    const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+                    candidates.forEach(([a, b]) => {
+                      const newInts = subtractInterval([a, b], covered, 0.2);
+                      if (!newInts.length) return;
+                      covered = mergeIntervals([...covered, ...newInts]);
+                      coveredIntervalsByKey.set(key, covered);
+                      newInts.forEach(([x, y]) => {
+                        const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: x, endM: y });
+                        if (!coords || coords.length < 2) return;
+                        toAdd.push({
+                          id: `${uid}:${lineIndex}:${x.toFixed(2)}-${y.toFixed(2)}`,
+                          uid,
+                          lineIndex,
+                          startM: x,
+                          endM: y,
+                          coords,
+                          meters: Math.max(0, y - x),
+                        });
+                      });
+                    });
+                  });
+                });
+
+                return toAdd.length > 0 ? [...parts, ...toAdd] : parts;
+              });
+            }
           } else if (isLV) {
           // LV MODE: Box select inv_id labels (daily completion)
             const labels = lvInvLabelByIdRef.current || {};
@@ -5074,17 +9009,185 @@ export default function BaseModule({
             }
           } else {
             // NORMAL MODE: Select polygons (DC)
+          const map = mapRef.current;
           const directlySelectedIds = [];
-          
-          Object.keys(polygonById.current).forEach(polygonId => {
-            const polygonInfo = polygonById.current[polygonId];
-            if (polygonInfo && polygonInfo.layer && polygonInfo.layer.getBounds) {
-              const polygonBounds = polygonInfo.layer.getBounds();
-              if (bounds.intersects(polygonBounds)) {
-                directlySelectedIds.push(polygonId);
+
+          // For weighted-counter modes (e.g. MODULE_INSTALLATION_PROGRES_TRACKING),
+          // bounds-only checks significantly over-select. Use a robust intersection test.
+          const useStrictIntersection = !!activeMode?.workUnitWeights;
+
+          const rectData = (() => {
+            if (!useStrictIntersection || !map) return null;
+            try {
+              const sw = bounds.getSouthWest();
+              const ne = bounds.getNorthEast();
+              const nw = L.latLng(ne.lat, sw.lng);
+              const se = L.latLng(sw.lat, ne.lng);
+              const rectPts = [
+                map.latLngToLayerPoint(nw),
+                map.latLngToLayerPoint(ne),
+                map.latLngToLayerPoint(se),
+                map.latLngToLayerPoint(sw),
+              ];
+              if (rectPts.some((p) => !p || !Number.isFinite(p.x) || !Number.isFinite(p.y))) return null;
+              const xs = rectPts.map((p) => p.x);
+              const ys = rectPts.map((p) => p.y);
+              const minX = Math.min(...xs);
+              const maxX = Math.max(...xs);
+              const minY = Math.min(...ys);
+              const maxY = Math.max(...ys);
+              const rectEdges = [
+                [rectPts[0], rectPts[1]],
+                [rectPts[1], rectPts[2]],
+                [rectPts[2], rectPts[3]],
+                [rectPts[3], rectPts[0]],
+              ];
+              return { rectPts, rectEdges, minX, maxX, minY, maxY };
+            } catch (_e) {
+              void _e;
+              return null;
+            }
+          })();
+
+          const isPointInBox = (p, minX, maxX, minY, maxY) => p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY;
+
+          const isPointInPoly = (pt, poly) => {
+            // Ray casting
+            let inside = false;
+            for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+              const xi = poly[i].x, yi = poly[i].y;
+              const xj = poly[j].x, yj = poly[j].y;
+              const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+                (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi + 1e-12) + xi);
+              if (intersect) inside = !inside;
+            }
+            return inside;
+          };
+
+          const segIntersects = (p1, p2, q1, q2) => {
+            const orient = (a, b, c) => (b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y);
+            const onSeg = (a, b, c) =>
+              Math.min(a.x, c.x) <= b.x && b.x <= Math.max(a.x, c.x) &&
+              Math.min(a.y, c.y) <= b.y && b.y <= Math.max(a.y, c.y);
+            const o1 = orient(p1, p2, q1);
+            const o2 = orient(p1, p2, q2);
+            const o3 = orient(q1, q2, p1);
+            const o4 = orient(q1, q2, p2);
+            if ((o1 > 0 && o2 < 0 || o1 < 0 && o2 > 0) && (o3 > 0 && o4 < 0 || o3 < 0 && o4 > 0)) return true;
+            if (Math.abs(o1) < 1e-9 && onSeg(p1, q1, p2)) return true;
+            if (Math.abs(o2) < 1e-9 && onSeg(p1, q2, p2)) return true;
+            if (Math.abs(o3) < 1e-9 && onSeg(q1, p1, q2)) return true;
+            if (Math.abs(o4) < 1e-9 && onSeg(q1, p2, q2)) return true;
+            return false;
+          };
+
+          const layerIntersectsSelection = (layer) => {
+            if (!useStrictIntersection || !rectData || !map || !layer) return true;
+
+            const geomType = layer?.feature?.geometry?.type;
+            // Weighted-counter modes are table-only: ignore non-polygons.
+            if (geomType && geomType !== 'Polygon' && geomType !== 'MultiPolygon') return false;
+
+            const { rectPts, rectEdges, minX, maxX, minY, maxY } = rectData;
+
+            const collectRings = (latlngs) => {
+              const out = [];
+              const walk = (node) => {
+                if (!Array.isArray(node) || node.length === 0) return;
+                if (node.length && node[0] && typeof node[0].lat === 'number' && typeof node[0].lng === 'number') {
+                  out.push(node);
+                  return;
+                }
+                node.forEach(walk);
+              };
+              walk(latlngs);
+              return out;
+            };
+
+            let ll = null;
+            try {
+              if (typeof layer.getLatLngs !== 'function') return false;
+              ll = layer.getLatLngs();
+            } catch (_e) {
+              void _e;
+              return false;
+            }
+
+            const rings = collectRings(ll);
+            for (let r = 0; r < rings.length; r++) {
+              const ring = rings[r];
+              if (!ring || ring.length < 3) continue;
+              const pts = ring.map((p) => map.latLngToLayerPoint(p)).filter(Boolean);
+              if (pts.length < 3) continue;
+              // drop duplicate last point if it equals first
+              const a = pts[0];
+              const z = pts[pts.length - 1];
+              if (a && z && a.x === z.x && a.y === z.y) pts.pop();
+              if (pts.length < 3) continue;
+
+              // 1) Any polygon vertex in selection box
+              if (pts.some((p) => isPointInBox(p, minX, maxX, minY, maxY))) return true;
+              // 2) Any selection corner inside polygon
+              if (rectPts.some((c) => isPointInPoly(c, pts))) return true;
+              // 3) Any edge intersection
+              for (let i = 0; i < pts.length; i++) {
+                const p1 = pts[i];
+                const p2 = pts[(i + 1) % pts.length];
+                for (let k = 0; k < rectEdges.length; k++) {
+                  const [q1, q2] = rectEdges[k];
+                  if (segIntersects(p1, p2, q1, q2)) return true;
+                }
               }
             }
+            return false;
+          };
+
+          Object.keys(polygonById.current).forEach(polygonId => {
+            const polygonInfo = polygonById.current[polygonId];
+            const layer = polygonInfo?.layer;
+            if (!layer || typeof layer.getBounds !== 'function') return;
+            let polygonBounds = null;
+            try {
+              polygonBounds = layer.getBounds();
+            } catch (_e) {
+              void _e;
+              return;
+            }
+            if (!polygonBounds || !bounds.intersects(polygonBounds)) return;
+            if (useStrictIntersection && !layerIntersectsSelection(layer)) return;
+
+            // LVIB: Selection box must ONLY select the currently active box type.
+            // Do not allow selecting other polygons/tables.
+            if (isLVIB) {
+              const currentSubMode = lvibSubModeRef.current;
+              if (polygonInfo?.boxType !== currentSubMode) return;
+            }
+
+            directlySelectedIds.push(polygonId);
           });
+          
+          // LVIB: Update lvibSelectedLvBoxes or lvibSelectedInvBoxes instead of selectedPolygons
+          if (isLVIB && directlySelectedIds.length > 0) {
+            const currentSubMode = lvibSubModeRef.current;
+            const setSelected = currentSubMode === 'lvBox' ? setLvibSelectedLvBoxes : setLvibSelectedInvBoxes;
+            const uniqueIds = Array.from(new Set(directlySelectedIds));
+            setSelected(prev => {
+              const next = new Set(prev);
+              if (isRightClick) {
+                uniqueIds.forEach(id => next.delete(id));
+              } else {
+                uniqueIds.forEach(id => next.add(id));
+              }
+              return next;
+            });
+          }
+
+          // LVIB: Skip normal polygon selection for selectedPolygons.
+          // IMPORTANT: do not return early here; onMouseUp must always reach the shared
+          // cleanup so the selection box closes (same pattern as LV/MC4 special logic).
+          if (isLVIB) {
+            // no-op
+          } else {
           
           const finalSelectedIds = new Set();
           directlySelectedIds.forEach(polygonId => {
@@ -5101,6 +9204,19 @@ export default function BaseModule({
             }
           });
           
+          // TIP: Add partner panels for each selected panel (table = 2 panels)
+          if (isTIP && tipPanelPairsRef.current?.polygonPairs) {
+            const partnersToAdd = new Set();
+            finalSelectedIds.forEach(pid => {
+              const partner = tipPanelPairsRef.current.polygonPairs.get(pid);
+              if (partner && !finalSelectedIds.has(partner)) {
+                partnersToAdd.add(partner);
+              }
+            });
+            partnersToAdd.forEach(p => finalSelectedIds.add(p));
+            console.log('[TIP Selection Box] directlySelectedIds:', directlySelectedIds.length, 'finalSelectedIds:', finalSelectedIds.size, 'partnersAdded:', partnersToAdd.size);
+          }
+          
           if (finalSelectedIds.size > 0) {
             setSelectedPolygons(prev => {
               const next = new Set(prev);
@@ -5109,13 +9225,19 @@ export default function BaseModule({
               } else {
                 finalSelectedIds.forEach(id => next.add(id));
               }
+              if (isTIP) console.log('[TIP Selection Box] prev.size:', prev.size, 'next.size:', next.size, 'finalSelectedIds.size:', finalSelectedIds.size);
               return next;
             });
           }
           }
+          }
         }
         
-        boxRectRef.current.remove();
+        try {
+          boxRectRef.current.remove();
+        } catch (_e) {
+          void _e;
+        }
         boxRectRef.current = null;
       } else if (!wasDrag && isRightClick) {
         // Right-click without dragging: always allow MVF "unselect"
@@ -5135,13 +9257,46 @@ export default function BaseModule({
         }
       } else if (!wasDrag && !isRightClick && noteMode) {
         // NOTE MODE: Create note on simple click (unless a marker click just happened)
+        // PUNCH_LIST mode: Create punch instead of note
         if (!markerClickedRef.current) {
-          createNote(clickLatLng);
+          if (isPL) {
+            // In PUNCH_LIST: if click is on a table polygon, open isometric view
+            // Otherwise, create a punch point (not on a table)
+            // Use setTimeout to allow polygon click handler to set polygonClickedRef first
+            setTimeout(() => {
+              if (polygonClickedRef.current) {
+                // Table was clicked - polygonClickHandler already opened isometric view
+                // Don't create a punch here
+              } else {
+                // Click outside tables - create punch on general area
+                // Check if contractor is selected (use ref for current value in async context)
+                if (!plSelectedContractorIdRef.current) {
+                  // Show warning toast
+                  const toast = document.createElement('div');
+                  toast.className = 'punch-warning-toast';
+                  toast.innerHTML = '⚠️ Please select a contractor first!';
+                  document.body.appendChild(toast);
+                  setTimeout(() => toast.remove(), 2500);
+                  return;
+                }
+                plCreatePunch(clickLatLng, null);
+              }
+            }, 10);
+          } else {
+            createNote(clickLatLng);
+          }
         }
       } else if (!wasDrag && !isRightClick && !noteMode) {
         // SINGLE CLICK SELECTION MODE: Select individual items by clicking
         const clickPoint = map.latLngToLayerPoint(clickLatLng);
         const clickTolerance = 10; // pixels
+
+        // PUNCH_LIST: if a polygon click handler already processed this click,
+        // don't run the global fallback picker (avoids double-handling and hover glitches).
+        if (isPL && polygonClickedRef.current) {
+          draggingRef.current = null;
+          return;
+        }
 
         // MVT: intercept clicks on our custom labels (counter + TESTED) before any other selection logic.
         if (isMVT) {
@@ -5237,17 +9392,9 @@ export default function BaseModule({
                     return base;
                   });
                 }
-                setMvtTermPanel({
-                  stationLabel: String(best._mvtStationLabel || '').trim() || stationNorm,
-                  stationNorm,
-                  value: nextVal,
-                });
+                // setMvtTermPanel removed - not defined
               } else if (stationNorm && lockedNow) {
-                setMvtTermPanel({
-                  stationLabel: String(best._mvtStationLabel || '').trim() || stationNorm,
-                  stationNorm,
-                  value: 3,
-                });
+                // setMvtTermPanel removed - not defined
               }
               draggingRef.current = null;
               return;
@@ -5361,6 +9508,77 @@ export default function BaseModule({
               }
               return next;
             });
+          }
+        } else if (isLVIB) {
+          // LVIB: Single click fallback selection (ensure click works in both modes)
+          // We only allow toggling boxes that match the current sub-mode.
+          const currentSubMode = lvibSubModeRef.current;
+          const byId = polygonById.current || {};
+
+          const isPointInPoly = (pt, poly) => {
+            let inside = false;
+            for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+              const xi = poly[i].x, yi = poly[i].y;
+              const xj = poly[j].x, yj = poly[j].y;
+              const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+                (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi + 1e-12) + xi);
+              if (intersect) inside = !inside;
+            }
+            return inside;
+          };
+
+          const latLngsToLayerPoints = (layer) => {
+            if (!map || !layer || typeof layer.getLatLngs !== 'function') return null;
+            let ll = layer.getLatLngs();
+            const rings = [];
+            const walk = (node) => {
+              if (!Array.isArray(node) || node.length === 0) return;
+              if (node[0] && typeof node[0].lat === 'number' && typeof node[0].lng === 'number') {
+                rings.push(node);
+                return;
+              }
+              node.forEach(walk);
+            };
+            walk(ll);
+            if (!rings.length) return null;
+            const ring = rings[0];
+            const pts = ring.map((p) => map.latLngToLayerPoint(p)).filter(Boolean);
+            if (pts.length < 3) return null;
+            const a = pts[0];
+            const z = pts[pts.length - 1];
+            if (a && z && a.x === z.x && a.y === z.y) pts.pop();
+            return pts;
+          };
+
+          let clickedId = null;
+          Object.keys(byId).forEach((pid) => {
+            if (clickedId) return;
+            const info = byId[pid];
+            if (!info?.layer) return;
+            if (info?.boxType !== currentSubMode) return;
+            const poly = latLngsToLayerPoints(info.layer);
+            if (poly && isPointInPoly(clickPoint, poly)) clickedId = pid;
+          });
+
+          if (clickedId) {
+            const setSelected = currentSubMode === 'lvBox' ? setLvibSelectedLvBoxes : setLvibSelectedInvBoxes;
+            setSelected((prev) => {
+              const next = new Set(prev);
+              if (isRightClick) next.delete(clickedId);
+              else if (next.has(clickedId)) next.delete(clickedId);
+              else next.add(clickedId);
+              return next;
+            });
+
+            // Ensure the rendered layer updates to green/red immediately.
+            const layerRef = currentSubMode === 'lvBox' ? lvibLvBoxLayerRef : lvibInvBoxLayerRef;
+            try {
+              if (layerRef.current && byId[clickedId]?.layer) {
+                layerRef.current.resetStyle(byId[clickedId].layer);
+              }
+            } catch (_e) {
+              void _e;
+            }
           }
         } else if (isMVF) {
           // MVF: Single click near a trench line to select a small segment around the click point
@@ -5516,31 +9734,40 @@ export default function BaseModule({
           });
 
           if (clickedPolygonId) {
-            const polygonInfo = polygonById.current[clickedPolygonId];
-            const finalSelectedIds = new Set();
-
-            if (polygonInfo && polygonInfo.isSmallTable && polygonInfo.stringId) {
-              Object.keys(polygonById.current).forEach(pid => {
-                const info = polygonById.current[pid];
-                if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
-                  finalSelectedIds.add(pid);
-                }
-              });
+            // DCCT: polygon clicks are handled by Leaflet per-polygon handler (toggle overlays).
+            if (isDCCT) {
+              // do nothing here
             } else {
-              finalSelectedIds.add(clickedPolygonId);
-            }
+              const polygonInfo = polygonById.current[clickedPolygonId];
+              const finalSelectedIds = new Set();
 
-            setSelectedPolygons(prev => {
-              const next = new Set(prev);
-              // Toggle: if all are selected, deselect; otherwise select
-              const allSelected = Array.from(finalSelectedIds).every(id => next.has(id));
-              if (allSelected) {
-                finalSelectedIds.forEach(id => next.delete(id));
+              if (polygonInfo && polygonInfo.isSmallTable && polygonInfo.stringId) {
+                Object.keys(polygonById.current).forEach(pid => {
+                  const info = polygonById.current[pid];
+                  if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
+                    finalSelectedIds.add(pid);
+                  }
+                });
               } else {
-                finalSelectedIds.forEach(id => next.add(id));
+                finalSelectedIds.add(clickedPolygonId);
               }
-              return next;
-            });
+
+              setSelectedPolygons(prev => {
+                const next = new Set(prev);
+                // Toggle: if all are selected, deselect; otherwise select
+                const allSelected = Array.from(finalSelectedIds).every(id => next.has(id));
+                if (allSelected) {
+                  finalSelectedIds.forEach(id => next.delete(id));
+                } else {
+                  finalSelectedIds.forEach(id => next.add(id));
+                }
+                return next;
+              });
+            }
+          } else if (isDCCT) {
+            // DCCT: Clicking on empty area clears filter + all test overlays
+            setDcctFilter(null);
+            dcctClearTestOverlays();
           }
         }
       }
@@ -5549,17 +9776,28 @@ export default function BaseModule({
     };
     
     container.addEventListener('mousedown', onMouseDown);
-    container.addEventListener('mousemove', onMouseMove);
-    container.addEventListener('mouseup', onMouseUp);
+    // Mouse move/up on window so we always clean up even if the user releases outside the map.
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
     
     return () => {
       container.removeEventListener('contextmenu', preventContextMenu);
       container.removeEventListener('mousedown', onMouseDown);
-      container.removeEventListener('mousemove', onMouseMove);
-      container.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+
+      // Safety: ensure we don't leave the map in a non-interactive state.
+      try { map.dragging.enable(); } catch (_e) { void _e; }
+      try {
+        if (boxRectRef.current) boxRectRef.current.remove();
+      } catch (_e) {
+        void _e;
+      }
+      boxRectRef.current = null;
+      draggingRef.current = null;
     };
   // IMPORTANT: include isMC4 (and module key) so drag-selection behavior updates when switching modes.
-  }, [mapReady, activeMode?.key, isLV, isMVF, isMC4, isMVT, isLVTT, stringPoints, noteMode, notes]);
+  }, [mapReady, activeMode?.key, isLV, isMVF, isMC4, isMVT, isLVTT, isDCCT, stringPoints, noteMode, notes]);
 
   useEffect(() => {
     mapRef.current = L.map('map', {
@@ -5571,6 +9809,73 @@ export default function BaseModule({
       fadeAnimation: false,
     });
     setMapReady(true);
+
+    // PTEP: dedicated SVG pane/renderer for interactive table-to-table layer.
+    // Map is preferCanvas:true, so we must explicitly opt into SVG for reliable per-feature clicks.
+    try {
+      const paneName = 'ptepTableToTablePane';
+      if (!mapRef.current.getPane(paneName)) {
+        const pane = mapRef.current.createPane(paneName);
+        pane.style.zIndex = '440'; // above canvas drawings, below stringTextPane(450)
+        pane.style.pointerEvents = 'auto';
+      }
+      ptepTableToTableSvgRendererRef.current = L.svg({ pane: paneName });
+    } catch (_e) {
+      void _e;
+      ptepTableToTableSvgRendererRef.current = null;
+    }
+
+    // PTEP: dedicated SVG pane/renderer for interactive parameter layer.
+    try {
+      const paneName = 'ptepParameterPane';
+      if (!mapRef.current.getPane(paneName)) {
+        const pane = mapRef.current.createPane(paneName);
+        pane.style.zIndex = '435'; // below table-to-table (440)
+        pane.style.pointerEvents = 'auto';
+      }
+      ptepParameterSvgRendererRef.current = L.svg({ pane: paneName });
+    } catch (_e) {
+      void _e;
+      ptepParameterSvgRendererRef.current = null;
+    }
+
+    // PTEP: selected parameter parts overlay pane (always pointerEvents:none)
+    try {
+      const paneName = 'ptepParameterSelectedPane';
+      if (!mapRef.current.getPane(paneName)) {
+        const pane = mapRef.current.createPane(paneName);
+        pane.style.zIndex = '436'; // above parameter base (435), below table-to-table (440)
+        pane.style.pointerEvents = 'none';
+      }
+    } catch (_e) {
+      void _e;
+    }
+
+    // DATP: dedicated SVG pane/renderer for interactive trench layer.
+    try {
+      const paneName = 'datpTrenchPane';
+      if (!mapRef.current.getPane(paneName)) {
+        const pane = mapRef.current.createPane(paneName);
+        pane.style.zIndex = '437';
+        pane.style.pointerEvents = 'auto';
+      }
+      datpSvgRendererRef.current = L.svg({ pane: paneName });
+    } catch (_e) {
+      void _e;
+      datpSvgRendererRef.current = null;
+    }
+
+    // DATP: selected trench parts overlay pane (always pointerEvents:none)
+    try {
+      const paneName = 'datpTrenchSelectedPane';
+      if (!mapRef.current.getPane(paneName)) {
+        const pane = mapRef.current.createPane(paneName);
+        pane.style.zIndex = '438';
+        pane.style.pointerEvents = 'none';
+      }
+    } catch (_e) {
+      void _e;
+    }
 
     // Dedicated canvas renderer + pane for string_text labels (prevents ghosting when hiding/showing)
     try {
@@ -5626,10 +9931,24 @@ export default function BaseModule({
 
     fetchAllGeoJson();
 
+    // DCCT: Clear test overlays immediately when clicking empty map.
+    // Table clicks stop propagation/prevent default, so this typically only triggers for empty clicks.
+    const onMapClick = () => {
+      if (!isDCCTRef.current) return;
+      setDcctFilter(null);
+      dcctClearTestOverlays();
+    };
+    try {
+      mapRef.current.on('click', onMapClick);
+    } catch (_e) {
+      void _e;
+    }
+
     return () => {
       try {
         if (rafRef.current) cancelAnimationFrame(rafRef.current);
         mapRef.current?.off('zoomend moveend', scheduleStringTextLabelUpdate);
+        mapRef.current?.off('click', onMapClick);
       } catch (_e) { void _e; }
       mapRef.current?.remove();
       mapRef.current = null;
@@ -5695,6 +10014,21 @@ export default function BaseModule({
     if (!mapRef.current) return;
     fetchAllGeoJson();
   }, [activeMode]);
+
+  // LVIB: Update box styles when selection changes
+  useEffect(() => {
+    if (!isLVIB) return;
+    if (lvibLvBoxLayerRef.current) {
+      lvibLvBoxLayerRef.current.eachLayer((layer) => {
+        lvibLvBoxLayerRef.current.resetStyle(layer);
+      });
+    }
+    if (lvibInvBoxLayerRef.current) {
+      lvibInvBoxLayerRef.current.eachLayer((layer) => {
+        lvibInvBoxLayerRef.current.resetStyle(layer);
+      });
+    }
+  }, [isLVIB, lvibSelectedLvBoxes, lvibSelectedInvBoxes]);
 
   // If a module wants string_text on hover/cursor, control label visibility by map pointer state.
   useEffect(() => {
@@ -5845,15 +10179,31 @@ export default function BaseModule({
     ? (mvfSegments || []).reduce((sum, s) => (mvfDoneSegmentKeys.has(s.key) ? sum + (Number(s.length) || 0) : sum), 0)
     : 0;
 
+  // TIP: Total = 2V14 + 2V27 (from full.geojson), Completed = selected tables count
+  const tipTotal = tableSmallCount + tableBigCount;
+  // TIP: Count selected tables (each table = 2 panels, so divide by 2)
+  const tipCompletedTables = isTIP ? Math.floor(selectedPolygons.size / 2) : 0;
+
   // MVF Total must come from CSV (already represents 3 circuits); completed comes from selected trench meters * 3.
-  const overallTotal = isMVF ? totalPlus : ((isLV || useSimpleCounters) ? totalPlus : (totalPlus + totalMinus));
-  const completedTotal = isLV
-    ? lvCompletedLength
-    : (isMVF ? (mvfSelectedCableMeters + mvfCommittedCableMeters + mvfDoneCableMeters) : (completedPlus + completedMinus));
+  // DATP: use fixed total (15993 m)
+  const overallTotal = isTIP ? tipTotal : (isDATP ? 15993 : (isMVF ? totalPlus : ((isLV || useSimpleCounters) ? totalPlus : (totalPlus + totalMinus))));
+  const completedTotal = isTIP
+    ? tipCompletedTables
+    : (isDATP
+      ? datpCompletedTrenchMeters
+      : (isLV
+        ? lvCompletedLength
+        : (isMVF ? (mvfSelectedCableMeters + mvfCommittedCableMeters + mvfDoneCableMeters) : (completedPlus + completedMinus))));
   const completedPct = overallTotal > 0 ? (completedTotal / overallTotal) * 100 : 0;
   const remainingPlus = Math.max(0, totalPlus - completedPlus);
   const remainingMinus = Math.max(0, totalMinus - completedMinus);
   const remainingTotal = Math.max(0, overallTotal - completedTotal);
+
+  const simpleCounterUnit = typeof activeMode?.simpleCounterUnit === 'string' ? activeMode.simpleCounterUnit : 'm';
+  const formatSimpleCounter = (value) => {
+    const v = Number(value) || 0;
+    return `${v.toFixed(0)}${simpleCounterUnit ? ` ${simpleCounterUnit}` : ''}`;
+  };
 
   // MC4 counters (per string_text count; each string/table has 2 ends)
   // IMPORTANT: Must be defined before workSelectionCount/workAmount which depend on it
@@ -5923,9 +10273,21 @@ export default function BaseModule({
     ? lvCompletedInvIds.size 
     : (isMVF 
       ? (mvfSelectedTrenchParts?.length || 0) 
-      : (isMC4 
-        ? Object.keys(mc4PanelStates || {}).length 
-        : selectedPolygons.size));
+      : (isPTEP
+        ? (ptepSubMode === 'tabletotable' ? ptepCompletedTableToTable.size : (ptepSelectedParameterParts?.length || 0))
+        : (isMC4 
+          ? Object.keys(mc4PanelStates || {}).length 
+          : (activeMode?.workUnitWeights
+            ? (() => {
+                const seen = new Set();
+                (selectedPolygons || new Set()).forEach((pid) => {
+                  const info = polygonById.current?.[pid];
+                  const key = String(info?.dedupeKey || pid);
+                  seen.add(key);
+                });
+                return seen.size;
+              })()
+            : selectedPolygons.size))));
   const mvtCompletedForSubmit = isMVT
     ? Math.max(0, Object.values(mvtTerminationByStation || {}).reduce((s, v) => s + Math.max(0, Math.min(3, Number(v) || 0)), 0))
     : 0;
@@ -5936,11 +10298,25 @@ export default function BaseModule({
     )
     : 0;
   const lvttWorkUnit = lvttCompletedForSubmit === 1 ? 'cable terminated' : 'cables terminated';
+  // PTEP completed amounts for submit
+  const ptepCompletedForSubmit = isPTEP
+    ? (ptepSubMode === 'tabletotable' ? ptepCompletedTableToTable.size : ptepCompletedParameterMeters)
+    : 0;
+  const ptepWorkUnit = isPTEP
+    ? (ptepSubMode === 'tabletotable' ? 'pcs' : 'm')
+    : '';
+  // DATP completed amounts for submit
+  const datpCompletedForSubmit = isDATP ? datpCompletedTrenchMeters : 0;
+  const datpWorkUnit = 'm';
   const workAmount = isMVF 
     ? mvfSelectedCableMeters 
-    : (isMC4 
-      ? (mc4Counts?.mc4Completed || 0) 
-      : completedTotal); // MVF: pending selected cable meters (scaled), MC4: completed ends count
+    : (isDATP
+      ? datpCompletedForSubmit
+      : (isPTEP
+        ? ptepCompletedForSubmit
+        : (isMC4 
+          ? (mc4Counts?.mc4Completed || 0) 
+          : completedTotal))); // MVF: pending selected cable meters (scaled), MC4: completed ends count
 
   const [dwgUrl, setDwgUrl] = useState('');
   useEffect(() => {
@@ -6247,6 +10623,155 @@ export default function BaseModule({
           );
         })()}
       </div>
+    ) : isDCCT ? (
+      <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start">
+        {(() => {
+          // DCCT Counters: Total, Passed, Failed, Not Tested
+          const csvTestData = dcctTestData || {};
+          const csvIds = new Set(Object.keys(csvTestData));
+          const mapIds = dcctMapIds || new Set();
+          
+          // Calculate counts
+          const csvTotal = csvIds.size;
+          let passedCount = 0;
+          let failedCount = 0;
+          
+          csvIds.forEach((id) => {
+            const result = csvTestData[id];
+            if (result === 'passed') passedCount++;
+            else if (result === 'failed') failedCount++;
+          });
+          
+          // Not tested: IDs in map but not in CSV, plus IDs in CSV but not in map
+          let notTestedCount = 0;
+          mapIds.forEach((id) => {
+            if (!csvIds.has(id)) notTestedCount++;
+          });
+          // Spec: Not Tested should be ONLY IDs that are on the map (string_text) but missing in CSV.
+          
+          const activeFilter = dcctFilter;
+          
+          // Styling for clickable filter links
+          const filterLinkBase = 'cursor-pointer underline decoration-1 underline-offset-2 hover:opacity-80 transition-opacity';
+          const filterActiveRing = 'ring-2 ring-offset-1 ring-offset-slate-900';
+          
+          return (
+            <div className="flex items-center gap-3">
+              {/* Total Counter */}
+              <div className="min-w-[120px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
+                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                  <span className="text-xs font-bold text-slate-200">Total</span>
+                  <span className="text-xs font-bold text-slate-200 tabular-nums">{csvTotal}</span>
+                </div>
+              </div>
+              
+              {/* Passed Counter - Clickable */}
+              <div 
+                className={`min-w-[120px] border-2 py-3 px-3 transition-all ${
+                  activeFilter === 'passed' 
+                    ? 'border-emerald-500 bg-emerald-950/40 ' + filterActiveRing + ' ring-emerald-500' 
+                    : 'border-slate-700 bg-slate-800 hover:border-emerald-600'
+                }`}
+              >
+                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                  <span 
+                    className={`text-xs font-bold text-emerald-400 ${filterLinkBase}`}
+                    onClick={() => setDcctFilter(activeFilter === 'passed' ? null : 'passed')}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => e.key === 'Enter' && setDcctFilter(activeFilter === 'passed' ? null : 'passed')}
+                  >
+                    Passed
+                  </span>
+                  <span className="text-xs font-bold text-emerald-400 tabular-nums">{passedCount}</span>
+                </div>
+              </div>
+              
+              {/* Failed Counter - Clickable */}
+              <div 
+                className={`min-w-[120px] border-2 py-3 px-3 transition-all ${
+                  activeFilter === 'failed' 
+                    ? 'border-red-500 bg-red-950/40 ' + filterActiveRing + ' ring-red-500' 
+                    : 'border-slate-700 bg-slate-800 hover:border-red-600'
+                }`}
+              >
+                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                  <span 
+                    className={`text-xs font-bold text-red-400 ${filterLinkBase}`}
+                    onClick={() => setDcctFilter(activeFilter === 'failed' ? null : 'failed')}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => e.key === 'Enter' && setDcctFilter(activeFilter === 'failed' ? null : 'failed')}
+                  >
+                    Failed
+                  </span>
+                  <span className="text-xs font-bold text-red-400 tabular-nums">{failedCount}</span>
+                </div>
+              </div>
+              
+              {/* Not Tested Counter - Clickable */}
+              <div 
+                className={`min-w-[140px] border-2 py-3 px-3 transition-all ${
+                  activeFilter === 'not_tested' 
+                    ? 'border-slate-400 bg-slate-700/40 ' + filterActiveRing + ' ring-slate-400' 
+                    : 'border-slate-700 bg-slate-800 hover:border-slate-500'
+                }`}
+              >
+                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                  <span 
+                    className={`text-xs font-bold text-slate-400 ${filterLinkBase}`}
+                    onClick={() => setDcctFilter(activeFilter === 'not_tested' ? null : 'not_tested')}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => e.key === 'Enter' && setDcctFilter(activeFilter === 'not_tested' ? null : 'not_tested')}
+                  >
+                    Not Tested
+                  </span>
+                  <span className="text-xs font-bold text-slate-400 tabular-nums">{notTestedCount}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+    ) : null) ||
+    (isPL ? (
+      <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start">
+        {(() => {
+          const total = plPunches.length;
+          const completed = plPunches.filter(p => p.completed).length;
+          const remaining = Math.max(0, total - completed);
+          const completedPct = total > 0 ? ((completed / total) * 100).toFixed(1) : '0.0';
+          
+          return (
+            <div className="flex items-center gap-3">
+              {/* Total Counter */}
+              <div className="min-w-[120px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
+                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                  <span className="text-xs font-bold text-slate-200">Total</span>
+                  <span className="text-xs font-bold text-slate-200 tabular-nums">{total}</span>
+                </div>
+              </div>
+              
+              {/* Completed Counter */}
+              <div className="min-w-[160px] border-2 border-emerald-700/50 bg-emerald-900/20 py-3 px-3">
+                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                  <span className="text-xs font-bold text-emerald-400">Completed</span>
+                  <span className="text-xs font-bold text-emerald-400 tabular-nums">{completed} ({completedPct}%)</span>
+                </div>
+              </div>
+              
+              {/* Remaining Counter */}
+              <div className="min-w-[120px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
+                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                  <span className="text-xs font-bold text-amber-400">Remaining</span>
+                  <span className="text-xs font-bold text-amber-400 tabular-nums">{remaining}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
     ) : null);
 
   return (
@@ -6261,31 +10786,356 @@ export default function BaseModule({
             effectiveCustomCounters ? (
               effectiveCustomCounters
             ) : (
-              <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start">
+              <div className={`flex min-w-0 gap-3 overflow-x-auto pb-1 justify-self-start ${isLVIB ? 'flex-col items-start gap-1' : 'items-center'}`}>
                 {useSimpleCounters ? (
                   <>
-                    <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-                      <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                        <span className="text-xs font-bold text-slate-200">Total</span>
-                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{overallTotal.toFixed(0)} m</span>
-                      </div>
-                    </div>
+                    {/* LVIB: LV Box / INV Box counters with checkbox toggle (MC4 style) */}
+                    {isLVIB ? (
+                      <div className="flex flex-col gap-2">
+                        {(() => {
+                          // Match DC cable pulling counters typography + spacing
+                          // - smaller padding
+                          // - same label/value fonts
+                          // Also reduce label-to-counters gap by shrinking label column and gap-x.
+                          const ROW = 'grid grid-cols-[24px_140px_repeat(3,max-content)] items-center gap-x-2 gap-y-2 cursor-pointer';
 
-                    <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-                      <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                        <span className="text-xs font-bold text-emerald-400">Completed</span>
-                        <span className="text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap">
-                          {completedTotal.toFixed(0)} m, {completedPct.toFixed(2)}%
-                        </span>
-                      </div>
-                    </div>
+                          const lvDone = lvibSelectedLvBoxes.size;
+                          const lvPct = lvibLvBoxTotal > 0 ? ((lvDone / lvibLvBoxTotal) * 100).toFixed(1) : '0.0';
+                          const lvRem = Math.max(0, lvibLvBoxTotal - lvDone);
 
-                    <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-                      <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                        <span className="text-xs font-bold text-slate-200">Remaining</span>
-                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingTotal.toFixed(0)} m</span>
+                          const invDone = lvibSelectedInvBoxes.size;
+                          const invPct = lvibInvBoxTotal > 0 ? ((invDone / lvibInvBoxTotal) * 100).toFixed(1) : '0.0';
+                          const invRem = Math.max(0, lvibInvBoxTotal - invDone);
+
+                          const checkboxBase = 'w-5 h-5 border-2 rounded flex items-center justify-center transition-colors';
+
+                          return (
+                            <>
+                              {/* LV Box row */}
+                              <div
+                                className={ROW}
+                                onClick={() => {
+                                  if (lvibSubMode !== 'lvBox') setLvibSubMode('lvBox');
+                                }}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (lvibSubMode !== 'lvBox') setLvibSubMode('lvBox');
+                                  }}
+                                  className={`${checkboxBase} ${
+                                    lvibSubMode === 'lvBox'
+                                        ? 'border-slate-200 bg-slate-200 text-slate-900'
+                                        : 'border-slate-500 bg-slate-800 hover:border-slate-200'
+                                  }`}
+                                  title="Select LV Box"
+                                  aria-pressed={lvibSubMode === 'lvBox'}
+                                >
+                                  {lvibSubMode === 'lvBox' && <span className="text-xs font-bold">✓</span>}
+                                </button>
+                                  <div className={`text-sm font-bold ${lvibSubMode === 'lvBox' ? 'text-white' : 'text-slate-500'}`}>LV Box:</div>
+                                <div className={COUNTER_BOX}>
+                                  <div className={COUNTER_GRID}>
+                                    <span className={COUNTER_LABEL}>Total</span>
+                                    <span className={COUNTER_VALUE}>{lvibLvBoxTotal}</span>
+                                  </div>
+                                </div>
+                                <div className={COUNTER_BOX}>
+                                  <div className={COUNTER_GRID}>
+                                    <span className={COUNTER_LABEL}>Done</span>
+                                    <span className={COUNTER_VALUE}>{lvDone} ({lvPct}%)</span>
+                                  </div>
+                                </div>
+                                <div className={COUNTER_BOX}>
+                                  <div className={COUNTER_GRID}>
+                                    <span className={COUNTER_LABEL}>Remaining</span>
+                                    <span className={COUNTER_VALUE}>{lvRem}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* INV Box row */}
+                              <div
+                                className={ROW}
+                                onClick={() => {
+                                  if (lvibSubMode !== 'invBox') setLvibSubMode('invBox');
+                                }}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (lvibSubMode !== 'invBox') setLvibSubMode('invBox');
+                                  }}
+                                  className={`${checkboxBase} ${
+                                    lvibSubMode === 'invBox'
+                                        ? 'border-slate-200 bg-slate-200 text-slate-900'
+                                        : 'border-slate-500 bg-slate-800 hover:border-slate-200'
+                                  }`}
+                                  title="Select INV Box"
+                                  aria-pressed={lvibSubMode === 'invBox'}
+                                >
+                                  {lvibSubMode === 'invBox' && <span className="text-xs font-bold">✓</span>}
+                                </button>
+                                  <div className={`text-sm font-bold ${lvibSubMode === 'invBox' ? 'text-white' : 'text-slate-500'}`}>INV Box:</div>
+                                <div className={COUNTER_BOX}>
+                                  <div className={COUNTER_GRID}>
+                                    <span className={COUNTER_LABEL}>Total</span>
+                                    <span className={COUNTER_VALUE}>{lvibInvBoxTotal}</span>
+                                  </div>
+                                </div>
+                                <div className={COUNTER_BOX}>
+                                  <div className={COUNTER_GRID}>
+                                    <span className={COUNTER_LABEL}>Done</span>
+                                    <span className={COUNTER_VALUE}>{invDone} ({invPct}%)</span>
+                                  </div>
+                                </div>
+                                <div className={COUNTER_BOX}>
+                                  <div className={COUNTER_GRID}>
+                                    <span className={COUNTER_LABEL}>Remaining</span>
+                                    <span className={COUNTER_VALUE}>{invRem}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
-                    </div>
+                    ) : isTIP ? (
+                      <>
+                        {/* Left card: 2V14 / 2V27 */}
+                        <div className="min-w-[140px] border-2 border-slate-700 bg-slate-800 py-3 px-3 self-center">
+                          <div className="flex flex-col gap-y-1">
+                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                              <span className="text-xs font-bold text-slate-200">{activeMode?.smallTableLabel || '2V14'}</span>
+                              <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{tableSmallCount}</span>
+                            </div>
+                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                              <span className="text-xs font-bold text-slate-200">{activeMode?.bigTableLabel || '2V27'}</span>
+                              <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{tableBigCount}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right group: Total / Completed / Remaining */}
+                        <div className="flex items-center gap-3 self-center">
+                          <div className="min-w-[120px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
+                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                              <span className="text-xs font-bold text-slate-200">Total</span>
+                              <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{tipTotal}</span>
+                            </div>
+                          </div>
+
+                          <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
+                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                              <span className="text-xs font-bold text-emerald-400">Completed</span>
+                              <span className="text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap">
+                                {tipCompletedTables}, {completedPct.toFixed(2)}%
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="min-w-[140px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
+                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                              <span className="text-xs font-bold text-slate-200">Remaining</span>
+                              <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingTotal}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    ) : isPTEP ? (
+                      <>
+                        {/* PTEP: MC4-style sub-mode selector with counters */}
+                        {(() => {
+                          const isTTMode = ptepSubMode === 'tabletotable';
+                          const isParamMode = ptepSubMode === 'parameter';
+                          const ttTotal = ptepTotalTableToTable;
+                          const ttDone = ptepCompletedTableToTable.size;
+                          const ttRem = Math.max(0, ttTotal - ttDone);
+                          const ttPct = ttTotal > 0 ? ((ttDone / ttTotal) * 100).toFixed(2) : '0.00';
+                          const paramTotal = ptepTotalParameterMeters;
+                          const paramDone = ptepCompletedParameterMeters;
+                          const paramRem = Math.max(0, paramTotal - paramDone);
+                          const paramPct = paramTotal > 0 ? ((paramDone / paramTotal) * 100).toFixed(2) : '0.00';
+                          // Fixed-width counter box style for alignment
+                          const PTEP_COUNTER_BOX = 'w-[160px] border-2 border-slate-700 bg-slate-800 py-2 px-3';
+                          return (
+                            <div className="min-w-[900px] border-2 border-slate-700 bg-slate-900/40 py-3 px-3">
+                              <div className="flex flex-col gap-2">
+                                {/* Table-to-Table row */}
+                                <div
+                                  className="grid grid-cols-[24px_180px_160px_160px_160px] items-center gap-x-3 cursor-pointer"
+                                  onClick={() => {
+                                    if (!isTTMode) {
+                                      ptepSubModeRef.current = 'tabletotable';
+                                      setPtepSubMode('tabletotable');
+                                      try {
+                                        const map = mapRef.current;
+                                        if (map) {
+                                          const ttPane = map.getPane('ptepTableToTablePane');
+                                          const paramPane = map.getPane('ptepParameterPane');
+                                          if (ttPane) ttPane.style.pointerEvents = 'auto';
+                                          if (paramPane) paramPane.style.pointerEvents = 'none';
+                                        }
+                                      } catch (_e) {
+                                        void _e;
+                                      }
+                                    }
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (!isTTMode) {
+                                        ptepSubModeRef.current = 'tabletotable';
+                                        setPtepSubMode('tabletotable');
+                                        try {
+                                          const map = mapRef.current;
+                                          if (map) {
+                                            const ttPane = map.getPane('ptepTableToTablePane');
+                                            const paramPane = map.getPane('ptepParameterPane');
+                                            if (ttPane) ttPane.style.pointerEvents = 'auto';
+                                            if (paramPane) paramPane.style.pointerEvents = 'none';
+                                          }
+                                        } catch (_e) {
+                                          void _e;
+                                        }
+                                      }
+                                    }}
+                                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
+                                      isTTMode 
+                                        ? 'border-white bg-white text-slate-900' 
+                                        : 'border-slate-500 bg-slate-800 hover:border-white'
+                                    }`}
+                                    title="Select Table-to-Table mode"
+                                  >
+                                    {isTTMode && <span className="text-xs font-bold">✓</span>}
+                                  </button>
+                                  <div className={`text-sm font-bold ${isTTMode ? 'text-white' : 'text-slate-500'}`}>Table-to-Table:</div>
+                                  <div className={PTEP_COUNTER_BOX}>
+                                    <div className="flex justify-between items-center">
+                                      <span className={COUNTER_LABEL}>Total</span>
+                                      <span className={COUNTER_VALUE}>{ttTotal}</span>
+                                    </div>
+                                  </div>
+                                  <div className={PTEP_COUNTER_BOX}>
+                                    <div className="flex justify-between items-center">
+                                      <span className={isTTMode ? 'text-xs font-bold text-emerald-400' : 'text-xs font-bold text-slate-500'}>Completed</span>
+                                      <span className={isTTMode ? 'text-xs font-bold text-emerald-400 tabular-nums' : 'text-xs font-bold text-slate-500 tabular-nums'}>{ttDone}</span>
+                                    </div>
+                                  </div>
+                                  <div className={PTEP_COUNTER_BOX}>
+                                    <div className="flex justify-between items-center">
+                                      <span className={COUNTER_LABEL}>Remaining</span>
+                                      <span className={COUNTER_VALUE}>{ttRem}</span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Parameter-Earthing row */}
+                                <div
+                                  className="grid grid-cols-[24px_180px_160px_160px_160px] items-center gap-x-3 cursor-pointer"
+                                  onClick={() => {
+                                    if (!isParamMode) {
+                                      ptepSubModeRef.current = 'parameter';
+                                      setPtepSubMode('parameter');
+                                      try {
+                                        const map = mapRef.current;
+                                        if (map) {
+                                          const ttPane = map.getPane('ptepTableToTablePane');
+                                          const paramPane = map.getPane('ptepParameterPane');
+                                          if (ttPane) ttPane.style.pointerEvents = 'none';
+                                          if (paramPane) paramPane.style.pointerEvents = 'auto';
+                                        }
+                                      } catch (_e) {
+                                        void _e;
+                                      }
+                                    }
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (!isParamMode) {
+                                        ptepSubModeRef.current = 'parameter';
+                                        setPtepSubMode('parameter');
+                                        try {
+                                          const map = mapRef.current;
+                                          if (map) {
+                                            const ttPane = map.getPane('ptepTableToTablePane');
+                                            const paramPane = map.getPane('ptepParameterPane');
+                                            if (ttPane) ttPane.style.pointerEvents = 'none';
+                                            if (paramPane) paramPane.style.pointerEvents = 'auto';
+                                          }
+                                        } catch (_e) {
+                                          void _e;
+                                        }
+                                      }
+                                    }}
+                                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
+                                      isParamMode 
+                                        ? 'border-amber-400 bg-amber-400 text-slate-900' 
+                                        : 'border-slate-500 bg-slate-800 hover:border-amber-400'
+                                    }`}
+                                    title="Select Parameter-Earthing mode"
+                                  >
+                                    {isParamMode && <span className="text-xs font-bold">✓</span>}
+                                  </button>
+                                  <div className={`text-sm font-bold ${isParamMode ? 'text-amber-400' : 'text-slate-500'}`}>Parameter-Earthing:</div>
+                                  <div className={PTEP_COUNTER_BOX}>
+                                    <div className="flex justify-between items-center">
+                                      <span className={COUNTER_LABEL}>Total</span>
+                                      <span className={COUNTER_VALUE}>{paramTotal.toFixed(0)} m</span>
+                                    </div>
+                                  </div>
+                                  <div className={PTEP_COUNTER_BOX}>
+                                    <div className="flex justify-between items-center">
+                                      <span className={isParamMode ? 'text-xs font-bold text-emerald-400' : 'text-xs font-bold text-slate-500'}>Completed</span>
+                                      <span className={isParamMode ? 'text-xs font-bold text-emerald-400 tabular-nums' : 'text-xs font-bold text-slate-500 tabular-nums'}>{paramDone.toFixed(0)} m</span>
+                                    </div>
+                                  </div>
+                                  <div className={PTEP_COUNTER_BOX}>
+                                    <div className="flex justify-between items-center">
+                                      <span className={COUNTER_LABEL}>Remaining</span>
+                                      <span className={COUNTER_VALUE}>{paramRem.toFixed(0)} m</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </>
+                    ) : (
+                      <>
+                        {/* Non-TIP simple counters */}
+                        <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                          <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                            <span className="text-xs font-bold text-slate-200">Total</span>
+                            <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{formatSimpleCounter(overallTotal)}</span>
+                          </div>
+                        </div>
+
+                        <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                          <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                            <span className="text-xs font-bold text-emerald-400">Completed</span>
+                            <span className="text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap">
+                              {formatSimpleCounter(completedTotal)}, {completedPct.toFixed(2)}%
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                          <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                            <span className="text-xs font-bold text-slate-200">Remaining</span>
+                            <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{formatSimpleCounter(remainingTotal)}</span>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </>
                 ) : (
                   <>
@@ -6379,67 +11229,131 @@ export default function BaseModule({
               </svg>
             </button>
 
-            <button
-              onClick={() => setModalOpen(true)}
-              disabled={
-                noteMode ||
-                (isMC4 && !mc4SelectionMode) ||
-                (isLVTT
-                  ? (String(lvttSubMode || 'termination') === 'testing' || lvttCompletedForSubmit === 0)
-                  : (isMVT ? mvtCompletedForSubmit === 0 : workSelectionCount === 0))
-              }
-              className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-              title={isMC4 && !mc4SelectionMode ? "Select MC4 Install or Cable Termination first" : "Submit Work"}
-              aria-label="Submit Work"
-            >
-              Submit
-            </button>
+            {!isDCCT && (
+              <>
+                <button
+                  onClick={() => setModalOpen(true)}
+                  disabled={
+                    noteMode ||
+                    (isMC4 && !mc4SelectionMode) ||
+                    (isDATP
+                      ? datpCompletedForSubmit === 0
+                      : (isPTEP
+                        ? (ptepSubMode === 'tabletotable' ? ptepCompletedTableToTable.size === 0 : ptepCompletedParameterMeters === 0)
+                        : (isLVTT
+                          ? (String(lvttSubMode || 'termination') === 'testing' || lvttCompletedForSubmit === 0)
+                          : (isMVT ? mvtCompletedForSubmit === 0 : workSelectionCount === 0))))
+                  }
+                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                  title={isMC4 && !mc4SelectionMode ? "Select MC4 Install or Cable Termination first" : "Submit Work"}
+                  aria-label="Submit Work"
+                >
+                  Submit
+                </button>
 
-            <button
-              onClick={() => setHistoryOpen(true)}
-              disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || (dailyLog.length === 0 && notes.length === 0)}
-              className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-              title={isLVTT && String(lvttSubMode || 'termination') === 'testing' ? 'History disabled in LV_TESTING' : 'History'}
-              aria-label="History"
-            >
-              History
-            </button>
+                <button
+                  onClick={() => setHistoryOpen(true)}
+                  disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || (dailyLog.length === 0 && notes.length === 0)}
+                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                  title={isLVTT && String(lvttSubMode || 'termination') === 'testing' ? 'History disabled in LV_TESTING' : 'History'}
+                  aria-label="History"
+                >
+                  History
+                </button>
 
-            <button
-              onClick={() =>
-                exportToExcel(dailyLog, {
-                  moduleKey: isMC4
-                    ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST')
-                    : (isMVT
-                      ? 'MVT_TERM'
-                      : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-                        ? 'LVTT_TERM'
-                        : (activeMode?.key || '')),
-                  moduleLabel: isMC4
-                    ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
-                    : (isMVT
-                      ? 'Cable Termination'
-                      : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-                        ? 'Cable Termination'
-                        : moduleName),
-                  unit: isMC4
-                    ? 'ends'
-                    : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination')) ? 'cables' : 'm'),
-                  chartSheetName: (isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
-                    ? 'Cable Termination'
-                    : undefined,
-                  chartTitle: (isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
-                    ? 'Cable Termination'
-                    : undefined,
-                })
-              }
-              disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || dailyLog.length === 0}
-              className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-              title={isLVTT && String(lvttSubMode || 'termination') === 'testing' ? 'Export disabled in LV_TESTING' : 'Export Excel'}
-              aria-label="Export Excel"
-            >
-              Export
-            </button>
+                <button
+                  onClick={() =>
+                    exportToExcel(dailyLog, {
+                      moduleKey: isMC4
+                        ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST')
+                        : (isDATP
+                          ? 'DATP'
+                          : (isPTEP
+                            ? (ptepSubMode === 'tabletotable' ? 'PTEP_TT' : 'PTEP_PARAM')
+                            : (isMVT
+                              ? 'MVT_TERM'
+                              : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                                ? 'LVTT_TERM'
+                                : (activeMode?.key || '')))),
+                      moduleLabel: isMC4
+                        ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
+                        : (isDATP
+                          ? 'DC&AC Trench'
+                          : (isPTEP
+                            ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+                            : (isMVT
+                              ? 'Cable Termination'
+                              : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                                ? 'Cable Termination'
+                                : moduleName))),
+                      unit: isMC4
+                        ? 'ends'
+                        : (isDATP
+                          ? 'm'
+                          : (isPTEP
+                            ? (ptepSubMode === 'tabletotable' ? 'pcs' : 'm')
+                            : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination')) ? 'cables' : 'm'))),
+                      chartSheetName: isDATP
+                        ? 'DC&AC Trench Progress'
+                        : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
+                          ? 'Cable Termination'
+                          : (isPTEP
+                            ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+                            : undefined)),
+                      chartTitle: isDATP
+                        ? 'DC&AC Trench Progress'
+                        : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
+                          ? 'Cable Termination'
+                          : (isPTEP
+                            ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+                            : undefined)),
+                    })
+                  }
+                  disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || dailyLog.length === 0}
+                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                  title={isLVTT && String(lvttSubMode || 'termination') === 'testing' ? 'Export disabled in LV_TESTING' : 'Export Excel'}
+                  aria-label="Export Excel"
+                >
+                  Export
+                </button>
+              </>
+            )}
+
+            {/* DCCT: Import/Export buttons */}
+            {isDCCT && (
+              <>
+                <input
+                  ref={dcctFileInputRef}
+                  type="file"
+                  accept=".csv"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target?.files?.[0];
+                    if (file) {
+                      dcctImportCsv(file);
+                    }
+                    // Reset input so same file can be re-selected
+                    if (e.target) e.target.value = '';
+                  }}
+                />
+                <button
+                  onClick={() => dcctFileInputRef.current?.click()}
+                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                  title="Import CSV file with test results"
+                  aria-label="Import CSV"
+                >
+                  Import
+                </button>
+                <button
+                  onClick={dcctExportCsv}
+                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                  title="Export current test results to CSV"
+                  aria-label="Export CSV"
+                >
+                  Export
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -6565,6 +11479,103 @@ export default function BaseModule({
         )}
 
         {/* Legend / DWG / Notes (right aligned, vertically centered on screen) */}
+        {/* For PUNCH_LIST: Show Punch and Contractor buttons instead of Legend/DWG/TEXT */}
+        {isPL ? (
+          <div className="fixed right-3 sm:right-5 top-[40%] -translate-y-1/2 z-[1090] flex flex-col items-end gap-4">
+            {/* Punch button with red pulsing dot */}
+            <button
+              type="button"
+              onClick={() => {
+                setNoteMode((prev) => !prev);
+              }}
+              aria-pressed={noteMode}
+              aria-label={noteMode ? 'Exit Punch Mode' : 'Punch Mode'}
+              title={noteMode ? 'Exit Punch Mode' : 'Punch Mode'}
+              className="relative inline-flex h-8 items-center justify-center border-2 border-slate-700 bg-slate-900 px-3 text-[11px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
+            >
+              Punch
+              {/* Red corner indicator (pulses when active) */}
+              <svg
+                className={`note-dot absolute -right-1 -top-1 ${noteMode ? 'h-3 w-3 note-dot--active' : 'h-2 w-2'}`}
+                viewBox="0 0 12 12"
+                aria-hidden="true"
+              >
+                <circle cx="6" cy="6" r="4" fill="#e23a3a" stroke="#7a0f0f" strokeWidth="2" />
+              </svg>
+            </button>
+            
+            {/* Selected punches indicator */}
+            {plSelectedPunches.size > 0 && (
+              <div className="inline-flex h-8 items-center gap-2 border-2 border-red-700 bg-red-900/80 px-3 text-[11px] font-extrabold uppercase tracking-wide text-red-200">
+                <span>{plSelectedPunches.size} Selected</span>
+                <button
+                  type="button"
+                  onClick={() => plDeleteSelectedPunches()}
+                  className="text-red-400 hover:text-white ml-1"
+                  title="Delete Selected (Delete key)"
+                >
+                  🗑️
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPlSelectedPunches(new Set())}
+                  className="text-red-400 hover:text-white"
+                  title="Clear Selection (Escape)"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+            
+            {/* Legend for PUNCH_LIST - in the middle */}
+            <div className="border-2 border-slate-700 bg-slate-900 px-4 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
+              <div className="text-base font-black uppercase tracking-wide text-white">Legend</div>
+              <div className="mt-2 border-2 border-slate-700 bg-slate-800 px-3 py-2">
+                {/* Completed punch indicator */}
+                <div className="flex items-center gap-2">
+                  <span 
+                    className="h-3 w-3 rounded-full border-2 border-emerald-300" 
+                    style={{ backgroundColor: PUNCH_COMPLETED_COLOR }}
+                    aria-hidden="true" 
+                  />
+                  <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-400">Completed</span>
+                </div>
+                {/* Contractor colors */}
+                {plContractors.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-slate-600">
+                    {plContractors.map((c) => (
+                      <div key={c.id} className="flex items-center gap-2 mt-1 first:mt-0">
+                        <span 
+                          className="h-3 w-3 rounded-full border border-white/40" 
+                          style={{ backgroundColor: c.color }}
+                          aria-hidden="true" 
+                        />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-slate-300">{c.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Contractor button - at the bottom, always shows "Contractor" */}
+            <button
+              type="button"
+              id="pl-contractor-btn"
+              onClick={() => setPlContractorDropdownOpen((v) => !v)}
+              className="inline-flex h-8 min-w-[120px] items-center justify-between gap-2 border-2 border-slate-700 bg-slate-900 px-3 text-[11px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
+            >
+              {plSelectedContractorId && (
+                <span
+                  className="inline-block h-3 w-3 rounded-full border border-white/40 flex-shrink-0"
+                  style={{ backgroundColor: plGetContractor(plSelectedContractorId)?.color || '#888' }}
+                />
+              )}
+              <span className={plSelectedContractorId ? 'text-white' : 'text-amber-400'}>Contractor</span>
+              <svg className="h-3 w-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+            </button>
+          </div>
+        ) : (
         <div className="fixed right-3 sm:right-5 top-[40%] -translate-y-1/2 z-[1090] flex flex-col items-end gap-2">
           <div className="border-2 border-slate-700 bg-slate-900 px-4 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
             <div className="text-base font-black uppercase tracking-wide text-white">Legend</div>
@@ -6582,6 +11593,62 @@ export default function BaseModule({
                   <div className="mt-2 flex items-center gap-2">
                     <span className="h-3 w-3 rounded-full border-2 border-emerald-700 bg-emerald-500" aria-hidden="true" />
                     <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-400">Completed Termination</span>
+                  </div>
+                </>
+              ) : isPTEP ? (
+                <>
+                  {/* Blue dashed line for Table to Table */}
+                  <div className="flex items-center gap-2">
+                    <svg width="24" height="12" aria-hidden="true">
+                      <line x1="0" y1="6" x2="24" y2="6" stroke="#3b82f6" strokeWidth="2" strokeDasharray="4 3" />
+                    </svg>
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-blue-400">Table to Table</span>
+                  </div>
+                  {/* Yellow line for Parameter Earthing */}
+                  <div className="mt-2 flex items-center gap-2">
+                    <svg width="24" height="12" aria-hidden="true">
+                      <line x1="0" y1="6" x2="24" y2="6" stroke="#facc15" strokeWidth="2" />
+                    </svg>
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-yellow-400">Parameter Earthing</span>
+                  </div>
+                  {/* Green line for Completed */}
+                  <div className="mt-2 flex items-center gap-2">
+                    <svg width="24" height="12" aria-hidden="true">
+                      <line x1="0" y1="6" x2="24" y2="6" stroke="#22c55e" strokeWidth="2" />
+                    </svg>
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-400">Completed</span>
+                  </div>
+                </>
+              ) : isDATP ? (
+                <>
+                  {/* Blue line for Uncompleted */}
+                  <div className="flex items-center gap-2">
+                    <svg width="24" height="12" aria-hidden="true">
+                      <line x1="0" y1="6" x2="24" y2="6" stroke={datpTrenchLineColor} strokeWidth="2" />
+                    </svg>
+                    <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: datpTrenchLineColor }}>Uncompleted</span>
+                  </div>
+                  {/* Green line for Completed */}
+                  <div className="mt-2 flex items-center gap-2">
+                    <svg width="24" height="12" aria-hidden="true">
+                      <line x1="0" y1="6" x2="24" y2="6" stroke={datpCompletedLineColor} strokeWidth="2" />
+                    </svg>
+                    <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: datpCompletedLineColor }}>Completed</span>
+                  </div>
+                </>
+              ) : isDCCT ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 border-2 border-emerald-900 bg-emerald-500" aria-hidden="true" />
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">PASSED</span>
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="h-3 w-3 border-2 border-red-900 bg-red-500" aria-hidden="true" />
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">FAILED</span>
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="h-3 w-3 border-2 border-slate-600 bg-slate-500" aria-hidden="true" />
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-slate-300">NOT TESTED</span>
                   </div>
                 </>
               ) : (
@@ -6622,6 +11689,17 @@ export default function BaseModule({
                           </div>
                         </>
                       )}
+                    </>
+                  ) : isLVIB ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-red-300 bg-red-500" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">Uncompleted</span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Completed</span>
+                      </div>
                     </>
                   ) : (
                     <>
@@ -6681,9 +11759,12 @@ export default function BaseModule({
             </button>
           )}
         </div>
+        )}
 
-        {/* NOTE (between header and legend, right-aligned with legend/DWG) */}
-        <div className="fixed right-3 sm:right-5 top-[20%] z-[1090] note-btn-wrap">
+        {/* NOTE button (between header and legend, right-aligned with legend/DWG) */}
+        {/* PUNCH_LIST: Note/Punch button is hidden - punch mode is always active */}
+        {!isPL && (
+        <div className="fixed right-3 sm:right-5 top-[20%] z-[1090] note-btn-wrap flex flex-col items-end gap-1">
           <button
             type="button"
             onClick={() => {
@@ -6709,6 +11790,7 @@ export default function BaseModule({
             </svg>
           </button>
         </div>
+        )}
         </div>
       </div>
 
@@ -7291,6 +12373,811 @@ export default function BaseModule({
         </div>
       )}
 
+      {/* ─────────────────────────────────────────────────────────────────
+          PUNCH LIST: Punch Edit Popup - Dark Industrial Theme
+          ───────────────────────────────────────────────────────────────── */}
+      {isPL && plEditingPunch && (() => {
+        // Calculate popup position to avoid covering the punch point
+        const popupWidth = 320;
+        const popupHeight = 400;
+        const margin = 20;
+        let popupX = (plPopupPosition?.x || window.innerWidth / 2) + margin;
+        let popupY = (plPopupPosition?.y || window.innerHeight / 2) - popupHeight / 2;
+        
+        // Adjust if would go off-screen right
+        if (popupX + popupWidth > window.innerWidth - margin) {
+          popupX = (plPopupPosition?.x || window.innerWidth / 2) - popupWidth - margin;
+        }
+        // Adjust if would go off-screen bottom
+        if (popupY + popupHeight > window.innerHeight - margin) {
+          popupY = window.innerHeight - popupHeight - margin;
+        }
+        // Adjust if would go off-screen top
+        if (popupY < margin) {
+          popupY = margin;
+        }
+        
+        return (
+        <div
+          className="punch-popup-overlay"
+          onClick={() => {
+            setPlEditingPunch(null);
+            setPlPunchText('');
+            setPlPunchContractorId(null);
+            setPlPunchPhotoDataUrl(null);
+            setPlPunchPhotoName('');
+            setPlPopupPosition(null);
+          }}
+        >
+          <div 
+            className="punch-popup-compact" 
+            onClick={(e) => e.stopPropagation()}
+            style={{ left: popupX, top: popupY }}
+          >
+            <div 
+              className="punch-popup-header-compact punch-popup-draggable"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                const startX = e.clientX;
+                const startY = e.clientY;
+                const startLeft = popupX;
+                const startTop = popupY;
+                
+                const onMouseMove = (ev) => {
+                  const dx = ev.clientX - startX;
+                  const dy = ev.clientY - startY;
+                  setPlPopupPosition({ x: startLeft + dx - 20, y: startTop + dy + 160 });
+                };
+                
+                const onMouseUp = () => {
+                  document.removeEventListener('mousemove', onMouseMove);
+                  document.removeEventListener('mouseup', onMouseUp);
+                };
+                
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+              }}
+            >
+              <h3>
+                <span
+                  className="inline-block h-3 w-3 rounded-full border border-white/40"
+                  style={{ backgroundColor: plGetContractor(plPunchContractorId)?.color || '#888' }}
+                />
+                Punch
+              </h3>
+              <button
+                className="punch-close-btn-compact"
+                onClick={() => {
+                  setPlEditingPunch(null);
+                  setPlPunchText('');
+                  setPlPunchContractorId(null);
+                  setPlPunchPhotoDataUrl(null);
+                  setPlPunchPhotoName('');
+                  setPlPopupPosition(null);
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Contractor selector */}
+            <div className="punch-form-row-compact">
+              <select
+                className="punch-select-compact"
+                value={plPunchContractorId || ''}
+                onChange={(e) => setPlPunchContractorId(e.target.value || null)}
+              >
+                <option value="">Contractor...</option>
+                {plContractors.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Photo section */}
+            <div className="punch-photo-section-compact">
+              <input
+                ref={plPunchPhotoInputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  handlePlPunchPhotoSelected(file);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                className="punch-btn-photo-compact"
+                onClick={() => plPunchPhotoInputRef.current?.click()}
+                type="button"
+              >
+                📷
+              </button>
+              {plPunchPhotoDataUrl && (
+                <button
+                  className="punch-btn-remove-photo-compact"
+                  onClick={() => {
+                    setPlPunchPhotoDataUrl(null);
+                    setPlPunchPhotoName('');
+                  }}
+                  type="button"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {plPunchPhotoDataUrl && (
+              <div 
+                className="punch-photo-preview-medium"
+                onClick={(e) => {
+                  // Open lightbox on click
+                  e.stopPropagation();
+                  // Position lightbox dynamically - offset from popup
+                  const lightboxX = popupX + 280;
+                  const lightboxY = popupY;
+                  // If would go off-screen right, put it on the left
+                  const finalX = lightboxX + 350 > window.innerWidth ? popupX - 370 : lightboxX;
+                  setPlPhotoLightbox({ url: plPunchPhotoDataUrl, name: plPunchPhotoName, x: finalX, y: lightboxY });
+                }}
+                title="Click to enlarge"
+              >
+                <img src={plPunchPhotoDataUrl} alt={plPunchPhotoName || 'Punch attachment'} draggable={false} />
+                <div className="punch-photo-zoom-hint">🔍 Click to enlarge</div>
+              </div>
+            )}
+
+            {/* Description */}
+            <div className="punch-form-row-compact">
+              <textarea
+                className="punch-textarea-compact"
+                value={plPunchText}
+                onChange={(e) => setPlPunchText(e.target.value)}
+                placeholder="Description..."
+                autoFocus
+              />
+            </div>
+
+            {/* Actions - compact */}
+            <div className="punch-actions-compact">
+              <button className="punch-btn-delete-compact" onClick={() => plDeletePunch(plEditingPunch.id)} title="Delete">
+                🗑️
+              </button>
+              {!plEditingPunch.completed ? (
+                <button
+                  className="punch-btn-done-compact"
+                  onClick={() => plMarkPunchCompleted(plEditingPunch.id)}
+                  title="Mark as completed"
+                >
+                  ✓
+                </button>
+              ) : (
+                <button
+                  className="punch-btn-uncomplete-compact"
+                  onClick={() => plMarkPunchUncompleted(plEditingPunch.id)}
+                  title="Mark as uncompleted"
+                >
+                  ↩
+                </button>
+              )}
+              <button className="punch-btn-save-compact" onClick={plSavePunch} title="Save">
+                💾
+              </button>
+            </div>
+
+            {plEditingPunch.completed && (
+              <div className="punch-completed-badge">✓ COMPLETED</div>
+            )}
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* Photo Lightbox - enlarged view */}
+      {isPL && plPhotoLightbox && (
+        <div
+          className="punch-lightbox-overlay"
+          onClick={() => setPlPhotoLightbox(null)}
+        >
+          <div
+            className="punch-lightbox"
+            style={{ left: plPhotoLightbox.x, top: plPhotoLightbox.y }}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              
+              // Middle mouse button (button === 1) = pan the image
+              if (e.button === 1) {
+                const startX = e.clientX;
+                const startY = e.clientY;
+                const startPanX = plPhotoLightbox.panX || 0;
+                const startPanY = plPhotoLightbox.panY || 0;
+                
+                const onMouseMove = (ev) => {
+                  const dx = ev.clientX - startX;
+                  const dy = ev.clientY - startY;
+                  setPlPhotoLightbox(prev => ({ ...prev, panX: startPanX + dx, panY: startPanY + dy }));
+                };
+                
+                const onMouseUp = () => {
+                  document.removeEventListener('mousemove', onMouseMove);
+                  document.removeEventListener('mouseup', onMouseUp);
+                };
+                
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+                return;
+              }
+              
+              // Left mouse button = drag the lightbox
+              const startX = e.clientX;
+              const startY = e.clientY;
+              const startLeft = plPhotoLightbox.x;
+              const startTop = plPhotoLightbox.y;
+              
+              const onMouseMove = (ev) => {
+                const dx = ev.clientX - startX;
+                const dy = ev.clientY - startY;
+                setPlPhotoLightbox(prev => ({ ...prev, x: startLeft + dx, y: startTop + dy }));
+              };
+              
+              const onMouseUp = () => {
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+              };
+              
+              document.addEventListener('mousemove', onMouseMove);
+              document.addEventListener('mouseup', onMouseUp);
+            }}
+            onWheel={(e) => {
+              // Mouse wheel zoom
+              e.preventDefault();
+              e.stopPropagation();
+              const delta = e.deltaY > 0 ? -0.1 : 0.1; // scroll down = zoom out, scroll up = zoom in
+              setPlPhotoLightbox(prev => ({
+                ...prev,
+                zoom: Math.min(3, Math.max(0.5, (prev.zoom || 1) + delta))
+              }));
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <button
+              className="punch-lightbox-close"
+              onClick={() => setPlPhotoLightbox(null)}
+            >
+              ×
+            </button>
+            <img 
+              src={plPhotoLightbox.url} 
+              alt={plPhotoLightbox.name || 'Punch photo'} 
+              draggable={false}
+              style={{ 
+                transform: `scale(${plPhotoLightbox.zoom || 1}) translate(${(plPhotoLightbox.panX || 0) / (plPhotoLightbox.zoom || 1)}px, ${(plPhotoLightbox.panY || 0) / (plPhotoLightbox.zoom || 1)}px)` 
+              }}
+            />
+            <div className="punch-lightbox-zoom-hint">
+              🖱️ Scroll: Zoom ({Math.round((plPhotoLightbox.zoom || 1) * 100)}%) | Middle click + drag: Pan
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────────
+          PUNCH LIST: Contractor Dropdown Menu (appears below button)
+          ───────────────────────────────────────────────────────────────── */}
+      {isPL && plContractorDropdownOpen && !plShowAddContractorForm && !plEditingContractor && (() => {
+        // Position dropdown below the contractor button
+        const btn = document.getElementById('pl-contractor-btn');
+        const btnRect = btn?.getBoundingClientRect();
+        const dropdownTop = btnRect ? btnRect.bottom + 4 : 300;
+        const dropdownRight = btnRect ? (window.innerWidth - btnRect.right) : 12;
+        
+        return (
+        <div
+          className="contractor-dropdown-overlay"
+          onClick={() => setPlContractorDropdownOpen(false)}
+        >
+          <div 
+            className="contractor-dropdown-menu"
+            style={{ top: dropdownTop, right: dropdownRight }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Contractor List (if contractors exist) */}
+            {plContractors.length > 0 && (
+              <div className="contractor-dropdown-list">
+                {plContractors.map((c) => (
+                  <div
+                    key={c.id}
+                    className={`contractor-dropdown-item ${plSelectedContractorId === c.id ? 'selected' : ''}`}
+                    onClick={() => {
+                      setPlSelectedContractorId(c.id);
+                      setPlContractorDropdownOpen(false);
+                    }}
+                  >
+                    <span className="contractor-color-dot" style={{ backgroundColor: c.color }} />
+                    <span className="contractor-name">{c.name}</span>
+                    <button
+                      type="button"
+                      className="contractor-dropdown-edit"
+                      title="Edit"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPlEditingContractor(c);
+                        setPlEditContractorName(c.name);
+                        setPlEditContractorColor(c.color);
+                      }}
+                    >
+                      ✎
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Add Contractor option - always visible */}
+            <div 
+              className="contractor-dropdown-add"
+              onClick={() => {
+                setPlShowAddContractorForm(true);
+              }}
+            >
+              <span className="contractor-add-icon">+</span>
+              <span>Add Contractor</span>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* ─────────────────────────────────────────────────────────────────
+          PUNCH LIST: Add/Edit Contractor Modal - Center Screen
+          ───────────────────────────────────────────────────────────────── */}
+      {isPL && (plShowAddContractorForm || plEditingContractor) && (
+        <div
+          className="contractor-modal-overlay"
+          onClick={() => {
+            setPlShowAddContractorForm(false);
+            setPlEditingContractor(null);
+            setPlEditContractorName('');
+            setPlEditContractorColor('');
+            setPlNewContractorName('');
+          }}
+        >
+          <div className="contractor-modal" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="contractor-modal-header">
+              <h3>👷 {plEditingContractor ? 'Edit Contractor' : 'Add Contractor'}</h3>
+              <button
+                className="contractor-modal-close"
+                onClick={() => {
+                  setPlShowAddContractorForm(false);
+                  setPlEditingContractor(null);
+                  setPlEditContractorName('');
+                  setPlEditContractorColor('');
+                  setPlNewContractorName('');
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Edit Contractor Form */}
+            {plEditingContractor && (
+              <div className="contractor-form-section compact">
+                <input
+                  type="text"
+                  className="contractor-input compact"
+                  value={plEditContractorName}
+                  onChange={(e) => setPlEditContractorName(e.target.value)}
+                  placeholder="Contractor name"
+                  autoFocus
+                />
+                <div className="contractor-color-picker compact">
+                  {DEFAULT_PUNCH_COLORS.map((clr) => {
+                    const isUsedByOther = plContractors.some(c => c.color === clr && c.id !== plEditingContractor.id);
+                    return (
+                      <button
+                        key={clr}
+                        type="button"
+                        className={`contractor-color-option compact ${plEditContractorColor === clr ? 'selected' : ''} ${isUsedByOther ? 'disabled' : ''}`}
+                        style={{ backgroundColor: clr, opacity: isUsedByOther ? 0.3 : 1 }}
+                        onClick={() => !isUsedByOther && setPlEditContractorColor(clr)}
+                        disabled={isUsedByOther}
+                        title={isUsedByOther ? 'This color is used by another contractor' : ''}
+                      />
+                    );
+                  })}
+                </div>
+                <div className="contractor-form-actions">
+                  <button
+                    type="button"
+                    className="contractor-btn delete"
+                    onClick={() => {
+                      if (window.confirm(`Are you sure you want to delete contractor "${plEditingContractor.name}"?`)) {
+                        plRemoveContractor(plEditingContractor.id);
+                        if (plSelectedContractorId === plEditingContractor.id) setPlSelectedContractorId(null);
+                        setPlEditingContractor(null);
+                        setPlEditContractorName('');
+                        setPlEditContractorColor('');
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
+                  <button
+                    type="button"
+                    className="contractor-btn cancel"
+                    onClick={() => {
+                      setPlEditingContractor(null);
+                      setPlEditContractorName('');
+                      setPlEditContractorColor('');
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="contractor-btn save"
+                    disabled={!plEditContractorName.trim()}
+                    onClick={() => {
+                      plUpdateContractor(plEditingContractor.id, plEditContractorName, plEditContractorColor);
+                      setPlEditingContractor(null);
+                      setPlEditContractorName('');
+                      setPlEditContractorColor('');
+                    }}
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Add New Contractor Form - Compact style like Edit */}
+            {plShowAddContractorForm && !plEditingContractor && (
+              <div className="contractor-form-section compact">
+                <input
+                  type="text"
+                  className="contractor-input compact"
+                  value={plNewContractorName}
+                  onChange={(e) => setPlNewContractorName(e.target.value)}
+                  placeholder="Contractor name"
+                  autoFocus
+                />
+                <div className="contractor-color-picker compact">
+                  {DEFAULT_PUNCH_COLORS.map((clr) => {
+                    const isUsed = plContractors.some(c => c.color === clr);
+                    return (
+                      <button
+                        key={clr}
+                        type="button"
+                        className={`contractor-color-option compact ${plNewContractorColor === clr ? 'selected' : ''} ${isUsed ? 'disabled' : ''}`}
+                        style={{ backgroundColor: clr, opacity: isUsed ? 0.3 : 1 }}
+                        onClick={() => !isUsed && setPlNewContractorColor(clr)}
+                        disabled={isUsed}
+                        title={isUsed ? 'This color is used by another contractor' : ''}
+                      />
+                    );
+                  })}
+                </div>
+                <div className="contractor-form-actions">
+                  <button
+                    type="button"
+                    className="contractor-btn cancel"
+                    onClick={() => {
+                      setPlShowAddContractorForm(false);
+                      setPlNewContractorName('');
+                      setPlNewContractorColor(getFirstAvailableColor());
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="contractor-btn save"
+                    disabled={!plNewContractorName.trim()}
+                    onClick={() => {
+                      const newC = plAddContractor(plNewContractorName, plNewContractorColor);
+                      if (newC) {
+                        setPlSelectedContractorId(newC.id);
+                        setPlNewContractorName('');
+                        setPlNewContractorColor(getFirstAvailableColor());
+                        setPlShowAddContractorForm(false);
+                        setPlContractorDropdownOpen(false);
+                      }
+                    }}
+                  >
+                    + Add
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────────
+          PUNCH LIST: Isometric Side Panel (fixed right panel, map stays interactive)
+          ───────────────────────────────────────────────────────────────── */}
+      {isPL && plIsometricOpen && plIsometricTableId && (
+        <div
+          className="fixed right-0 w-[380px] z-[1100] bg-slate-900 border-l-2 border-slate-700 shadow-2xl flex flex-col"
+          style={{ pointerEvents: 'auto', top: '60px', height: 'calc(100vh - 60px)' }}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700 bg-slate-800 flex-shrink-0">
+            <div className="flex flex-col">
+              <span className="text-white font-bold text-sm uppercase tracking-wide">Isometric</span>
+              <span className="text-amber-400 font-mono text-base font-bold">{plIsometricTableId}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-slate-400 text-[11px]">
+                {plPunches.filter(p => p.tableId === plIsometricTableId).length} punch
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setPlIsometricOpen(false);
+                  setPlIsometricTableId(null);
+                }}
+                className="text-slate-400 hover:text-white text-xl font-bold leading-none"
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+
+          {/* Contractor Selector */}
+          <div className="px-3 py-2 border-b border-slate-700 bg-slate-800/50">
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400 text-[10px] uppercase">Contractor:</span>
+              <select
+                className="flex-1 border border-slate-600 bg-slate-800 px-2 py-1 text-[11px] text-white focus:outline-none focus:border-amber-400 rounded"
+                value={plSelectedContractorId || ''}
+                onChange={(e) => setPlSelectedContractorId(e.target.value || null)}
+              >
+                <option value="">Select...</option>
+                {plContractors.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              {plSelectedContractorId && (
+                <span
+                  className="w-4 h-4 rounded-full border border-white/40"
+                  style={{ backgroundColor: plGetContractor(plSelectedContractorId)?.color || '#888' }}
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Isometric content area with zoom/pan */}
+          <div className="flex-1 overflow-hidden p-3 flex flex-col gap-2">
+            {/* Isometric PNG with clickable punch points, zoom & pan support */}
+            <div
+              className="relative flex-1 border border-slate-600 rounded overflow-hidden bg-slate-800"
+              style={{ minHeight: '300px' }}
+              onWheel={(e) => {
+                e.preventDefault();
+                const container = e.currentTarget;
+                const inner = container.querySelector('[data-iso-inner]');
+                if (!inner) return;
+                
+                // Get current transform values
+                const currentScale = parseFloat(inner.dataset.scale || '1');
+                const currentX = parseFloat(inner.dataset.panX || '0');
+                const currentY = parseFloat(inner.dataset.panY || '0');
+                
+                // Calculate zoom
+                const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                const newScale = Math.min(Math.max(currentScale * delta, 0.5), 5);
+                
+                // Get mouse position relative to container
+                const rect = container.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                
+                // Adjust pan to zoom towards mouse position
+                const scaleChange = newScale / currentScale;
+                const newX = mouseX - (mouseX - currentX) * scaleChange;
+                const newY = mouseY - (mouseY - currentY) * scaleChange;
+                
+                inner.dataset.scale = String(newScale);
+                inner.dataset.panX = String(newX);
+                inner.dataset.panY = String(newY);
+                inner.style.transform = `translate(${newX}px, ${newY}px) scale(${newScale})`;
+              }}
+              onMouseDown={(e) => {
+                // Only middle mouse button (button 1) for pan
+                if (e.button !== 1) return;
+                e.preventDefault();
+                const container = e.currentTarget;
+                const inner = container.querySelector('[data-iso-inner]');
+                if (!inner) return;
+                
+                const startX = e.clientX;
+                const startY = e.clientY;
+                const startPanX = parseFloat(inner.dataset.panX || '0');
+                const startPanY = parseFloat(inner.dataset.panY || '0');
+                
+                const onMouseMove = (ev) => {
+                  const dx = ev.clientX - startX;
+                  const dy = ev.clientY - startY;
+                  const newX = startPanX + dx;
+                  const newY = startPanY + dy;
+                  const scale = parseFloat(inner.dataset.scale || '1');
+                  
+                  inner.dataset.panX = String(newX);
+                  inner.dataset.panY = String(newY);
+                  inner.style.transform = `translate(${newX}px, ${newY}px) scale(${scale})`;
+                };
+                
+                const onMouseUp = () => {
+                  document.removeEventListener('mousemove', onMouseMove);
+                  document.removeEventListener('mouseup', onMouseUp);
+                };
+                
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+              }}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              {/* Fit button - top right corner of image */}
+              <button
+                type="button"
+                onClick={() => {
+                  const inner = plIsoInnerRef.current;
+                  if (inner) {
+                    inner.dataset.scale = '1';
+                    inner.dataset.panX = '0';
+                    inner.dataset.panY = '0';
+                    inner.style.transform = 'translate(0px, 0px) scale(1)';
+                  }
+                }}
+                className="absolute top-2 right-2 z-10 flex items-center justify-center w-7 h-7 bg-slate-700/80 hover:bg-slate-600 border border-slate-500 rounded transition-colors"
+                title="Fit to screen"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-300">
+                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                </svg>
+              </button>
+              <div
+                ref={plIsoInnerRef}
+                data-iso-inner="true"
+                data-scale="1"
+                data-pan-x="0"
+                data-pan-y="0"
+                className="absolute inset-0 origin-top-left cursor-crosshair"
+                style={{ transform: 'translate(0px, 0px) scale(1)' }}
+                onClick={(e) => {
+                  // Don't create punch on middle click
+                  if (e.button === 1) return;
+                  
+                  // Get click position relative to the inner container, accounting for transform
+                  const inner = e.currentTarget;
+                  const scale = parseFloat(inner.dataset.scale || '1');
+                  const panX = parseFloat(inner.dataset.panX || '0');
+                  const panY = parseFloat(inner.dataset.panY || '0');
+                  
+                  const rect = inner.parentElement.getBoundingClientRect();
+                  const clickX = e.clientX - rect.left;
+                  const clickY = e.clientY - rect.top;
+                  
+                  // Convert to original coordinates
+                  const x = ((clickX - panX) / scale / rect.width) * 100;
+                  const y = ((clickY - panY) / scale / rect.height) * 100;
+                  
+                  // Only create punch if click is within bounds
+                  if (x < 0 || x > 100 || y < 0 || y > 100) return;
+                  
+                  // Check if contractor is selected (use ref for reliability)
+                  const currentContractorId = plSelectedContractorIdRef.current;
+                  if (!currentContractorId) {
+                    // Show warning toast
+                    const toast = document.createElement('div');
+                    toast.className = 'punch-warning-toast';
+                    toast.innerHTML = '⚠️ Please select a contractor first!';
+                    document.body.appendChild(toast);
+                    setTimeout(() => toast.remove(), 2500);
+                    return;
+                  }
+                  
+                  // Get next punch number using ref (always current) and increment both ref and state
+                  const nextNumber = plPunchCounterRef.current + 1;
+                  plPunchCounterRef.current = nextNumber; // Update ref immediately for next call
+                  setPlPunchCounter(nextNumber); // Update state for persistence
+                  
+                  // Create punch with isometric position (no popup - click on dot to edit)
+                  const punch = {
+                    id: `punch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    lat: 0,
+                    lng: 0,
+                    contractorId: currentContractorId,
+                    text: '',
+                    photoDataUrl: null,
+                    photoName: '',
+                    tableId: plIsometricTableId,
+                    isoX: x,
+                    isoY: y,
+                    createdAt: new Date().toISOString(),
+                    punchNumber: nextNumber // Permanent number - never changes
+                  };
+                  setPlPunches(prev => [...prev, punch]);
+                }}
+              >
+                <img
+                  src="/PUNCH_LIST/photo/table.png"
+                  alt="Table Isometric"
+                  className="w-full h-full object-contain"
+                  draggable={false}
+                  onError={(e) => {
+                    console.error('Failed to load isometric image');
+                    e.target.style.display = 'none';
+                  }}
+                />
+                {/* Punch markers on isometric */}
+                {plPunches
+                  .filter(p => p.tableId === plIsometricTableId && p.isoX != null && p.isoY != null)
+                  .map((p) => {
+                    const c = plGetContractor(p.contractorId);
+                    // Use green for completed punches
+                    const dotColor = p.completed ? PUNCH_COMPLETED_COLOR : (c?.color || '#888');
+                    const isIsoEditing = plEditingPunch?.id === p.id;
+                    return (
+                      <div
+                        key={p.id}
+                        className={`absolute w-3 h-3 -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-transform ${isIsoEditing ? 'scale-150 z-50' : 'hover:scale-150'}`}
+                        style={{
+                          left: `${p.isoX}%`,
+                          top: `${p.isoY}%`,
+                          ...(isIsoEditing ? { animation: 'punch-editing-pulse 1s ease-in-out infinite' } : {}),
+                        }}
+                        title={`${c?.name || 'No contractor'}: ${p.text || '(no description)'}${p.completed ? ' ✓ COMPLETED' : ''}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPlEditingPunch(p);
+                          setPlPunchText(p.text || '');
+                          setPlPunchContractorId(p.contractorId);
+                          setPlPunchPhotoDataUrl(p.photoDataUrl || null);
+                          setPlPunchPhotoName(p.photoName || '');
+                        }}
+                      >
+                        <div
+                          className={`w-full h-full rounded-full border shadow-md ${isIsoEditing ? 'border-2 border-yellow-400' : 'border border-white'}`}
+                          style={{ backgroundColor: dotColor }}
+                        />
+                        {p.completed && (
+                          <span className="absolute -top-1 -right-1 text-[8px] text-white font-bold">✓</span>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+
+            {/* Instructions */}
+            <div className="text-slate-500 text-[10px] text-center py-1">
+              Scroll to zoom • Middle-click drag to pan • Click to add punch
+            </div>
+          </div>
+
+          {/* Close button at bottom */}
+          <div className="px-3 py-2 border-t border-slate-700 bg-slate-800">
+            <button
+              type="button"
+              onClick={() => {
+                setPlIsometricOpen(false);
+                setPlIsometricTableId(null);
+              }}
+              className="w-full border border-slate-600 bg-slate-700 px-3 py-2 text-[11px] font-bold uppercase text-white hover:bg-slate-600 rounded"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Submit Modal */}
       <SubmitModal
         isOpen={modalOpen}
@@ -7367,35 +13254,53 @@ export default function BaseModule({
         }}
         moduleKey={isMC4
           ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST')
-          : (isMVT
-            ? 'MVT_TERM'
-            : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-              ? 'LVTT_TERM'
-              : (activeMode?.key || ''))}
+          : (isDATP
+            ? 'DATP'
+            : (isPTEP
+              ? (ptepSubMode === 'tabletotable' ? 'PTEP_TT' : 'PTEP_PARAM')
+              : (isMVT
+                ? 'MVT_TERM'
+                : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                  ? 'LVTT_TERM'
+                  : (activeMode?.key || ''))))}
         moduleLabel={isMC4
           ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
-          : (isMVT
-            ? 'Cable Termination'
-            : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-              ? 'Cable Termination'
-              : moduleName)}
+          : (isDATP
+            ? 'DC&AC Trench'
+            : (isPTEP
+              ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+              : (isMVT
+                ? 'Cable Termination'
+                : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                  ? 'Cable Termination'
+                  : moduleName)))}
         workAmount={isMC4
           ? (mc4SelectionMode === 'termination'
             ? (mc4Counts?.terminatedCompleted || 0)
             : (mc4Counts?.mc4Completed || 0))
-          : (isMVT
-            ? mvtCompletedForSubmit
-            : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-              ? lvttCompletedForSubmit
-              : workAmount)}
+          : (isDATP
+            ? datpCompletedForSubmit
+            : (isPTEP
+              ? ptepCompletedForSubmit
+              : (isMVT
+                ? mvtCompletedForSubmit
+                : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                  ? lvttCompletedForSubmit
+                  : workAmount)))}
         workUnit={
           isMC4
             ? (mc4SelectionMode === 'termination' ? 'cables terminated' : 'mc4')
-            : (isMVT
-              ? 'cables terminated'
-              : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-                ? lvttWorkUnit
-                : 'm')
+            : (isDATP
+              ? datpWorkUnit
+              : (isPTEP
+                ? ptepWorkUnit
+                : (isMVT
+                  ? 'cables terminated'
+                  : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                    ? lvttWorkUnit
+                    : (activeMode?.submitWorkUnit
+                      ? String(activeMode.submitWorkUnit)
+                      : (activeMode?.workUnitWeights ? 'panels' : 'm')))))
         }
       />
       
@@ -7429,29 +13334,14 @@ export default function BaseModule({
                 Workers {historySortBy === 'workers' && (historySortOrder === 'desc' ? '↓' : '↑')}
               </button>
               <button 
-                className={`sort-btn ${historySortBy === 'cable' ? 'active' : ''}`}
+                className={`sort-btn ${historySortBy === 'amount' ? 'active' : ''}`}
                 onClick={() => {
-                  if (historySortBy === 'cable') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
-                  else { setHistorySortBy('cable'); setHistorySortOrder('desc'); }
+                  if (historySortBy === 'amount') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
+                  else { setHistorySortBy('amount'); setHistorySortOrder('desc'); }
                 }}
               >
-                Cable {historySortBy === 'cable' && (historySortOrder === 'desc' ? '↓' : '↑')}
+                Amount {historySortBy === 'amount' && (historySortOrder === 'desc' ? '↓' : '↑')}
               </button>
-            </div>
-            
-            <div className="history-summary">
-              <div className="summary-item">
-                <span className="summary-label">Total Records</span>
-                <span className="summary-value">{dailyLog.length}</span>
-              </div>
-              <div className="summary-item">
-                <span className="summary-label">Total Cable</span>
-                <span className="summary-value">{dailyLog.reduce((s, r) => s + (r.total_cable || 0), 0).toFixed(0)} m</span>
-              </div>
-              <div className="summary-item">
-                <span className="summary-label">Total Workers</span>
-                <span className="summary-value">{dailyLog.reduce((s, r) => s + (r.workers || 0), 0)}</span>
-              </div>
             </div>
             
             <div className="history-list">
@@ -7480,7 +13370,7 @@ export default function BaseModule({
                 const dateMetric = (d) => {
                   const recs = recordsByDate[d] || [];
                   if (historySortBy === 'workers') return recs.reduce((s, r) => s + (r.workers || 0), 0);
-                  if (historySortBy === 'cable') return recs.reduce((s, r) => s + (r.total_cable || 0), 0);
+                  if (historySortBy === 'amount') return recs.reduce((s, r) => s + (r.total_cable || 0), 0);
                   return new Date(d).getTime();
                 };
 
@@ -7500,7 +13390,7 @@ export default function BaseModule({
                       <div className="history-day-header">
                         <span className="history-day-date">{dateLabel}</span>
                         <span className="history-day-badges">
-                          {recs.length > 0 && <span className="history-day-badge">Work: {recs.length}</span>}
+                          {recs.length > 0 && <span className="history-day-badge">Total Records: {recs.length}</span>}
                           {dayNotes.length > 0 && <span className="history-day-badge notes">Notes: {dayNotes.length}</span>}
                         </span>
                       </div>
@@ -7522,14 +13412,8 @@ export default function BaseModule({
                                   </svg>
                                   <span>{record.workers} workers</span>
                                 </div>
-                                <div className="stat stat-positive">
-                                  <span>+DC: {(record.plus_dc || 0).toFixed(0)} m</span>
-                                </div>
-                                <div className="stat stat-negative">
-                                  <span>-DC: {(record.minus_dc || 0).toFixed(0)} m</span>
-                                </div>
                                 <div className="stat stat-total">
-                                  <span>Total: {(record.total_cable || 0).toFixed(0)} m</span>
+                                  <span>Amount: {(record.total_cable || 0).toFixed(0)} {record.unit || 'm'}</span>
                                 </div>
                               </div>
                             </div>

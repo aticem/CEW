@@ -28,6 +28,7 @@ export default function SubmitModal({
       module_label: moduleLabel || '',
       // Keep `total_cable` for backwards compatibility with existing history/export logic.
       total_cable: Number(workAmount) || 0,
+      unit: workUnit || 'm',
       subcontractor,
       workers: parseInt(workers),
       timestamp: new Date().toISOString()
