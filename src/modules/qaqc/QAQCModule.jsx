@@ -5,6 +5,8 @@ import {
   getMetadata, 
   addDocument, 
   updateDocSlot, 
+  clearDocSlot,
+  updateDocumentFile,
   updateStatus,
   updatePublicFileStatus,
   deleteDocument,
@@ -14,9 +16,20 @@ import {
   deleteCategory,
   deleteFolder,
   renameFolder,
-  calculateStats 
+  calculateStats,
+  resetMetadata 
 } from './metadataStorage.js';
-import { saveFile, deleteFile, getFileUrl } from './fileStorage.js';
+import { saveFile, deleteFile, getFile, getFileUrl } from './fileStorage.js';
+
+// Debug: expose reset function to window for manual reset
+if (typeof window !== 'undefined') {
+  window.resetQAQCMetadata = () => {
+    const fresh = resetMetadata();
+    console.log('[QAQC] Metadata reset to fresh state:', fresh);
+    window.location.reload();
+  };
+  console.log('[QAQC] To reset metadata, run: window.resetQAQCMetadata()');
+}
 
 // Category icons
 const CategoryIcon = ({ category }) => {
@@ -80,7 +93,7 @@ const StatusBadge = ({ status, isNCR, onChange, small = false }) => {
   return (
     <button
       onClick={handleClick}
-      className={`${small ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-1 text-[10px]'} font-bold uppercase tracking-wide rounded cursor-pointer hover:opacity-80 transition-opacity`}
+      className={`${small ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-1 text-[10px]'} font-bold uppercase tracking-wide rounded-none cursor-pointer hover:opacity-80 transition-opacity`}
       style={{ 
         color: statusObj.color, 
         backgroundColor: statusObj.bgColor,
@@ -100,9 +113,9 @@ const CompletionBar = ({ label, done, total, percentage, color = '#22c55e' }) =>
       <span className="text-[12px] font-normal text-slate-300">{label}</span>
       <span className="text-[12px] font-normal text-slate-200">{done}/{total} ({percentage}%)</span>
     </div>
-    <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+    <div className="h-2 bg-slate-700 rounded-none overflow-hidden">
       <div 
-        className="h-full transition-all duration-300 rounded-full"
+        className="h-full transition-all duration-300 rounded-none"
         style={{ width: `${percentage}%`, backgroundColor: color }}
       />
     </div>
@@ -159,7 +172,7 @@ export default function QAQCModule() {
   const [previewFile, setPreviewFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const fileInputRef = useRef(null);
-  const [uploadTarget, setUploadTarget] = useState(null);
+  const uploadTargetRef = useRef(null);
   const [newFolderParent, setNewFolderParent] = useState(null);
   const [newFolderName, setNewFolderName] = useState('');
   const [newCategoryModal, setNewCategoryModal] = useState(false);
@@ -283,11 +296,17 @@ export default function QAQCModule() {
   // Handle file upload
   const handleUpload = useCallback(async (e) => {
     const file = e.target.files?.[0];
-    if (!file || !uploadTarget) return;
+    const target = uploadTargetRef.current;
+    console.log('[QAQC Upload] Starting upload:', { file: file?.name, target });
+    if (!file || !target) {
+      console.log('[QAQC Upload] No file or target, aborting');
+      return;
+    }
     
     try {
       const fileId = generateId();
       await saveFile(fileId, file);
+      console.log('[QAQC Upload] File saved with ID:', fileId);
       
       const docData = {
         fileId,
@@ -298,26 +317,126 @@ export default function QAQCModule() {
         name: file.name,
       };
       
-      if (uploadTarget.type === 'slot') {
-        updateDocSlot(uploadTarget.category, uploadTarget.slotKey, docData);
-      } else if (uploadTarget.type === 'folder') {
-        addDocument(uploadTarget.category, uploadTarget.path, docData);
-        // Make sure the folder is expanded so the uploaded file is visible immediately
-        expandFolderPath(uploadTarget.category, uploadTarget.path);
-        setSelectedContainer({ categoryKey: uploadTarget.category, path: uploadTarget.path });
-      } else if (uploadTarget.type === 'category') {
-        addDocument(uploadTarget.category, [], docData);
+      let docId = null;
+      let oldFileIdToDelete = null;
+      if (target.type === 'slot') {
+        console.log('[QAQC Upload] Updating slot:', target.slotKey);
+        oldFileIdToDelete = updateDocSlot(target.category, target.slotKey, docData) || null;
+      } else if (target.type === 'folder') {
+        console.log('[QAQC Upload] Adding to folder:', target.category, target.path);
+        docId = addDocument(target.category, target.path, docData);
+        console.log('[QAQC Upload] addDocument returned:', docId);
+        if (docId) {
+          // Make sure the folder is expanded so the uploaded file is visible immediately
+          expandFolderPath(target.category, target.path);
+          // Also expand this specific folder
+          const nodeId = `${target.category}-${target.path.join('-')}`;
+          setExpandedNodes(prev => new Set([...prev, nodeId]));
+          setSelectedContainer({ categoryKey: target.category, path: target.path });
+        } else {
+          console.error('[QAQC Upload] Failed to add document - path not found');
+          alert('Failed to add document to folder. Path may not exist.');
+        }
+      } else if (target.type === 'document') {
+        console.log('[QAQC Upload] Replacing document at path:', target.category, target.path);
+        oldFileIdToDelete = updateDocumentFile(target.category, target.path, docData) || null;
+      } else if (target.type === 'category') {
+        console.log('[QAQC Upload] Adding to category root:', target.category);
+        docId = addDocument(target.category, [], docData);
+        console.log('[QAQC Upload] addDocument returned:', docId);
       }
       
+      if (oldFileIdToDelete && oldFileIdToDelete !== fileId) {
+        try {
+          await deleteFile(oldFileIdToDelete);
+        } catch (err) {
+          console.warn('[QAQC Upload] Failed to delete old file:', oldFileIdToDelete, err);
+        }
+      }
+
       refreshMetadata();
+      console.log('[QAQC Upload] Metadata refreshed');
     } catch (err) {
-      console.error('Upload failed:', err);
-      alert('Failed to upload file');
+      console.error('[QAQC Upload] Upload failed:', err);
+      alert('Failed to upload file: ' + err.message);
     }
     
-    setUploadTarget(null);
+    uploadTargetRef.current = null;
     if (fileInputRef.current) fileInputRef.current.value = '';
-  }, [uploadTarget, refreshMetadata, expandFolderPath]);
+  }, [refreshMetadata, expandFolderPath]);
+
+  const triggerBrowserDownload = useCallback((blob, fileName) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const downloadStoredFile = useCallback(async (fileId, fileName) => {
+    const record = await getFile(fileId);
+    if (!record?.data) return false;
+    const blob = new Blob([record.data], { type: record.type || 'application/octet-stream' });
+    triggerBrowserDownload(blob, fileName || record.name || 'download');
+    return true;
+  }, [triggerBrowserDownload]);
+
+  const handleFolderDownload = useCallback(async (categoryKey, folderPath) => {
+    const meta = getMetadata();
+    const category = meta.tree?.[categoryKey];
+    if (!category) return;
+
+    let target = category;
+    for (const key of folderPath) {
+      if (target.children && target.children[key]) {
+        target = target.children[key];
+      } else {
+        return;
+      }
+    }
+
+    const files = [];
+    function walk(node, labelPath) {
+      if (!node) return;
+      if (node.type === 'document' && node.fileId) {
+        files.push({ fileId: node.fileId, fileName: node.fileName || node.label, path: labelPath });
+      }
+      if (node.type === 'doc-slot' && node.fileId) {
+        files.push({ fileId: node.fileId, fileName: node.fileName || node.label, path: labelPath });
+      }
+      if (node.children) {
+        for (const [k, child] of Object.entries(node.children)) {
+          walk(child, [...labelPath, child?.label || k]);
+        }
+      }
+    }
+
+    walk(target, [target?.label || 'folder']);
+
+    if (files.length === 0) {
+      alert('No downloadable files in this folder.');
+      return;
+    }
+
+    if (files.length === 1) {
+      const ok = await downloadStoredFile(files[0].fileId, files[0].fileName);
+      if (!ok) alert('File not found in storage.');
+      return;
+    }
+
+    const manifest = {
+      folder: target?.label || 'folder',
+      category: categoryKey,
+      exportedAt: new Date().toISOString(),
+      files: files.map((f) => ({ fileId: f.fileId, fileName: f.fileName, path: f.path })),
+    };
+
+    const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' });
+    triggerBrowserDownload(blob, `${categoryKey}-${target?.label || 'folder'}-manifest.json`);
+  }, [downloadStoredFile, triggerBrowserDownload]);
   
   // Handle status change (supports both regular docs and public files)
   const handleStatusChange = useCallback((categoryKeyOrStatusKey, path, newStatus, isPublicFile = false) => {
@@ -349,6 +468,18 @@ export default function QAQCModule() {
       console.error('Delete failed:', err);
     }
   }, [refreshMetadata]);
+
+  const handleClearSlot = useCallback(async (categoryKey, slotKey, fileId) => {
+    if (!fileId) return;
+    if (!confirm('Remove this file from the slot?')) return;
+    try {
+      const oldId = clearDocSlot(categoryKey, slotKey);
+      if (oldId) await deleteFile(oldId);
+      refreshMetadata();
+    } catch (err) {
+      console.error('Clear slot failed:', err);
+    }
+  }, [refreshMetadata]);
   
   // Handle preview
   const handlePreview = useCallback(async (fileId, fileName, fileType) => {
@@ -373,10 +504,21 @@ export default function QAQCModule() {
   // Create folder
   const handleCreateFolder = useCallback(() => {
     if (!newFolderParent || !newFolderName.trim()) return;
-    createFolder(newFolderParent.category, newFolderParent.path, newFolderName.trim());
-    // Ensure parent path is expanded so the new folder is visible
-    expandFolderPath(newFolderParent.category, newFolderParent.path);
-    setSelectedContainer({ categoryKey: newFolderParent.category, path: newFolderParent.path });
+    const folderId = createFolder(newFolderParent.category, newFolderParent.path, newFolderName.trim());
+    if (folderId) {
+      // Ensure parent path is expanded so the new folder is visible
+      expandFolderPath(newFolderParent.category, newFolderParent.path);
+      // Also expand the parent folder if it exists
+      if (newFolderParent.path.length > 0) {
+        const parentNodeId = `${newFolderParent.category}-${newFolderParent.path.join('-')}`;
+        setExpandedNodes(prev => new Set([...prev, parentNodeId]));
+      }
+      // Expand the newly created folder too
+      const newFolderPath = [...newFolderParent.path, folderId];
+      const newNodeId = `${newFolderParent.category}-${newFolderPath.join('-')}`;
+      setExpandedNodes(prev => new Set([...prev, newNodeId]));
+      setSelectedContainer({ categoryKey: newFolderParent.category, path: newFolderPath });
+    }
     refreshMetadata();
     setNewFolderParent(null);
     setNewFolderName('');
@@ -401,7 +543,6 @@ export default function QAQCModule() {
 
   const handleRenameCategory = useCallback(() => {
     if (!editCategoryModal) return;
-    if (editCategoryModal.fixed) return;
     const nextName = editCategoryName.trim();
     if (!nextName) return;
     renameCategory(editCategoryModal.key, nextName);
@@ -449,15 +590,41 @@ export default function QAQCModule() {
   
   // Trigger file input
   const triggerUpload = useCallback((target) => {
-    setUploadTarget(target);
+    uploadTargetRef.current = target;
     fileInputRef.current?.click();
   }, []);
+
+  const searchLower = searchQuery.trim().toLowerCase();
+
+  const nodeOrDescendantMatchesSearch = useCallback(
+    function matches(node, nodeKey, categoryKey) {
+      if (!searchLower) return true;
+      const label = (node?.label || '').toLowerCase();
+      if (label.includes(searchLower)) return true;
+
+      const folderPublicFiles = publicFiles?.[categoryKey]?.[nodeKey] || [];
+      if (folderPublicFiles.some((f) => (f.name || '').toLowerCase().includes(searchLower))) {
+        return true;
+      }
+
+      if (node?.children) {
+        for (const [childKey, child] of Object.entries(node.children)) {
+          if (matches(child, childKey, categoryKey)) return true;
+        }
+      }
+
+      return false;
+    },
+    [publicFiles, searchLower]
+  );
   
   // Render tree node
   const renderNode = (node, nodeKey, path, categoryKey, isNCR = false, depth = 0) => {
+    if (node?.hidden) return null;
     const fullPath = [...path, nodeKey];
     const nodeId = `${categoryKey}-${fullPath.join('-')}`;
     const isExpanded = expandedNodes.has(nodeId);
+    const effectiveExpanded = searchLower ? true : isExpanded;
     const isFolder = node.type === 'folder';
     const isDocSlot = node.type === 'doc-slot';
     const isDocument = node.type === 'document';
@@ -483,19 +650,11 @@ export default function QAQCModule() {
       isDocument ||
       isDocSlot ||
       (isFolder &&
-        (node.fixed || hasChildren || categoryAllowsFolderCreation || categoryKey === 'Random'));
+        (node.fixed || node.userCreated || hasChildren || categoryAllowsFolderCreation || categoryKey === 'Random'));
     
-    // Search filter
-    if (searchQuery && !node.label?.toLowerCase().includes(searchQuery.toLowerCase())) {
-      if (!hasChildren) return null;
-      // Check if any children match
-      const childrenMatch = Object.entries(node.children || {}).some(([, v]) => 
-        v.label?.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-      const publicFilesMatch = folderPublicFiles.some(f => 
-        f.name.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-      if (!childrenMatch && !publicFilesMatch) return null;
+    // Search filter (deep, includes public files)
+    if (searchLower && !nodeOrDescendantMatchesSearch(node, nodeKey, categoryKey)) {
+      return null;
     }
     
     // Don't render non-fixed empty folders
@@ -518,7 +677,7 @@ export default function QAQCModule() {
           {/* Expand/collapse icon for folders */}
           {isFolder && (
             <span className="w-4 h-4 flex items-center justify-center text-slate-500">
-              {hasChildren ? (isExpanded ? '▼' : '▶') : '○'}
+              {hasChildren ? (effectiveExpanded ? '▼' : '▶') : '○'}
             </span>
           )}
           
@@ -585,15 +744,29 @@ export default function QAQCModule() {
           
           {/* Actions */}
           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            {/* Upload/Replace */}
-            {(isDocSlot || isFolder || (isDocument && node.fileId)) && (
+            {/* Download (folders only) */}
+            {isFolder && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleFolderDownload(categoryKey, fullPath);
+                }}
+                className="p-1 hover:bg-slate-600 rounded text-[10px] text-slate-300"
+                title="Download"
+              >
+                ↓
+              </button>
+            )}
+
+            {/* Upload/Replace (documents + doc-slots only) */}
+            {(isDocSlot || isDocument) && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   if (isDocSlot) {
                     triggerUpload({ type: 'slot', category: categoryKey, slotKey: nodeKey });
-                  } else if (isFolder) {
-                    triggerUpload({ type: 'folder', category: categoryKey, path: fullPath });
+                  } else if (isDocument) {
+                    triggerUpload({ type: 'document', category: categoryKey, path: fullPath });
                   }
                 }}
                 className="p-1 hover:bg-slate-600 rounded text-[10px] text-slate-300"
@@ -603,8 +776,8 @@ export default function QAQCModule() {
               </button>
             )}
             
-            {/* Preview */}
-            {node.fileId && (
+            {/* Preview (documents + doc-slots) */}
+            {(isDocSlot || isDocument) && node.fileId && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -616,23 +789,9 @@ export default function QAQCModule() {
                 👁
               </button>
             )}
-            
-            {/* Delete (only for non-fixed items) */}
-            {!node.fixed && (isDocument || (isFolder && !node.fixed)) && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDelete(categoryKey, fullPath, isFolder);
-                }}
-                className="p-1 hover:bg-red-600/50 rounded text-[10px] text-red-400"
-                title="Delete"
-              >
-                ✕
-              </button>
-            )}
-            
-            {/* Rename (only for non-fixed folders in Random) */}
-            {isFolder && !node.fixed && categoryKey === 'Random' && (
+
+            {/* Rename (folders only) */}
+            {isFolder && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -644,25 +803,51 @@ export default function QAQCModule() {
                 ✎
               </button>
             )}
-            
-            {/* Add folder (only in Random or allowed folders) */}
-            {isFolder && (node.allowFolderCreation || categoryAllowsFolderCreation || categoryKey === 'Random') && (
+
+            {/* Remove file / Delete */}
+            {isDocSlot && node.fileId && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  setNewFolderParent({ category: categoryKey, path: fullPath });
+                  handleClearSlot(categoryKey, nodeKey, node.fileId);
                 }}
-                className="p-1 hover:bg-slate-600 rounded text-[10px] text-slate-300"
-                title="New Folder"
+                className="p-1 hover:bg-red-600/50 rounded text-[10px] text-red-400"
+                title="Remove"
               >
-                +📁
+                ✕
+              </button>
+            )}
+
+            {isDocument && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDelete(categoryKey, fullPath, false);
+                }}
+                className="p-1 hover:bg-red-600/50 rounded text-[10px] text-red-400"
+                title="Remove"
+              >
+                ✕
+              </button>
+            )}
+
+            {isFolder && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDelete(categoryKey, fullPath, isFolder);
+                }}
+                className="p-1 hover:bg-red-600/50 rounded text-[10px] text-red-400"
+                title="Delete"
+              >
+                ✕
               </button>
             )}
           </div>
         </div>
         
         {/* Children and Public Files */}
-        {isFolder && isExpanded && hasChildren && (
+        {isFolder && effectiveExpanded && hasChildren && (
           <div className="border-l-2 border-slate-600 ml-2">
             {/* Render public files first */}
             {folderPublicFiles.map((file) => (
@@ -700,7 +885,7 @@ export default function QAQCModule() {
   return (
     <div className="fixed inset-0 bg-slate-900 flex flex-col">
       {/* Title bar - same as other modules, with hamburger button */}
-      <div className="w-full border-0 bg-[#0b1220] py-2 text-center text-base font-black uppercase tracking-[0.22em] text-slate-200 relative">
+      <div className="w-full border-0 bg-[#0b1220] py-3 text-center text-lg font-black uppercase tracking-[0.22em] text-slate-200 relative">
         {/* Hamburger button positioned at left */}
         <div className="absolute left-3 top-1/2 -translate-y-1/2 z-[1200]">
           <button
@@ -709,9 +894,9 @@ export default function QAQCModule() {
               window.dispatchEvent(new CustomEvent('toggleHamburgerMenu'));
             }}
             aria-label="Mode"
-            className="inline-flex h-8 w-8 items-center justify-center border-2 border-slate-700 bg-slate-900 text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
+            className="inline-flex h-10 w-10 items-center justify-center border-2 border-slate-700 bg-slate-900 text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
           >
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
               <line x1="4" y1="6" x2="20" y2="6" />
               <line x1="4" y1="12" x2="20" y2="12" />
               <line x1="4" y1="18" x2="20" y2="18" />
@@ -744,7 +929,7 @@ export default function QAQCModule() {
                   <button
                     type="button"
                     onClick={() => setSelectedCategory(key)}
-                    className={`px-3 py-2 flex items-center gap-2 text-left transition-colors rounded ${
+                    className={`px-4 py-3 flex items-center gap-2 text-left transition-colors rounded-none ${
                       selectedCategory === key 
                         ? 'bg-amber-500/20 border border-amber-500 text-amber-400' 
                         : 'text-slate-300 hover:bg-slate-800 border border-transparent'
@@ -752,8 +937,8 @@ export default function QAQCModule() {
                   >
                     <CategoryIcon category={key} />
                     <div>
-                      <div className="text-[11px] font-medium">{category.label}</div>
-                      <div className="text-[9px] text-slate-500">
+                      <div className="text-[13px] font-medium">{category.label}</div>
+                      <div className="text-[10px] text-slate-500">
                         {catStats.done}/{catStats.total} ({catStats.percentage}%)
                       </div>
                     </div>
@@ -782,10 +967,10 @@ export default function QAQCModule() {
             <button
               type="button"
               onClick={() => setNewCategoryModal(true)}
-              className="flex-shrink-0 px-3 py-2 flex items-center justify-center transition-colors rounded text-slate-400 hover:bg-slate-700 hover:text-white border border-dashed border-slate-600 hover:border-amber-500"
+              className="flex-shrink-0 px-4 py-3 flex items-center justify-center transition-colors rounded-none text-slate-400 hover:bg-slate-700 hover:text-white border border-dashed border-slate-600 hover:border-amber-500"
               title="Add new category"
             >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
               </svg>
             </button>
@@ -794,18 +979,14 @@ export default function QAQCModule() {
         
         {/* Tree Explorer Header */}
         <div className="p-4 border-b-2 border-slate-700 flex items-center gap-3">
-          <h2 className="text-[13px] font-bold text-white flex-shrink-0">
-            {currentCategory?.label}
-          </h2>
-          
-          {/* Search */}
+          {/* Search - global across all categories */}
           <div className="flex-1 relative">
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search..."
-              className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-1.5 text-[11px] text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+              placeholder="Search all categories..."
+              className="w-full bg-slate-800 border border-slate-600 rounded-none px-3 py-2 text-[12px] text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
             />
           </div>
           
@@ -823,7 +1004,7 @@ export default function QAQCModule() {
                 triggerUpload({ type: 'category', category: selectedCategory });
               }
             }}
-            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold uppercase tracking-wide rounded"
+            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold uppercase tracking-wide rounded-none"
           >
             + Upload
           </button>
@@ -837,132 +1018,165 @@ export default function QAQCModule() {
                   : [];
               setNewFolderParent({ category: selectedCategory, path: targetPath });
             }}
-            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-bold uppercase tracking-wide rounded"
+            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-bold uppercase tracking-wide rounded-none"
           >
             + Folder
           </button>
         </div>
         
         <div className="flex-1 overflow-y-auto p-3">
-          {/* Show public files directly in category (for NCRs, ThirdParty) */}
-          {publicFiles[selectedCategory]?.[selectedCategory]?.map((file) => (
-            <PublicFileItem 
-              key={file.path}
-              file={file}
-              categoryKey={selectedCategory}
-              nodeKey={selectedCategory}
-              onStatusChange={handleStatusChange}
-              metadata={metadata}
-              depth={-1}
-            />
-          ))}
-          
-          {currentCategory?.children && Object.entries(currentCategory.children).map(([k, v]) => 
-            renderNode(v, k, [], selectedCategory, isNCR)
-          )}
-          
-          {(!currentCategory?.children || Object.keys(currentCategory.children).length === 0) && 
-           !publicFiles[selectedCategory]?.[selectedCategory]?.length && (
-            <div className="text-center text-slate-500 text-[12px] py-8">
-              {selectedCategory === 'Random' ? (
-                <div>
-                  <p className="mb-2">No folders or documents yet.</p>
-                  <p>Click <span className="text-amber-400 font-bold">"+ Folder"</span> to create a folder or <span className="text-emerald-400 font-bold">"+ Upload"</span> to add files.</p>
-                </div>
-              ) : (
-                'No documents yet. Click "Upload" to add documents.'
-              )}
-            </div>
+          {searchLower ? (
+            <>
+              {Object.entries(metadata.tree || {}).map(([catKey, catData]) => {
+                const catIsNCR = !!catData?.isNCR;
+                const childEntries = Object.entries(catData?.children || {});
+                const hasChildMatch = childEntries.some(([k, v]) =>
+                  nodeOrDescendantMatchesSearch(v, k, catKey)
+                );
+
+                const rootPublic = publicFiles?.[catKey]?.[catKey] || [];
+                const rootPublicMatches = rootPublic.filter((f) =>
+                  (f.name || '').toLowerCase().includes(searchLower)
+                );
+
+                if (!hasChildMatch && rootPublicMatches.length === 0) return null;
+
+                return (
+                  <div key={catKey} className="mb-4">
+                    <div className="text-[11px] font-bold text-amber-400 uppercase tracking-wide mb-2 px-2 py-1 bg-slate-700/30 rounded">
+                      {catData?.label || catKey}
+                    </div>
+
+                    {rootPublicMatches.map((file) => (
+                      <PublicFileItem
+                        key={file.path}
+                        file={file}
+                        categoryKey={catKey}
+                        nodeKey={catKey}
+                        onStatusChange={handleStatusChange}
+                        metadata={metadata}
+                        depth={-1}
+                      />
+                    ))}
+
+                    {childEntries.map(([k, v]) => renderNode(v, k, [], catKey, catIsNCR))}
+                  </div>
+                );
+              })}
+            </>
+          ) : (
+            <>
+              {/* Show public files directly in category (for NCRs, ThirdParty) */}
+              {publicFiles[selectedCategory]?.[selectedCategory]?.map((file) => (
+                <PublicFileItem 
+                  key={file.path}
+                  file={file}
+                  categoryKey={selectedCategory}
+                  nodeKey={selectedCategory}
+                  onStatusChange={handleStatusChange}
+                  metadata={metadata}
+                  depth={-1}
+                />
+              ))}
+
+              {currentCategory?.children &&
+                Object.entries(currentCategory.children).map(([k, v]) =>
+                  renderNode(v, k, [], selectedCategory, isNCR)
+                )}
+
+              {(!currentCategory?.children || Object.keys(currentCategory.children).length === 0) &&
+                !publicFiles[selectedCategory]?.[selectedCategory]?.length && (
+                  <div className="text-center text-slate-500 text-[12px] py-8">
+                    {selectedCategory === 'Random' ? (
+                      <div>
+                        <p className="mb-2">No folders or documents yet.</p>
+                        <p>
+                          Click <span className="text-amber-400 font-bold">"+ Folder"</span> to create a folder or{' '}
+                          <span className="text-emerald-400 font-bold">"+ Upload"</span> to add files.
+                        </p>
+                      </div>
+                    ) : (
+                      'No documents yet. Click "Upload" to add documents.'
+                    )}
+                  </div>
+                )}
+            </>
           )}
         </div>
       </div>
       
       {/* RIGHT COLUMN - Overall Panel */}
-      <div className="w-64 flex-shrink-0 bg-slate-800/50 flex flex-col">
-        <div className="p-3 border-b-2 border-slate-700">
-          <h2 className="text-[14px] font-semibold text-white text-center">Overall Status</h2>
+      <div className="w-72 flex-shrink-0 bg-slate-800/50 flex flex-col">
+        <div className="h-[78px] px-3 border-b-2 border-slate-700 flex items-center justify-center">
+          <h2 className="text-[16px] font-bold text-white text-center">Overall Status</h2>
         </div>
-        
-        <div className="flex-1 overflow-y-auto p-3">
+
+        <div className="flex-1 overflow-y-auto p-4">
           {/* Overall completion - three status percentages */}
-          <div className="mb-4 p-3 bg-slate-700/50 rounded-lg">
-            <div className="flex justify-between items-center mb-2">
+          <div className="mb-5 p-4 bg-slate-700/50 rounded-none">
+            <div className="flex justify-between items-center mb-3">
               <div className="text-center flex-1">
-                <div className="text-[14px] font-medium text-emerald-400">{stats.overall.percentage}%</div>
-                <div className="text-[8px] text-slate-400">Completed</div>
+                <div className="text-[18px] font-medium text-emerald-400">{stats.overall.percentage}%</div>
+                <div className="mt-1 inline-block px-2 py-0.5 bg-slate-800/60 border border-slate-600/50 rounded-none text-[9px] text-slate-300">
+                  Completed
+                </div>
               </div>
               <div className="text-center flex-1">
-                <div className="text-[14px] font-medium text-amber-400">{stats.overall.inProgressPercentage}%</div>
-                <div className="text-[8px] text-slate-400">In Progress</div>
+                <div className="text-[18px] font-medium text-amber-400">{stats.overall.inProgressPercentage}%</div>
+                <div className="mt-1 inline-block px-2 py-0.5 bg-slate-800/60 border border-slate-600/50 rounded-none text-[9px] text-slate-300">
+                  In Progress
+                </div>
               </div>
               <div className="text-center flex-1">
-                <div className="text-[14px] font-medium text-red-400">{stats.overall.incompletePercentage}%</div>
-                <div className="text-[8px] text-slate-400">Incomplete</div>
+                <div className="text-[18px] font-medium text-red-400">{stats.overall.incompletePercentage}%</div>
+                <div className="mt-1 inline-block px-2 py-0.5 bg-slate-800/60 border border-slate-600/50 rounded-none text-[9px] text-slate-300">
+                  Incomplete
+                </div>
               </div>
             </div>
-            <div className="h-2 bg-slate-600 rounded-full overflow-hidden flex">
-              <div 
-                className="h-full bg-emerald-500 transition-all duration-500"
-                style={{ width: `${stats.overall.percentage}%` }}
-              />
-              <div 
-                className="h-full bg-amber-500 transition-all duration-500"
-                style={{ width: `${stats.overall.inProgressPercentage}%` }}
-              />
-            </div>
-            <div className="text-center mt-1.5 text-[9px] text-slate-400">
-              {stats.overall.done} completed, {stats.overall.inProgress} in progress, {stats.overall.total - stats.overall.done - stats.overall.inProgress} incomplete
+            <div className="text-center text-[10px] text-slate-400">
+              {stats.overall.done} completed, {stats.overall.inProgress} in progress,{' '}
+              {stats.overall.total - stats.overall.done - stats.overall.inProgress} incomplete
             </div>
           </div>
-          
-          {/* Per-category completion */}
-          <div className="space-y-2 pb-3 border-b-2 border-slate-700">
-            <CompletionBar 
-              label="ITPs" 
-              done={stats.ITPs.done} 
-              total={stats.ITPs.total} 
+
+          <div className="p-3 bg-slate-700/30 rounded-none border border-slate-600/50">
+            <CompletionBar
+              label="ITPs"
+              done={stats.ITPs.done}
+              total={stats.ITPs.total}
               percentage={stats.ITPs.percentage}
-              color="#3b82f6"
+              color="#22c55e"
             />
-            <CompletionBar 
-              label="Checklists" 
-              done={stats.Checklists.done} 
-              total={stats.Checklists.total} 
+            <CompletionBar
+              label="Checklists"
+              done={stats.Checklists.done}
+              total={stats.Checklists.total}
               percentage={stats.Checklists.percentage}
               color="#8b5cf6"
             />
-            <CompletionBar 
-              label="NCR Closure" 
-              done={stats.NCRs.done} 
-              total={stats.NCRs.total} 
+            <CompletionBar
+              label="NCR Closure"
+              done={stats.NCRs.done}
+              total={stats.NCRs.total}
               percentage={stats.NCRs.percentage}
               color="#f59e0b"
             />
-            <CompletionBar 
-              label="Third Party" 
-              done={stats.ThirdParty.done} 
-              total={stats.ThirdParty.total} 
+            <CompletionBar
+              label="Third Party"
+              done={stats.ThirdParty.done}
+              total={stats.ThirdParty.total}
               percentage={stats.ThirdParty.percentage}
               color="#ec4899"
             />
-            <CompletionBar 
-              label="Random" 
-              done={stats.Random.done} 
-              total={stats.Random.total} 
+            <CompletionBar
+              label="Random"
+              done={stats.Random.done}
+              total={stats.Random.total}
               percentage={stats.Random.percentage}
               color="#6366f1"
             />
           </div>
-          
-          {/* Missing docs indicator */}
-          {stats.ITPs.total > 0 && stats.ITPs.done < stats.ITPs.total && (
-            <div className="mt-4 p-2 bg-red-500/10 border border-red-500/30 rounded">
-              <div className="text-[10px] font-medium text-red-400 mb-0.5">⚠ Missing Required Docs</div>
-              <div className="text-[9px] text-red-300/70">
-                {stats.ITPs.total - stats.ITPs.done} ITP document(s) not uploaded
-              </div>
-            </div>
-          )}
         </div>
       </div>
       
@@ -1049,12 +1263,11 @@ export default function QAQCModule() {
               placeholder="Category name..."
               className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-[12px] text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 mb-3"
               autoFocus
-              disabled={editCategoryModal.fixed}
               onKeyDown={(e) => e.key === 'Enter' && handleRenameCategory()}
             />
             {editCategoryModal.fixed && (
               <div className="text-[11px] text-slate-400 mb-3">
-                This is a fixed system category and cannot be renamed or deleted.
+                This is a system category. You can rename it, but you cannot delete it.
               </div>
             )}
             <div className="flex items-center justify-between gap-2">
@@ -1077,7 +1290,7 @@ export default function QAQCModule() {
                 <button
                   type="button"
                   onClick={handleRenameCategory}
-                  disabled={editCategoryModal.fixed || !editCategoryName.trim()}
+                  disabled={!editCategoryName.trim()}
                   className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-white text-[11px] font-bold uppercase rounded"
                 >
                   Save

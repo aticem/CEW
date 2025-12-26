@@ -36,10 +36,43 @@ const MODULES = {
 };
 
 export default function App() {
-  const [activeKey, setActiveKey] = useState('DC');
+  const [activeKey, setActiveKey] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const fromUrl = params.get('module');
+      return fromUrl && MODULES[fromUrl] ? fromUrl : 'DC';
+    } catch {
+      return 'DC';
+    }
+  });
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
   const menuOpenRef = useRef(false);
+
+  const buildModuleHref = (moduleKey) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('module', moduleKey);
+    return url.pathname + url.search + url.hash;
+  };
+
+  const handleModuleNavigate = (e, moduleKey) => {
+    // Let the browser handle: right-click context menu, middle click, ctrl/cmd-click, etc.
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    // Normal left-click: switch module in-place without navigation.
+    e.preventDefault();
+    setActiveKey(moduleKey);
+    setMenuOpen(false);
+  };
+
+  // Keep URL in sync with current module (shareable + supports opening in new tab)
+  useEffect(() => {
+    if (!MODULES[activeKey]) return;
+    const url = new URL(window.location.href);
+    const current = url.searchParams.get('module');
+    if (current === activeKey) return;
+    url.searchParams.set('module', activeKey);
+    window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+  }, [activeKey]);
 
   // Keep ref in sync and expose globally for BaseModule to check
   useEffect(() => {
@@ -90,19 +123,16 @@ export default function App() {
           {menuOpen && (
             <div className="absolute left-0 mt-2 w-72 max-h-[70vh] overflow-y-auto border-2 border-slate-700 bg-slate-900 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
               {Object.values(MODULES).map((m, idx) => (
-                <button 
+                <a
                   key={m.key}
-                  type="button"
-                  onClick={() => {
-                    setActiveKey(m.key);
-                    setMenuOpen(false);
-                  }}
-                  className={`w-full px-3 py-2.5 text-left text-[11px] font-medium tracking-wide ${
+                  href={buildModuleHref(m.key)}
+                  onClick={(e) => handleModuleNavigate(e, m.key)}
+                  className={`block w-full px-3 py-2.5 text-left text-[11px] font-medium tracking-wide ${
                     idx === 0 ? 'border-b border-slate-700/50' : ''
                   } ${activeKey === m.key ? 'bg-amber-500 text-black' : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white'}`}
                 >
                   {m.label}
-                </button>
+                </a>
               ))}
             </div>
           )}
@@ -117,19 +147,16 @@ export default function App() {
           className="fixed left-3 top-[42px] z-[1300] w-72 max-h-[70vh] overflow-y-auto border-2 border-slate-700 bg-slate-900 shadow-[0_10px_26px_rgba(0,0,0,0.55)]"
         >
           {Object.values(MODULES).map((m, idx) => (
-            <button 
+            <a
               key={m.key}
-              type="button"
-              onClick={() => {
-                setActiveKey(m.key);
-                setMenuOpen(false);
-              }}
-              className={`w-full px-3 py-2.5 text-left text-[11px] font-medium tracking-wide ${
+              href={buildModuleHref(m.key)}
+              onClick={(e) => handleModuleNavigate(e, m.key)}
+              className={`block w-full px-3 py-2.5 text-left text-[11px] font-medium tracking-wide ${
                 idx === 0 ? 'border-b border-slate-700/50' : ''
               } ${activeKey === m.key ? 'bg-amber-500 text-black' : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white'}`}
             >
               {m.label}
-            </button>
+            </a>
           ))}
         </div>
       )}

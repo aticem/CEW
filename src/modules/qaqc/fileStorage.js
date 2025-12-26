@@ -27,27 +27,33 @@ function openDB() {
 
 export async function saveFile(id, file) {
   const db = await openDB();
+
+  // IMPORTANT:
+  // Don't start an IndexedDB transaction and then do async work (FileReader) before
+  // issuing requests on that transaction. The browser will auto-commit the transaction
+  // once the call stack clears and there are no pending IDB requests, which leads to
+  // TransactionInactiveError.
+  const data = await file.arrayBuffer();
+
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
     const store = tx.objectStore(STORE_NAME);
-    
-    const reader = new FileReader();
-    reader.onload = () => {
-      const record = {
-        id,
-        name: file.name,
-        type: file.type,
-        size: file.size,
-        data: reader.result,
-        uploadedAt: Date.now(),
-      };
-      
-      const request = store.put(record);
-      request.onsuccess = () => resolve(record);
-      request.onerror = () => reject(request.error);
+
+    const record = {
+      id,
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      data,
+      uploadedAt: Date.now(),
     };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsArrayBuffer(file);
+
+    tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
+    tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed'));
+
+    const request = store.put(record);
+    request.onsuccess = () => resolve(record);
+    request.onerror = () => reject(request.error);
   });
 }
 

@@ -16,13 +16,19 @@ function mergeSchemaIntoNode(schemaNode, existingNode) {
   // Merge properties from schema
   const merged = { ...existingNode };
   
-  // Copy fixed schema properties
+  // Copy fixed schema properties (while preserving user overrides)
   if (schemaNode.type) merged.type = schemaNode.type;
-  if (schemaNode.label) merged.label = schemaNode.label;
+  if (schemaNode.label) {
+    const override = existingNode.labelOverride;
+    merged.label = override ?? existingNode.label ?? schemaNode.label;
+  }
   if (schemaNode.fixed !== undefined) merged.fixed = schemaNode.fixed;
   if (schemaNode.isNCR !== undefined) merged.isNCR = schemaNode.isNCR;
   if (schemaNode.allowMultiple !== undefined) merged.allowMultiple = schemaNode.allowMultiple;
   if (schemaNode.publicPath !== undefined) merged.publicPath = schemaNode.publicPath;
+
+  // Preserve user hide flag even for schema nodes
+  if (existingNode.hidden !== undefined) merged.hidden = existingNode.hidden;
   
   // Merge children recursively
   if (schemaNode.children) {
@@ -38,6 +44,7 @@ function mergeSchemaIntoNode(schemaNode, existingNode) {
 // Initialize metadata from schema if not exists
 export function initializeMetadata() {
   const existing = localStorage.getItem(STORAGE_KEY);
+  console.log('[initializeMetadata] Existing data:', existing ? 'found' : 'none');
   if (existing) {
     try {
       const parsed = JSON.parse(existing);
@@ -58,6 +65,8 @@ export function initializeMetadata() {
       }
 
       merged.updatedAt = Date.now();
+      console.log('[initializeMetadata] Merged tree keys:', Object.keys(merged.tree));
+      console.log('[initializeMetadata] ITPs children:', Object.keys(merged.tree?.ITPs?.children || {}));
       saveMetadata(merged);
       return merged;
     } catch (e) {
@@ -74,8 +83,15 @@ export function initializeMetadata() {
     publicFileStatuses: {}, // Store status for public files
   };
   
+  console.log('[initializeMetadata] Fresh init, tree keys:', Object.keys(metadata.tree));
   saveMetadata(metadata);
   return metadata;
+}
+
+// Reset metadata to fresh schema (for debugging)
+export function resetMetadata() {
+  localStorage.removeItem(STORAGE_KEY);
+  return initializeMetadata();
 }
 
 export function getMetadata() {
@@ -97,14 +113,21 @@ export function saveMetadata(metadata) {
 export function addDocument(categoryKey, folderPath, docData) {
   const metadata = getMetadata();
   const category = metadata.tree[categoryKey];
-  if (!category) return null;
+  console.log('[addDocument] Starting:', { categoryKey, folderPath, category: !!category });
+  if (!category) {
+    console.log('[addDocument] Category not found:', categoryKey);
+    return null;
+  }
   
   let target = category;
   if (folderPath && folderPath.length > 0) {
+    console.log('[addDocument] Navigating path:', folderPath);
     for (const key of folderPath) {
+      console.log('[addDocument] Looking for child:', key, 'in', Object.keys(target.children || {}));
       if (target.children && target.children[key]) {
         target = target.children[key];
       } else {
+        console.log('[addDocument] Path not found at:', key);
         return null;
       }
     }
@@ -124,6 +147,7 @@ export function addDocument(categoryKey, folderPath, docData) {
     status: category.isNCR ? 'open' : 'incomplete',
   };
   
+  console.log('[addDocument] Document added with ID:', docId);
   saveMetadata(metadata);
   return docId;
 }
@@ -135,6 +159,7 @@ export function updateDocSlot(categoryKey, slotKey, docData) {
   if (!category || !category.children || !category.children[slotKey]) return false;
   
   const slot = category.children[slotKey];
+  const oldFileId = slot.fileId || null;
   slot.fileId = docData.fileId;
   slot.fileName = docData.fileName;
   slot.fileType = docData.fileType;
@@ -143,7 +168,58 @@ export function updateDocSlot(categoryKey, slotKey, docData) {
   if (!slot.status) slot.status = 'incomplete';
   
   saveMetadata(metadata);
-  return true;
+  return oldFileId;
+}
+
+// Clear a doc-slot upload (keeps the slot itself)
+export function clearDocSlot(categoryKey, slotKey) {
+  const metadata = getMetadata();
+  const category = metadata.tree[categoryKey];
+  if (!category || !category.children || !category.children[slotKey]) return null;
+
+  const slot = category.children[slotKey];
+  const oldFileId = slot.fileId || null;
+
+  delete slot.fileId;
+  delete slot.fileName;
+  delete slot.fileType;
+  delete slot.fileSize;
+  delete slot.uploadedAt;
+
+  slot.status = category.isNCR ? 'open' : 'incomplete';
+
+  saveMetadata(metadata);
+  return oldFileId;
+}
+
+// Replace an existing document node's file
+export function updateDocumentFile(categoryKey, path, docData) {
+  const metadata = getMetadata();
+  const category = metadata.tree[categoryKey];
+  if (!category) return null;
+
+  let target = category;
+  for (const key of path) {
+    if (target.children && target.children[key]) {
+      target = target.children[key];
+    } else {
+      return null;
+    }
+  }
+
+  if (target.type !== 'document') return null;
+
+  const oldFileId = target.fileId || null;
+  target.fileId = docData.fileId;
+  target.fileName = docData.fileName;
+  target.fileType = docData.fileType;
+  target.fileSize = docData.fileSize;
+  target.uploadedAt = docData.uploadedAt || Date.now();
+  target.label = docData.name || target.label;
+  if (!target.status) target.status = category.isNCR ? 'open' : 'incomplete';
+
+  saveMetadata(metadata);
+  return oldFileId;
 }
 
 // Update document status
@@ -223,14 +299,21 @@ export function deleteDocument(categoryKey, path) {
 export function createFolder(categoryKey, parentPath, folderName) {
   const metadata = getMetadata();
   const category = metadata.tree[categoryKey];
-  if (!category) return null;
+  console.log('[createFolder] Starting:', { categoryKey, parentPath, folderName, category: !!category });
+  if (!category) {
+    console.log('[createFolder] Category not found:', categoryKey);
+    return null;
+  }
   
   let target = category;
   if (parentPath && parentPath.length > 0) {
+    console.log('[createFolder] Navigating path:', parentPath);
     for (const key of parentPath) {
+      console.log('[createFolder] Looking for child:', key, 'in', Object.keys(target.children || {}));
       if (target.children && target.children[key]) {
         target = target.children[key];
       } else {
+        console.log('[createFolder] Path not found at:', key);
         return null;
       }
     }
@@ -243,11 +326,13 @@ export function createFolder(categoryKey, parentPath, folderName) {
     type: 'folder',
     label: folderName,
     fixed: false,
+    userCreated: true,
     allowMultiple: true,
     allowFolderCreation: true,
     children: {},
   };
   
+  console.log('[createFolder] Folder created with ID:', folderId);
   saveMetadata(metadata);
   return folderId;
 }
@@ -272,14 +357,16 @@ export function createCategory(categoryName) {
   return categoryKey;
 }
 
-// Rename a category (only non-fixed categories)
+// Rename a category (fixed categories use labelOverride so schema merge won't overwrite)
 export function renameCategory(categoryKey, newName) {
   const metadata = getMetadata();
   const category = metadata.tree?.[categoryKey];
   if (!category) return false;
-  if (category.fixed) return false;
 
   category.label = newName;
+  if (category.fixed) {
+    category.labelOverride = newName;
+  }
   saveMetadata(metadata);
   return true;
 }
@@ -323,13 +410,14 @@ export function renameFolder(categoryKey, path, newName) {
     }
   }
   
-  if (!target.fixed) {
-    target.label = newName;
-    saveMetadata(metadata);
-    return true;
+  target.label = newName;
+  if (target.fixed) {
+    // Schema merge would normally re-apply schema label, so store an override.
+    target.labelOverride = newName;
   }
-  
-  return false;
+
+  saveMetadata(metadata);
+  return true;
 }
 
 // Delete a folder (only non-fixed folders)
@@ -361,14 +449,21 @@ export function deleteFolder(categoryKey, path) {
   
   const folderId = path[path.length - 1];
   const folder = parent.children?.[folderId];
-  if (folder && !folder.fixed) {
-    const fileIds = collectFileIds(folder);
-    delete parent.children[folderId];
+  if (!folder) return [];
+
+  const fileIds = collectFileIds(folder);
+
+  if (folder.fixed) {
+    // Hide schema/fixed folders instead of removing them (schema merge would re-add them).
+    folder.hidden = true;
+    folder.children = {};
     saveMetadata(metadata);
     return fileIds;
   }
-  
-  return [];
+
+  delete parent.children[folderId];
+  saveMetadata(metadata);
+  return fileIds;
 }
 
 // Calculate completion stats
