@@ -1050,23 +1050,6 @@ body {
   color: #fde68a;
 }
 
-/* History highlighted polygons on map */
-.history-highlighted-polygon {
-  filter: drop-shadow(0 0 8px orange) brightness(1.2);
-  animation: history-pulse 1s ease-in-out infinite alternate;
-}
-
-@keyframes history-pulse {
-  0% {
-    transform: scale(1);
-    opacity: 0.9;
-  }
-  100% {
-    transform: scale(1.05);
-    opacity: 1;
-  }
-}
-
 .history-day-section {
   margin-top: 10px;
 }
