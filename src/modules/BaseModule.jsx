@@ -4135,8 +4135,132 @@ export default function BaseModule({
   }, [effectiveStringTextVisibility, scheduleStringTextLabelUpdate]);
   
   // Hooks for daily log and export
-  const { dailyLog, addRecord } = useDailyLog(activeMode?.key || 'DC');
+  const { dailyLog, addRecord, updateRecord, deleteRecord, updateRecordSelections, getRecord } = useDailyLog(activeMode?.key || 'DC');
   const { exportToExcel } = useChartExport();
+  
+  // Work History state for editing mode
+  const [activeHistoryRecordId, setActiveHistoryRecordId] = useState(null); // Currently selected history record for editing
+  const [historyEditSelections, setHistoryEditSelections] = useState(new Set()); // Temporary selections while editing history
+  const [historyModalPosition, setHistoryModalPosition] = useState({ x: 80, y: 100 }); // Draggable position
+  const [isDraggingHistory, setIsDraggingHistory] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+
+  // --- Map Highlighting for Work History ---
+  // When a history record is selected, highlight its selections on the map
+  useEffect(() => {
+    if (!activeHistoryRecordId) return;
+    const record = getRecord(activeHistoryRecordId);
+    if (!record || !Array.isArray(record.selections)) return;
+
+    // Highlight selected polygons (DC cable segments) on the map with orange color, scale, and attention
+    const selections = new Set(record.selections);
+    selections.forEach(polygonId => {
+      const polygonInfo = polygonById.current[polygonId];
+      if (polygonInfo && polygonInfo.layer && polygonInfo.layer.setStyle) {
+        // Apply orange highlighting with scale effect
+        polygonInfo.layer.setStyle({
+          color: 'orange',
+          weight: 3,
+          fill: false,
+          fillOpacity: 0,
+          // Add scale transform for attention effect
+          className: 'history-highlighted-polygon'
+        });
+
+        // Add pulsing animation for attention
+        if (!polygonInfo.layer._historyAnimation) {
+          polygonInfo.layer._historyAnimation = true;
+          const animate = () => {
+            if (polygonInfo.layer && activeHistoryRecordId === record.id) {
+              const currentWeight = polygonInfo.layer.options.weight;
+              const newWeight = currentWeight === 3 ? 4 : 3;
+              polygonInfo.layer.setStyle({ weight: newWeight });
+              setTimeout(animate, 500);
+            } else {
+              polygonInfo.layer._historyAnimation = false;
+            }
+          };
+          setTimeout(animate, 500);
+        }
+      }
+    });
+
+    return () => {
+      // Remove highlight when unselecting
+      selections.forEach(polygonId => {
+        const polygonInfo = polygonById.current[polygonId];
+        if (polygonInfo && polygonInfo.layer && polygonInfo.layer.setStyle) {
+          // Restore to selected or unselected style
+          const isCurrentlySelected = selectedPolygons.has(polygonId);
+          const keepFillForHover = !!isPL;
+          polygonInfo.layer.setStyle(
+            isCurrentlySelected
+              ? {
+                  color: '#22c55e',
+                  weight: 2,
+                  fill: keepFillForHover,
+                  fillOpacity: 0
+                }
+              : {
+                  color: 'rgba(255,255,255,0.35)',
+                  weight: 1.05,
+                  fill: keepFillForHover,
+                  fillOpacity: 0
+                }
+          );
+          polygonInfo.layer._historyAnimation = false;
+        }
+      });
+    };
+  }, [activeHistoryRecordId, getRecord, selectedPolygons, isPL]);
+
+  // --- Selection Editing for Work History ---
+  // When editing a history record, allow user to add/remove selections on the map
+  useEffect(() => {
+    if (!activeHistoryRecordId) return;
+
+    // Override the click handler to modify history selections instead of current selections
+    const originalClickHandler = (polygonId, isSelected) => {
+      setHistoryEditSelections(prev => {
+        const next = new Set(prev);
+        if (isSelected) next.add(polygonId);
+        else next.delete(polygonId);
+        // Update the record's selections and total_cable (amount)
+        const record = getRecord(activeHistoryRecordId);
+        if (record) {
+          // Calculate new amount (sum of meters for selected features)
+          let newAmount = 0;
+          next.forEach(id => {
+            const polygonInfo = polygonById.current[id];
+            if (polygonInfo && polygonInfo.layer) {
+              // Try to get meters from feature properties or calculate from geometry
+              const feature = polygonInfo.layer.feature;
+              if (feature?.properties?.meters) {
+                newAmount += Number(feature.properties.meters) || 0;
+              }
+            }
+          });
+          updateRecordSelections(activeHistoryRecordId, Array.from(next), newAmount);
+        }
+        return next;
+      });
+    };
+
+    // Store the original handler and replace with history editing handler
+    window.__originalPolygonClick = window.__originalPolygonClick || (() => {});
+    window.__historyPolygonClick = originalClickHandler;
+
+    return () => {
+      window.__historyPolygonClick = null;
+    };
+  }, [activeHistoryRecordId, getRecord, updateRecordSelections]);
+
+  // When a record is selected, initialize edit selections
+  useEffect(() => {
+    if (!activeHistoryRecordId) return;
+    const record = getRecord(activeHistoryRecordId);
+    setHistoryEditSelections(new Set(record && record.selections ? record.selections : []));
+  }, [activeHistoryRecordId, getRecord]);
   
   // Save notes to localStorage
   useEffect(() => {
@@ -6335,6 +6459,17 @@ export default function BaseModule({
                 }
 
                 if (noteMode) return;
+
+                // WORK HISTORY EDITING MODE: modify history selections instead of current selections
+                if (activeHistoryRecordId && window.__historyPolygonClick) {
+                  const polygonId = featureLayer._uniquePolygonId;
+                  if (polygonId) {
+                    const isCurrentlySelected = historyEditSelections.has(polygonId);
+                    window.__historyPolygonClick(polygonId, !isCurrentlySelected);
+                  }
+                  return;
+                }
+
                 const polygonId = featureLayer._uniquePolygonId;
                 if (polygonId) {
                   // TIP: Select/unselect both panels of a table together
@@ -11262,8 +11397,10 @@ export default function BaseModule({
                 </button>
 
                 <button
-                  onClick={() =>
-                    exportToExcel(dailyLog, {
+                  onClick={() => {
+                    // If a history record is active, export only that record's data
+                    const exportData = activeHistoryRecordId ? [getRecord(activeHistoryRecordId)].filter(Boolean) : dailyLog;
+                    exportToExcel(exportData, {
                       moduleKey: isMC4
                         ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST')
                         : (isDATP
@@ -11307,11 +11444,11 @@ export default function BaseModule({
                           : (isPTEP
                             ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
                             : undefined)),
-                    })
-                  }
-                  disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || dailyLog.length === 0}
+                    });
+                  }}
+                  disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || (dailyLog.length === 0 && !activeHistoryRecordId)}
                   className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-                  title={isLVTT && String(lvttSubMode || 'termination') === 'testing' ? 'Export disabled in LV_TESTING' : 'Export Excel'}
+                  title={isLVTT && String(lvttSubMode || 'termination') === 'testing' ? 'Export disabled in LV_TESTING' : activeHistoryRecordId ? 'Export Selected History Record' : 'Export All History'}
                   aria-label="Export Excel"
                 >
                   Export
@@ -13302,150 +13439,188 @@ export default function BaseModule({
                       ? String(activeMode.submitWorkUnit)
                       : (activeMode?.workUnitWeights ? 'panels' : 'm')))))
         }
+        selectedPolygons={selectedPolygons}
       />
       
       {/* History Modal */}
       {historyOpen && (
-        <div className="history-overlay" onClick={() => setHistoryOpen(false)}>
-          <div className="history-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="history-header">
-              <h2>📊 Work History</h2>
-              <button className="history-close" onClick={() => setHistoryOpen(false)}>×</button>
-            </div>
-            
-            <div className="history-sort">
-              <span>Sort by:</span>
-              <button 
-                className={`sort-btn ${historySortBy === 'date' ? 'active' : ''}`}
-                onClick={() => {
-                  if (historySortBy === 'date') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
-                  else { setHistorySortBy('date'); setHistorySortOrder('desc'); }
-                }}
-              >
-                Date {historySortBy === 'date' && (historySortOrder === 'desc' ? '↓' : '↑')}
-              </button>
-              <button 
-                className={`sort-btn ${historySortBy === 'workers' ? 'active' : ''}`}
-                onClick={() => {
-                  if (historySortBy === 'workers') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
-                  else { setHistorySortBy('workers'); setHistorySortOrder('desc'); }
-                }}
-              >
-                Workers {historySortBy === 'workers' && (historySortOrder === 'desc' ? '↓' : '↑')}
-              </button>
-              <button 
-                className={`sort-btn ${historySortBy === 'amount' ? 'active' : ''}`}
-                onClick={() => {
-                  if (historySortBy === 'amount') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
-                  else { setHistorySortBy('amount'); setHistorySortOrder('desc'); }
-                }}
-              >
-                Amount {historySortBy === 'amount' && (historySortOrder === 'desc' ? '↓' : '↑')}
-              </button>
-            </div>
-            
-            <div className="history-list">
-              {(() => {
-                const noteYmd = (n) => n.noteDate || (n.createdAt ? new Date(n.createdAt).toISOString().split('T')[0] : null);
-
-                const notesByDate = {};
-                notes.forEach(n => {
-                  const d = noteYmd(n);
-                  if (!d) return;
-                  if (!notesByDate[d]) notesByDate[d] = [];
-                  notesByDate[d].push(n);
-                });
-
-                const recordsByDate = {};
-                dailyLog.forEach(r => {
-                  const d = r.date;
-                  if (!d) return;
-                  if (!recordsByDate[d]) recordsByDate[d] = [];
-                  recordsByDate[d].push(r);
-                });
-
-                const dates = Array.from(new Set([...Object.keys(recordsByDate), ...Object.keys(notesByDate)]));
-                const mult = historySortOrder === 'desc' ? -1 : 1;
-
-                const dateMetric = (d) => {
-                  const recs = recordsByDate[d] || [];
-                  if (historySortBy === 'workers') return recs.reduce((s, r) => s + (r.workers || 0), 0);
-                  if (historySortBy === 'amount') return recs.reduce((s, r) => s + (r.total_cable || 0), 0);
-                  return new Date(d).getTime();
-                };
-
-                dates.sort((a, b) => mult * (dateMetric(a) - dateMetric(b)));
-
-                if (dates.length === 0) {
-                  return <div className="history-empty">No work records or notes yet</div>;
-                }
-
-                return dates.map((d) => {
-                  const recs = [...(recordsByDate[d] || [])];
-                  const dayNotes = [...(notesByDate[d] || [])].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-                  const dateLabel = new Date(d).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
-
-                  return (
-                    <div key={d} className="history-day">
-                      <div className="history-day-header">
-                        <span className="history-day-date">{dateLabel}</span>
-                        <span className="history-day-badges">
-                          {recs.length > 0 && <span className="history-day-badge">Total Records: {recs.length}</span>}
-                          {dayNotes.length > 0 && <span className="history-day-badge notes">Notes: {dayNotes.length}</span>}
-                        </span>
-                      </div>
-
-                      {recs.length > 0 && (
-                        <div className="history-day-section">
-                          <div className="history-day-section-title">Work</div>
-                          {recs.map((record, idx) => (
-                            <div key={idx} className="history-item">
-                              <div className="history-item-header">
-                                <span className="history-subcontractor">{record.subcontractor}</span>
+        <div
+          className="history-modal-draggable"
+          style={{
+            position: 'fixed',
+            left: historyModalPosition.x,
+            top: historyModalPosition.y,
+            zIndex: 10010,
+            width: '90%',
+            maxWidth: 700,
+            maxHeight: '85vh',
+            background: '#1e293b',
+            borderRadius: 16,
+            boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            display: 'flex',
+            flexDirection: 'column',
+            userSelect: isDraggingHistory ? 'none' : 'auto',
+            cursor: isDraggingHistory ? 'move' : 'default',
+          }}
+          onMouseDown={e => {
+            if (e.target.classList.contains('history-header')) {
+              setIsDraggingHistory(true);
+              setDragOffset({ x: e.clientX - historyModalPosition.x, y: e.clientY - historyModalPosition.y });
+            }
+          }}
+          onMouseMove={e => {
+            if (isDraggingHistory) {
+              setHistoryModalPosition({ x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y });
+            }
+          }}
+          onMouseUp={() => setIsDraggingHistory(false)}
+          onMouseLeave={() => setIsDraggingHistory(false)}
+        >
+          <div className="history-header" style={{ cursor: 'move', userSelect: 'none' }}>
+            <h2>📊 Work History</h2>
+            <button className="history-close" onClick={() => setHistoryOpen(false)}>×</button>
+          </div>
+          <div className="history-sort">
+            <span>Sort by:</span>
+            <button 
+              className={`sort-btn ${historySortBy === 'date' ? 'active' : ''}`}
+              onClick={() => {
+                if (historySortBy === 'date') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
+                else { setHistorySortBy('date'); setHistorySortOrder('desc'); }
+              }}
+            >
+              Date {historySortBy === 'date' && (historySortOrder === 'desc' ? '↓' : '↑')}
+            </button>
+            <button 
+              className={`sort-btn ${historySortBy === 'workers' ? 'active' : ''}`}
+              onClick={() => {
+                if (historySortBy === 'workers') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
+                else { setHistorySortBy('workers'); setHistorySortOrder('desc'); }
+              }}
+            >
+              Workers {historySortBy === 'workers' && (historySortOrder === 'desc' ? '↓' : '↑')}
+            </button>
+            <button 
+              className={`sort-btn ${historySortBy === 'amount' ? 'active' : ''}`}
+              onClick={() => {
+                if (historySortBy === 'amount') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
+                else { setHistorySortBy('amount'); setHistorySortOrder('desc'); }
+              }}
+            >
+              Amount {historySortBy === 'amount' && (historySortOrder === 'desc' ? '↓' : '↑')}
+            </button>
+          </div>
+          <div className="history-list">
+            {(() => {
+              const noteYmd = (n) => n.noteDate || (n.createdAt ? new Date(n.createdAt).toISOString().split('T')[0] : null);
+              const notesByDate = {};
+              notes.forEach(n => {
+                const d = noteYmd(n);
+                if (!d) return;
+                if (!notesByDate[d]) notesByDate[d] = [];
+                notesByDate[d].push(n);
+              });
+              const recordsByDate = {};
+              dailyLog.forEach(r => {
+                const d = r.date;
+                if (!d) return;
+                if (!recordsByDate[d]) recordsByDate[d] = [];
+                recordsByDate[d].push(r);
+              });
+              const dates = Array.from(new Set([...Object.keys(recordsByDate), ...Object.keys(notesByDate)]));
+              const mult = historySortOrder === 'desc' ? -1 : 1;
+              const dateMetric = (d) => {
+                const recs = recordsByDate[d] || [];
+                if (historySortBy === 'workers') return recs.reduce((s, r) => s + (r.workers || 0), 0);
+                if (historySortBy === 'amount') return recs.reduce((s, r) => s + (r.total_cable || 0), 0);
+                return new Date(d).getTime();
+              };
+              dates.sort((a, b) => mult * (dateMetric(a) - dateMetric(b)));
+              if (dates.length === 0) {
+                return <div className="history-empty">No work records or notes yet</div>;
+              }
+              return dates.map((d) => {
+                const recs = [...(recordsByDate[d] || [])];
+                const dayNotes = [...(notesByDate[d] || [])].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+                const dateLabel = new Date(d).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+                return (
+                  <div key={d} className="history-day">
+                    <div className="history-day-header">
+                      <span className="history-day-date">{dateLabel}</span>
+                      <span className="history-day-badges">
+                        {recs.length > 0 && <span className="history-day-badge">Total Records: {recs.length}</span>}
+                        {dayNotes.length > 0 && <span className="history-day-badge notes">Notes: {dayNotes.length}</span>}
+                      </span>
+                    </div>
+                    {recs.length > 0 && (
+                      <div className="history-day-section">
+                        <div className="history-day-section-title">Work</div>
+                        {recs.map((record, idx) => (
+                          <div key={record.id || idx} className="history-item" style={{ border: activeHistoryRecordId === record.id ? '2px solid orange' : undefined, boxShadow: activeHistoryRecordId === record.id ? '0 0 0 2px orange' : undefined }}>
+                            <div className="history-item-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span className="history-subcontractor">{record.subcontractor}</span>
+                              <span style={{ display: 'flex', gap: 8 }}>
+                                <button title="Select for Map" style={{ background: activeHistoryRecordId === record.id ? 'orange' : '#334155', color: 'white', border: 'none', borderRadius: 6, padding: '2px 8px', marginRight: 4, cursor: 'pointer' }}
+                                  onClick={() => {
+                                    setActiveHistoryRecordId(record.id);
+                                    setHistoryEditSelections(new Set(record.selections || []));
+                                    // TODO: trigger map highlight here
+                                  }}>
+                                  {activeHistoryRecordId === record.id ? 'Selected' : 'Select'}
+                                </button>
+                                <button title="Edit" style={{ background: '#f59e0b', color: '#1e293b', border: 'none', borderRadius: 6, padding: '2px 8px', marginRight: 4, cursor: 'pointer' }}
+                                  onClick={() => {
+                                    // TODO: open edit modal for record
+                                    alert('Edit functionality coming soon!');
+                                  }}>✎</button>
+                                <button title="Delete" style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '2px 8px', cursor: 'pointer' }}
+                                  onClick={() => {
+                                    if (window.confirm('Delete this work record?')) deleteRecord(record.id);
+                                  }}>✕</button>
+                              </span>
+                            </div>
+                            <div className="history-item-stats">
+                              <div className="stat">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="stat-icon">
+                                  <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+                                  <circle cx="9" cy="7" r="4"/>
+                                  <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
+                                </svg>
+                                <span>{record.workers} workers</span>
                               </div>
-                              <div className="history-item-stats">
-                                <div className="stat">
-                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="stat-icon">
-                                    <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
-                                    <circle cx="9" cy="7" r="4"/>
-                                    <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
-                                  </svg>
-                                  <span>{record.workers} workers</span>
-                                </div>
-                                <div className="stat stat-total">
-                                  <span>Amount: {(record.total_cable || 0).toFixed(0)} {record.unit || 'm'}</span>
-                                </div>
+                              <div className="stat stat-total">
+                                <span>Amount: {(record.total_cable || 0).toFixed(0)} {record.unit || 'm'}</span>
                               </div>
                             </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {dayNotes.length > 0 && (
-                        <div className="history-day-section">
-                          <div className="history-day-section-title">Notes</div>
-                          <div className="history-notes">
-                            {dayNotes.map((n) => {
-                              const time = n.createdAt ? new Date(n.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
-                              const hasPhoto = Boolean(n.photoDataUrl);
-                              return (
-                                <div key={n.id} className="history-note">
-                                  <div className="history-note-top">
-                                    <span className="history-note-time">{time}</span>
-                                    {hasPhoto && <span className="history-note-photo">📷</span>}
-                                  </div>
-                                  <div className="history-note-text">{n.text || '(empty note)'}</div>
-                                </div>
-                              );
-                            })}
                           </div>
+                        ))}
+                      </div>
+                    )}
+                    {dayNotes.length > 0 && (
+                      <div className="history-day-section">
+                        <div className="history-day-section-title">Notes</div>
+                        <div className="history-notes">
+                          {dayNotes.map((n) => {
+                            const time = n.createdAt ? new Date(n.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
+                            const hasPhoto = Boolean(n.photoDataUrl);
+                            return (
+                              <div key={n.id} className="history-note">
+                                <div className="history-note-top">
+                                  <span className="history-note-time">{time}</span>
+                                  {hasPhoto && <span className="history-note-photo">📷</span>}
+                                </div>
+                                <div className="history-note-text">{n.text || '(empty note)'}</div>
+                              </div>
+                            );
+                          })}
                         </div>
-                      )}
-                    </div>
-                  );
-                });
-              })()}
-            </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              });
+            })()}
           </div>
         </div>
       )}

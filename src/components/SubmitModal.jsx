@@ -9,6 +9,7 @@ export default function SubmitModal({
   moduleLabel,
   workAmount = 0,
   workUnit = 'm',
+  selectedPolygons = new Set(), // Add selected polygons parameter
 }) {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [subcontractor, setSubcontractor] = useState('');
@@ -31,6 +32,7 @@ export default function SubmitModal({
       unit: workUnit || 'm',
       subcontractor,
       workers: parseInt(workers),
+      selections: Array.from(selectedPolygons), // Store selected polygon IDs
       timestamp: new Date().toISOString()
     };
 
