@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import './SubmitModal.css';
 
 export default function SubmitModal({
@@ -14,6 +14,11 @@ export default function SubmitModal({
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [subcontractor, setSubcontractor] = useState('');
   const [workers, setWorkers] = useState(1);
+  
+  // Draggable state
+  const [panelPos, setPanelPos] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragOffset = useRef({ x: 0, y: 0 });
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -42,6 +47,7 @@ export default function SubmitModal({
     setDate(new Date().toISOString().split('T')[0]);
     setSubcontractor('');
     setWorkers(1);
+    setPanelPos({ x: 0, y: 0 }); // Reset position
     
     onClose();
   };
@@ -49,14 +55,63 @@ export default function SubmitModal({
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
+    <>
+      {/* Draggable panel - non-blocking */}
+      <div 
+        className="submit-panel"
+        style={{
+          transform: `translate(${panelPos.x}px, ${panelPos.y}px)`,
+          cursor: dragging ? 'grabbing' : 'default'
+        }}
+      >
+        <div 
+          className="submit-panel-header"
+          style={{ cursor: dragging ? 'grabbing' : 'grab' }}
+          onMouseDown={(e) => {
+            if (e.target.closest('button')) return;
+            setDragging(true);
+            dragOffset.current = {
+              x: e.clientX - panelPos.x,
+              y: e.clientY - panelPos.y
+            };
+          }}
+          onTouchStart={(e) => {
+            if (e.target.closest('button')) return;
+            const touch = e.touches[0];
+            setDragging(true);
+            dragOffset.current = {
+              x: touch.clientX - panelPos.x,
+              y: touch.clientY - panelPos.y
+            };
+          }}
+        >
           <h2>Submit Daily Work</h2>
-          <button className="close-button" onClick={onClose}>×</button>
+          <button className="submit-panel-close" onClick={onClose}>×</button>
         </div>
         
-        <form onSubmit={handleSubmit}>
+        {/* Drag overlay */}
+        {dragging && (
+          <div 
+            style={{ position: 'fixed', inset: 0, zIndex: 99999, cursor: 'grabbing' }}
+            onMouseMove={(e) => {
+              setPanelPos({
+                x: e.clientX - dragOffset.current.x,
+                y: e.clientY - dragOffset.current.y
+              });
+            }}
+            onMouseUp={() => setDragging(false)}
+            onTouchMove={(e) => {
+              const touch = e.touches[0];
+              setPanelPos({
+                x: touch.clientX - dragOffset.current.x,
+                y: touch.clientY - dragOffset.current.y
+              });
+            }}
+            onTouchEnd={() => setDragging(false)}
+          />
+        )}
+        
+        <form onSubmit={handleSubmit} className="submit-panel-form">
           <div className="form-group">
             <label>Date</label>
             <input
@@ -96,7 +151,7 @@ export default function SubmitModal({
             </div>
           </div>
 
-          <div className="modal-actions">
+          <div className="submit-panel-actions">
             <button type="button" onClick={onClose} className="btn-cancel">
               Cancel
             </button>
@@ -106,6 +161,6 @@ export default function SubmitModal({
           </div>
         </form>
       </div>
-    </div>
+    </>
   );
 }

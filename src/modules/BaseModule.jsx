@@ -440,6 +440,7 @@ export default function BaseModule({
   const layersRef = useRef([]);
   const polygonIdCounter = useRef(0); // Counter for unique polygon IDs
   const polygonById = useRef({}); // uniqueId -> {layer, stringId}
+  const prevHistoryHighlightRef = useRef(new Set()); // Track previously highlighted history polygons
                 const boxRectRef = useRef(null);
   const draggingRef = useRef(null);
   const rafRef = useRef(null);
@@ -883,6 +884,28 @@ export default function BaseModule({
   useEffect(() => {
     committedPolygonsRef.current = committedPolygons;
   }, [committedPolygons]);
+
+  // HARD GUARANTEE:
+  // Once a polygon is submitted (committed), it must NEVER disappear from `selectedPolygons`
+  // until its history record is deleted (🗑️). This protects against any "global/common"
+  // selection logic accidentally unselecting committed polygons.
+  useEffect(() => {
+    const committed = committedPolygonsRef.current || committedPolygons;
+    if (!committed || committed.size === 0) return;
+
+    setSelectedPolygons((prev) => {
+      // Fast path: if all committed are already present, do nothing.
+      let missing = false;
+      committed.forEach((id) => {
+        if (!prev.has(id)) missing = true;
+      });
+      if (!missing) return prev;
+
+      const next = new Set(prev);
+      committed.forEach((id) => next.add(id));
+      return next;
+    });
+  }, [selectedPolygons, committedPolygons]);
   // MVT: test panel state for "TESTED" click
   const [mvtTestPanel, setMvtTestPanel] = useState(null); // { stationLabel, fromKey, phases: {L1,L2,L3} } | null
   // MVT: manual termination counter state (persistent)
@@ -983,6 +1006,35 @@ export default function BaseModule({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historySortBy, setHistorySortBy] = useState('date'); // 'date', 'workers', 'cable'
   const [historySortOrder, setHistorySortOrder] = useState('desc'); // 'asc', 'desc'
+  
+  // History editing mode states
+  const [historySelectedRecordId, setHistorySelectedRecordId] = useState(null); // ID of selected record in history
+  const historySelectedRecordIdRef = useRef(historySelectedRecordId);
+  useEffect(() => {
+    historySelectedRecordIdRef.current = historySelectedRecordId;
+    // Also set on window for Leaflet click handlers (they run outside React's event system)
+    window.__historySelectedRecordId = historySelectedRecordId;
+  }, [historySelectedRecordId]);
+  
+  // Local editing state for history record polygons
+  const [editingPolygonIds, setEditingPolygonIds] = useState([]);
+  const editingPolygonIdsRef = useRef([]);
+  useEffect(() => {
+    editingPolygonIdsRef.current = editingPolygonIds;
+    window.__editingPolygonIds = editingPolygonIds;
+  }, [editingPolygonIds]);
+  
+  // Editing amount state (updated directly from click handler)
+  const [editingAmountState, setEditingAmountState] = useState(0);
+  useEffect(() => {
+    window.__setEditingAmountState = setEditingAmountState;
+  }, []);
+  
+  // Draggable history panel position
+  const [historyPanelPos, setHistoryPanelPos] = useState({ x: 0, y: 0 });
+  const [historyDragging, setHistoryDragging] = useState(false);
+  const historyDragOffset = useRef({ x: 0, y: 0 });
+  const historyPanelRef = useRef(null);
   
   // Note Mode state - PUNCH_LIST always starts in punch mode
   const [noteMode, setNoteMode] = useState(isPL);
@@ -1477,7 +1529,8 @@ export default function BaseModule({
       setLvCompletedInvIds(new Set());
     }
     // Reset polygon selection in LV (we count via inv_id clicks)
-    setSelectedPolygons(new Set());
+    // Keep committed polygons locked unless their history record is deleted.
+    setSelectedPolygons(new Set(committedPolygonsRef.current || []));
   }, [isLV, lvStorageKey]);
 
   useEffect(() => {
@@ -4144,9 +4197,114 @@ export default function BaseModule({
   }, [effectiveStringTextVisibility, scheduleStringTextLabelUpdate]);
   
   // Hooks for daily log and export
-  const { dailyLog, addRecord } = useDailyLog(activeMode?.key || 'DC');
+  const { dailyLog, addRecord, updateRecord, deleteRecord } = useDailyLog(activeMode?.key || 'DC');
   const { exportToExcel } = useChartExport();
   
+  // Initialize editing state when a history record is selected
+  useEffect(() => {
+    if (historySelectedRecordId) {
+      const record = dailyLog.find((r) => r.id === historySelectedRecordId);
+      if (record) {
+        setEditingPolygonIds([...(record.selectedPolygonIds || [])]);
+        setEditingAmountState(record.total_cable || 0);
+        window.__editingAmount = record.total_cable || 0;
+      }
+    } else {
+      setEditingPolygonIds([]);
+      setEditingAmountState(0);
+      window.__editingAmount = 0;
+    }
+  }, [historySelectedRecordId, dailyLog]);
+  
+  // Calculate editingAmount from editingPolygonIds (auto-updates when polygons change)
+  const editingAmount = useMemo(() => {
+    if (!historySelectedRecordId || editingPolygonIds.length === 0) return 0;
+    
+    // For DC module, calculate based on string lengths
+    if (isDC) {
+      const stringIds = new Set();
+      editingPolygonIds.forEach((pid) => {
+        const pInfo = polygonById.current[pid];
+        if (pInfo && pInfo.stringId) {
+          stringIds.add(normalizeId(pInfo.stringId));
+        }
+      });
+      let plus = 0;
+      let minus = 0;
+      stringIds.forEach((stringId) => {
+        const data = lengthData[stringId];
+        if (data) {
+          if (data.plus && data.plus.length > 0) {
+            plus += data.plus.reduce((a, b) => a + b, 0);
+          }
+          if (data.minus && data.minus.length > 0) {
+            minus += data.minus.reduce((a, b) => a + b, 0);
+          }
+        }
+      });
+      return plus + minus;
+    }
+    
+    // For other modules, just count polygons
+    return editingPolygonIds.length;
+  }, [historySelectedRecordId, editingPolygonIds, isDC, lengthData]);
+
+  // History Record Selection: Highlight polygons from editingPolygonIds with orange color
+  useEffect(() => {
+    const panels = polygonById.current || {};
+    const polygonIdsToHighlight = new Set(editingPolygonIds);
+    
+    if (!historySelectedRecordId || editingPolygonIds.length === 0) {
+      // Clean up previous highlights when no record is selected
+      prevHistoryHighlightRef.current.forEach((polygonId) => {
+        const polygonInfo = panels[polygonId];
+        if (polygonInfo && polygonInfo.layer && polygonInfo.layer.setStyle) {
+          // Restore to committed (green) or unselected style
+          const isCommitted = (committedPolygonsRef.current || committedPolygons).has(polygonId);
+          polygonInfo.layer.setStyle(
+            isCommitted
+              ? { color: '#22c55e', weight: 1.5, fill: false, fillOpacity: 0 }
+              : { color: 'rgba(255,255,255,0.35)', weight: 1.05, fill: false, fillOpacity: 0 }
+          );
+        }
+      });
+      if (!historySelectedRecordId) {
+        prevHistoryHighlightRef.current = new Set();
+        return;
+      }
+    }
+
+    // Clean up polygons that are no longer in highlight set
+    prevHistoryHighlightRef.current.forEach((polygonId) => {
+      if (!polygonIdsToHighlight.has(polygonId)) {
+        const polygonInfo = panels[polygonId];
+        if (polygonInfo && polygonInfo.layer && polygonInfo.layer.setStyle) {
+          const isCommitted = (committedPolygonsRef.current || committedPolygons).has(polygonId);
+          polygonInfo.layer.setStyle(
+            isCommitted
+              ? { color: '#22c55e', weight: 1.5, fill: false, fillOpacity: 0 }
+              : { color: 'rgba(255,255,255,0.35)', weight: 1.05, fill: false, fillOpacity: 0 }
+          );
+        }
+      }
+    });
+
+    // Apply orange highlight to editing polygons
+    polygonIdsToHighlight.forEach((polygonId) => {
+      const polygonInfo = panels[polygonId];
+      if (polygonInfo && polygonInfo.layer && polygonInfo.layer.setStyle) {
+        polygonInfo.layer.setStyle({
+          color: '#f97316',
+          weight: 1.8,
+          fill: false,
+          fillOpacity: 0,
+        });
+      }
+    });
+
+    prevHistoryHighlightRef.current = polygonIdsToHighlight;
+  }, [historySelectedRecordId, editingPolygonIds, committedPolygons]);
+
   // Save notes to localStorage
   useEffect(() => {
     localStorage.setItem('cew_notes', JSON.stringify(notes));
@@ -4769,7 +4927,8 @@ export default function BaseModule({
           setMvfSegments([]);
           mvfSegmentLenByKeyRef.current = {};
           // Reset selection when switching modules (avoids mismatched IDs)
-          setSelectedPolygons(new Set());
+          // Keep committed polygons locked unless their history record is deleted.
+          setSelectedPolygons(new Set(committedPolygonsRef.current || []));
           setCompletedPlus(0);
           setCompletedMinus(0);
           return;
@@ -4963,7 +5122,8 @@ export default function BaseModule({
           setTotalMinus(0);
           setMvfSegments([]);
           mvfSegmentLenByKeyRef.current = {};
-          setSelectedPolygons(new Set());
+          // Keep committed polygons locked unless their history record is deleted.
+          setSelectedPolygons(new Set(committedPolygonsRef.current || []));
           setCompletedPlus(0);
           setCompletedMinus(0);
           return;
@@ -4984,7 +5144,8 @@ export default function BaseModule({
         setTotalMinus(allMinus);
 
         // Reset selection when switching modules (avoids mismatched IDs)
-        setSelectedPolygons(new Set());
+        // Keep committed polygons locked unless their history record is deleted.
+        setSelectedPolygons(new Set(committedPolygonsRef.current || []));
         setCompletedPlus(0);
         setCompletedMinus(0);
       })
@@ -6346,9 +6507,105 @@ export default function BaseModule({
                 if (noteMode) return;
                 const polygonId = featureLayer._uniquePolygonId;
                 if (polygonId) {
+                  // HISTORY EDITING MODE: If a history record is selected, toggle polygon in editing set
+                  const currentHistoryRecordId = window.__historySelectedRecordId;
+                  if (currentHistoryRecordId) {
+                    // Get current editing polygon IDs from window
+                    const currentPolygonIds = window.__editingPolygonIds || [];
+                    const pInfo = polygonById.current?.[polygonId] || null;
+
+                    // DC mode: toggle entire string group together
+                    let toggleIds = [polygonId];
+                    if (isDC && pInfo?.stringId) {
+                      const sid = normalizeId(pInfo.stringId);
+                      toggleIds = Object.keys(polygonById.current || {}).filter((pid) => {
+                        const info = polygonById.current?.[pid];
+                        return normalizeId(info?.stringId || '') === sid;
+                      });
+                      if (toggleIds.length === 0) toggleIds = [polygonId];
+                    }
+
+                    const currentSet = new Set(currentPolygonIds);
+                    const allInEditing = toggleIds.every((id) => currentSet.has(id));
+
+                    let newPolygonIds;
+                    if (allInEditing) {
+                      // Remove the whole group
+                      toggleIds.forEach((id) => currentSet.delete(id));
+                      newPolygonIds = Array.from(currentSet);
+                    } else {
+                      // Add the whole group
+                      toggleIds.forEach((id) => currentSet.add(id));
+                      newPolygonIds = Array.from(currentSet);
+                    }
+                    
+                    // Update editing state
+                    setEditingPolygonIds(newPolygonIds);
+                    editingPolygonIdsRef.current = newPolygonIds;
+                    window.__editingPolygonIds = newPolygonIds;
+                    
+                    // Calculate new amount for DC
+                    if (isDC) {
+                      const stringIdsSet = new Set();
+                      newPolygonIds.forEach((pid) => {
+                        const info = polygonById.current?.[pid];
+                        if (info?.stringId) stringIdsSet.add(normalizeId(info.stringId));
+                      });
+                      let plus = 0, minus = 0;
+                      stringIdsSet.forEach((sid) => {
+                        const d = lengthData[sid];
+                        if (d?.plus?.length) plus += d.plus.reduce((a, b) => a + b, 0);
+                        if (d?.minus?.length) minus += d.minus.reduce((a, b) => a + b, 0);
+                      });
+                      setEditingAmountState(plus + minus);
+                    } else {
+                      setEditingAmountState(newPolygonIds.length);
+                    }
+
+                    // Immediately update polygon style
+                    toggleIds.forEach((id) => {
+                      const layerInfo = polygonById.current?.[id];
+                      if (!layerInfo?.layer || typeof layerInfo.layer.setStyle !== 'function') return;
+                      if (allInEditing) {
+                        // We removed it -> back to base style
+                        const isCommitted = (committedPolygonsRef.current || committedPolygons).has(id);
+                        layerInfo.layer.setStyle(
+                          isCommitted
+                            ? { color: '#22c55e', weight: 1.5, fill: false, fillOpacity: 0 }
+                            : { color: 'rgba(255,255,255,0.35)', weight: 1.05, fill: false, fillOpacity: 0 }
+                        );
+                      } else {
+                        // We added it -> orange
+                        layerInfo.layer.setStyle({
+                          color: '#f97316',
+                          weight: 1.8,
+                          fill: false,
+                          fillOpacity: 0,
+                        });
+                      }
+                    });
+                    
+                    return; // Don't do normal selection
+                  }
+                  
+                  // COMMITTED POLYGON CHECK: Don't allow unselecting committed (submitted) polygons
+                  // They can only be removed by deleting the history record
+                  // Use ref to get latest value (Leaflet handlers have stale closures)
+                  const currentCommitted = committedPolygonsRef.current || new Set();
+                  const isCommitted = currentCommitted.has(polygonId);
+                  if (isCommitted) {
+                    // Already committed - don't allow unselection
+                    return;
+                  }
+                  
                   // TIP: Select/unselect both panels of a table together
                   if (isTIP) {
                     const partnerPolygonId = tipPanelPairsRef.current?.polygonPairs?.get(polygonId);
+                    // Check if any of the pair is committed
+                    const anyCommitted = currentCommitted.has(polygonId) || 
+                      (partnerPolygonId && currentCommitted.has(partnerPolygonId));
+                    if (anyCommitted) return; // Don't allow unselection of committed polygons
+                    
                     setSelectedPolygons(prev => {
                       const next = new Set(prev);
                       const isSelected = next.has(polygonId);
@@ -6367,16 +6624,19 @@ export default function BaseModule({
                   // For small tables: select all polygons with same string ID
                   const polygonInfo = polygonById.current[polygonId];
                   if (polygonInfo && polygonInfo.stringId && polygonInfo.isSmallTable) {
+                    // Check if any polygon in the group is committed
+                    const groupIds = [];
+                    Object.keys(polygonById.current).forEach(pid => {
+                      const info = polygonById.current[pid];
+                      if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
+                        groupIds.push(pid);
+                      }
+                    });
+                    const anyGroupCommitted = groupIds.some(id => currentCommitted.has(id));
+                    if (anyGroupCommitted) return; // Don't allow unselection of committed groups
+                    
                     setSelectedPolygons(prev => {
                       const next = new Set(prev);
-                      const groupIds = [];
-                      // Find all polygons with same string ID
-                      Object.keys(polygonById.current).forEach(pid => {
-                        const info = polygonById.current[pid];
-                        if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
-                          groupIds.push(pid);
-                        }
-                      });
 
                       const allSelected = groupIds.length > 0 && groupIds.every(id => next.has(id));
                       if (allSelected) {
@@ -6411,9 +6671,20 @@ export default function BaseModule({
                 if (noteMode) return;
                 const polygonId = featureLayer._uniquePolygonId;
                 if (polygonId) {
+                  // COMMITTED POLYGON CHECK: Don't allow unselecting committed (submitted) polygons
+                  // Use ref to get latest value (Leaflet handlers have stale closures)
+                  const currentCommitted = committedPolygonsRef.current || new Set();
+                  const isCommitted = currentCommitted.has(polygonId);
+                  if (isCommitted) return; // Already committed - don't allow unselection
+                  
                   // TIP: Unselect both panels of a table together
                   if (isTIP && tipPanelPairsRef.current?.polygonPairs) {
                     const partnerPolygonId = tipPanelPairsRef.current.polygonPairs.get(polygonId);
+                    // Check if any is committed
+                    const anyCommitted = currentCommitted.has(polygonId) || 
+                      (partnerPolygonId && currentCommitted.has(partnerPolygonId));
+                    if (anyCommitted) return;
+                    
                     setSelectedPolygons(prev => {
                       const next = new Set(prev);
                       next.delete(polygonId);
@@ -6426,15 +6697,20 @@ export default function BaseModule({
                   // For small tables: unselect all polygons with same string ID
                   const polygonInfo = polygonById.current[polygonId];
                   if (polygonInfo && polygonInfo.stringId && polygonInfo.isSmallTable) {
+                    // Check if any in group is committed
+                    const groupIds = [];
+                    Object.keys(polygonById.current).forEach(pid => {
+                      const info = polygonById.current[pid];
+                      if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
+                        groupIds.push(pid);
+                      }
+                    });
+                    const anyGroupCommitted = groupIds.some(id => currentCommitted.has(id));
+                    if (anyGroupCommitted) return;
+                    
                     setSelectedPolygons(prev => {
                       const next = new Set(prev);
-                      // Find all polygons with same string ID
-                      Object.keys(polygonById.current).forEach(pid => {
-                        const info = polygonById.current[pid];
-                        if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
-                          next.delete(pid);
-                        }
-                      });
+                      groupIds.forEach(pid => next.delete(pid));
                       return next;
                     });
                   } else {
@@ -10328,7 +10604,8 @@ export default function BaseModule({
     // For DC and similar modules: calculate only NEW (uncommitted) polygons
     const newPolygonIds = new Set();
     selectedPolygons.forEach((id) => {
-      if (!committedPolygons.has(id)) {
+      const committed = committedPolygonsRef.current || committedPolygons;
+      if (!committed.has(id)) {
         newPolygonIds.add(id);
       }
     });
@@ -13357,6 +13634,8 @@ export default function BaseModule({
           setCommittedPolygons((prev) => {
             const next = new Set(prev);
             newPolygonIds.forEach((id) => next.add(id));
+            // IMPORTANT: keep ref in sync immediately (Leaflet click handlers can run before next render)
+            committedPolygonsRef.current = next;
             return next;
           });
 
@@ -13414,148 +13693,236 @@ export default function BaseModule({
         }
       />
       
-      {/* History Modal */}
+      {/* History Panel - Draggable, non-blocking */}
       {historyOpen && (
-        <div className="history-overlay" onClick={() => setHistoryOpen(false)}>
-          <div className="history-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="history-header">
-              <h2>📊 Work History</h2>
-              <button className="history-close" onClick={() => setHistoryOpen(false)}>×</button>
+        <div 
+          ref={historyPanelRef}
+          className="history-panel"
+          style={{
+            transform: `translate(${historyPanelPos.x}px, ${historyPanelPos.y}px)`,
+            cursor: historyDragging ? 'grabbing' : 'default'
+          }}
+        >
+          <div 
+            className="history-panel-header"
+            style={{ cursor: historyDragging ? 'grabbing' : 'grab' }}
+            onMouseDown={(e) => {
+              if (e.target.closest('button')) return;
+              setHistoryDragging(true);
+              historyDragOffset.current = {
+                x: e.clientX - historyPanelPos.x,
+                y: e.clientY - historyPanelPos.y
+              };
+            }}
+            onTouchStart={(e) => {
+              if (e.target.closest('button')) return;
+              const touch = e.touches[0];
+              setHistoryDragging(true);
+              historyDragOffset.current = {
+                x: touch.clientX - historyPanelPos.x,
+                y: touch.clientY - historyPanelPos.y
+              };
+            }}
+          >
+            <div className="history-panel-title">📊 Work History</div>
+            <div className="history-panel-actions">
+              <button 
+                className="history-panel-close" 
+                onClick={() => {
+                  setHistoryOpen(false);
+                  setHistorySelectedRecordId(null);
+                }}
+              >
+                ×
+              </button>
             </div>
-            
-            <div className="history-sort">
-              <span>Sort by:</span>
-              <button 
-                className={`sort-btn ${historySortBy === 'date' ? 'active' : ''}`}
-                onClick={() => {
-                  if (historySortBy === 'date') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
-                  else { setHistorySortBy('date'); setHistorySortOrder('desc'); }
-                }}
-              >
-                Date {historySortBy === 'date' && (historySortOrder === 'desc' ? '↓' : '↑')}
-              </button>
-              <button 
-                className={`sort-btn ${historySortBy === 'workers' ? 'active' : ''}`}
-                onClick={() => {
-                  if (historySortBy === 'workers') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
-                  else { setHistorySortBy('workers'); setHistorySortOrder('desc'); }
-                }}
-              >
-                Workers {historySortBy === 'workers' && (historySortOrder === 'desc' ? '↓' : '↑')}
-              </button>
-              <button 
-                className={`sort-btn ${historySortBy === 'amount' ? 'active' : ''}`}
-                onClick={() => {
-                  if (historySortBy === 'amount') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
-                  else { setHistorySortBy('amount'); setHistorySortOrder('desc'); }
-                }}
-              >
-                Amount {historySortBy === 'amount' && (historySortOrder === 'desc' ? '↓' : '↑')}
-              </button>
-            </div>
-            
-            <div className="history-list">
-              {(() => {
-                const noteYmd = (n) => n.noteDate || (n.createdAt ? new Date(n.createdAt).toISOString().split('T')[0] : null);
-
-                const notesByDate = {};
-                notes.forEach(n => {
-                  const d = noteYmd(n);
-                  if (!d) return;
-                  if (!notesByDate[d]) notesByDate[d] = [];
-                  notesByDate[d].push(n);
+          </div>
+          
+          {/* Mouse/Touch move handlers for dragging */}
+          {historyDragging && (
+            <div 
+              style={{ position: 'fixed', inset: 0, zIndex: 99999, cursor: 'grabbing' }}
+              onMouseMove={(e) => {
+                setHistoryPanelPos({
+                  x: e.clientX - historyDragOffset.current.x,
+                  y: e.clientY - historyDragOffset.current.y
                 });
-
-                const recordsByDate = {};
-                dailyLog.forEach(r => {
-                  const d = r.date;
-                  if (!d) return;
-                  if (!recordsByDate[d]) recordsByDate[d] = [];
-                  recordsByDate[d].push(r);
+              }}
+              onMouseUp={() => setHistoryDragging(false)}
+              onTouchMove={(e) => {
+                const touch = e.touches[0];
+                setHistoryPanelPos({
+                  x: touch.clientX - historyDragOffset.current.x,
+                  y: touch.clientY - historyDragOffset.current.y
                 });
+              }}
+              onTouchEnd={() => setHistoryDragging(false)}
+            />
+          )}
+          
+          <div className="history-sort">
+            <span>Sort:</span>
+            <button 
+              className={`sort-btn ${historySortBy === 'date' ? 'active' : ''}`}
+              onClick={() => {
+                if (historySortBy === 'date') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
+                else { setHistorySortBy('date'); setHistorySortOrder('desc'); }
+              }}
+            >
+              Date {historySortBy === 'date' && (historySortOrder === 'desc' ? '↓' : '↑')}
+            </button>
+            <button 
+              className={`sort-btn ${historySortBy === 'workers' ? 'active' : ''}`}
+              onClick={() => {
+                if (historySortBy === 'workers') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
+                else { setHistorySortBy('workers'); setHistorySortOrder('desc'); }
+              }}
+            >
+              Workers {historySortBy === 'workers' && (historySortOrder === 'desc' ? '↓' : '↑')}
+            </button>
+            <button 
+              className={`sort-btn ${historySortBy === 'amount' ? 'active' : ''}`}
+              onClick={() => {
+                if (historySortBy === 'amount') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
+                else { setHistorySortBy('amount'); setHistorySortOrder('desc'); }
+              }}
+            >
+              Amount {historySortBy === 'amount' && (historySortOrder === 'desc' ? '↓' : '↑')}
+            </button>
+          </div>
+          
+          <div className="history-list">
+            {(() => {
+              const noteYmd = (n) => n.noteDate || (n.createdAt ? new Date(n.createdAt).toISOString().split('T')[0] : null);
 
-                const dates = Array.from(new Set([...Object.keys(recordsByDate), ...Object.keys(notesByDate)]));
-                const mult = historySortOrder === 'desc' ? -1 : 1;
+              const notesByDate = {};
+              notes.forEach(n => {
+                const d = noteYmd(n);
+                if (!d) return;
+                if (!notesByDate[d]) notesByDate[d] = [];
+                notesByDate[d].push(n);
+              });
 
-                const dateMetric = (d) => {
-                  const recs = recordsByDate[d] || [];
-                  if (historySortBy === 'workers') return recs.reduce((s, r) => s + (r.workers || 0), 0);
-                  if (historySortBy === 'amount') return recs.reduce((s, r) => s + (r.total_cable || 0), 0);
-                  return new Date(d).getTime();
-                };
+              const recordsByDate = {};
+              dailyLog.forEach(r => {
+                const d = r.date;
+                if (!d) return;
+                if (!recordsByDate[d]) recordsByDate[d] = [];
+                recordsByDate[d].push(r);
+              });
 
-                dates.sort((a, b) => mult * (dateMetric(a) - dateMetric(b)));
+              const dates = Array.from(new Set([...Object.keys(recordsByDate), ...Object.keys(notesByDate)]));
+              const mult = historySortOrder === 'desc' ? -1 : 1;
 
-                if (dates.length === 0) {
-                  return <div className="history-empty">No work records or notes yet</div>;
-                }
+              const dateMetric = (d) => {
+                const recs = recordsByDate[d] || [];
+                if (historySortBy === 'workers') return recs.reduce((s, r) => s + (r.workers || 0), 0);
+                if (historySortBy === 'amount') return recs.reduce((s, r) => s + (r.total_cable || 0), 0);
+                return new Date(d).getTime();
+              };
 
-                return dates.map((d) => {
-                  const recs = [...(recordsByDate[d] || [])];
-                  const dayNotes = [...(notesByDate[d] || [])].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-                  const dateLabel = new Date(d).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+              dates.sort((a, b) => mult * (dateMetric(a) - dateMetric(b)));
 
-                  return (
-                    <div key={d} className="history-day">
-                      <div className="history-day-header">
-                        <span className="history-day-date">{dateLabel}</span>
-                        <span className="history-day-badges">
-                          {recs.length > 0 && <span className="history-day-badge">Total Records: {recs.length}</span>}
-                          {dayNotes.length > 0 && <span className="history-day-badge notes">Notes: {dayNotes.length}</span>}
-                        </span>
-                      </div>
+              if (dates.length === 0) {
+                return <div className="history-empty">No work records or notes yet</div>;
+              }
 
-                      {recs.length > 0 && (
-                        <div className="history-day-section">
-                          <div className="history-day-section-title">Work</div>
-                          {recs.map((record, idx) => (
-                            <div key={idx} className="history-item">
-                              <div className="history-item-header">
-                                <span className="history-subcontractor">{record.subcontractor}</span>
-                              </div>
-                              <div className="history-item-stats">
-                                <div className="stat">
-                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="stat-icon">
-                                    <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
-                                    <circle cx="9" cy="7" r="4"/>
-                                    <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
-                                  </svg>
-                                  <span>{record.workers} workers</span>
-                                </div>
-                                <div className="stat stat-total">
-                                  <span>Amount: {(record.total_cable || 0).toFixed(0)} {record.unit || 'm'}</span>
-                                </div>
-                              </div>
+              return dates.map((d) => {
+                const recs = [...(recordsByDate[d] || [])];
+                const dayNotes = [...(notesByDate[d] || [])].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+                const dateLabel = new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+                return (
+                  <div key={d} className="history-day">
+                    <div className="history-day-header">
+                      <span className="history-day-date">{dateLabel}</span>
+                    </div>
+
+                    {recs.map((record) => {
+                      const isSelected = historySelectedRecordId === record.id;
+                      const recordPolygonIds = record.selectedPolygonIds || [];
+                      
+                      return (
+                        <div 
+                          key={record.id} 
+                          className={`history-item ${isSelected ? 'history-item-selected' : ''}`}
+                          onClick={() => {
+                            // Toggle select/deselect for orange highlight on map
+                            if (historySelectedRecordId === record.id) {
+                              setHistorySelectedRecordId(null);
+                            } else {
+                              setHistorySelectedRecordId(record.id);
+                            }
+                          }}
+                        >
+                          <div className="history-item-header">
+                            <span className="history-subcontractor">{record.subcontractor}</span>
+                            <button
+                              className="history-item-delete"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (window.confirm('Delete this record?')) {
+                                  // Remove from committedPolygons
+                                  setCommittedPolygons((prev) => {
+                                    const next = new Set(prev);
+                                    recordPolygonIds.forEach((id) => next.delete(id));
+                                    return next;
+                                  });
+                                  // Also remove from selectedPolygons (make them disappear from map)
+                                  setSelectedPolygons((prev) => {
+                                    const next = new Set(prev);
+                                    recordPolygonIds.forEach((id) => next.delete(id));
+                                    return next;
+                                  });
+                                  deleteRecord(record.id);
+                                  if (historySelectedRecordId === record.id) {
+                                    setHistorySelectedRecordId(null);
+                                  }
+                                }
+                              }}
+                              title="Delete record"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                          <div className="history-item-stats">
+                            <div className="stat">
+                              <span>{record.workers} workers</span>
                             </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {dayNotes.length > 0 && (
-                        <div className="history-day-section">
-                          <div className="history-day-section-title">Notes</div>
-                          <div className="history-notes">
-                            {dayNotes.map((n) => {
-                              const time = n.createdAt ? new Date(n.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
-                              const hasPhoto = Boolean(n.photoDataUrl);
-                              return (
-                                <div key={n.id} className="history-note">
-                                  <div className="history-note-top">
-                                    <span className="history-note-time">{time}</span>
-                                    {hasPhoto && <span className="history-note-photo">📷</span>}
-                                  </div>
-                                  <div className="history-note-text">{n.text || '(empty note)'}</div>
-                                </div>
-                              );
-                            })}
+                            <div className="stat stat-total">
+                              <span>
+                                {(record.total_cable || 0).toFixed(0)} {record.unit || 'm'}
+                              </span>
+                            </div>
                           </div>
                         </div>
-                      )}
-                    </div>
-                  );
-                });
-              })()}
-            </div>
+                      );
+                    })}
+
+                    {dayNotes.length > 0 && (
+                      <div className="history-day-section">
+                        <div className="history-day-section-title">Notes</div>
+                        <div className="history-notes">
+                          {dayNotes.map((n) => {
+                            const time = n.createdAt ? new Date(n.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
+                            const hasPhoto = Boolean(n.photoDataUrl);
+                            return (
+                              <div key={n.id} className="history-note">
+                                <div className="history-note-top">
+                                  <span className="history-note-time">{time}</span>
+                                  {hasPhoto && <span className="history-note-photo">📷</span>}
+                                </div>
+                                <div className="history-note-text">{n.text || '(empty note)'}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              });
+            })()}
           </div>
         </div>
       )}

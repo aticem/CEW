@@ -55,10 +55,8 @@ export function useChartExport() {
           aggregated[dateKey].total_cable += record.total_cable || 0;
         }
 
-        aggregated[dateKey].workers = Math.max(
-          aggregated[dateKey].workers,
-          record.workers || 0
-        );
+        // Sum workers for the day (total workers across all submissions)
+        aggregated[dateKey].workers += record.workers || 0;
       });
 
       // 2. Sort by date

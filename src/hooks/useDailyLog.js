@@ -5,9 +5,18 @@ export default function useDailyLog(moduleKey = "DC") {
   const [dailyLog, setDailyLog] = useState([]);
 
   const addRecord = (record) => {
-    const updated = [...dailyLog, record];
-    setDailyLog(updated);
-    // Don't save to localStorage - history should reset with page refresh
+    // Generate unique ID for the record
+    const id = `${record.date}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const recordWithId = { ...record, id };
+    setDailyLog(prev => [...prev, recordWithId]);
+  };
+
+  const updateRecord = (id, updates) => {
+    setDailyLog(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
+  };
+
+  const deleteRecord = (id) => {
+    setDailyLog(prev => prev.filter(r => r.id !== id));
   };
 
   const resetLog = () => {
@@ -16,5 +25,5 @@ export default function useDailyLog(moduleKey = "DC") {
     }
   };
 
-  return { dailyLog, addRecord, resetLog };
+  return { dailyLog, addRecord, updateRecord, deleteRecord, resetLog };
 }

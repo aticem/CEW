@@ -802,6 +802,132 @@ body {
   animation: popup-in 0.2s ease-out;
 }
 
+/* Draggable History Panel (non-blocking) */
+.history-panel {
+  position: fixed;
+  top: 60px;
+  right: 20px;
+  width: 340px;
+  max-height: 70vh;
+  background: rgba(30, 41, 59, 0.95);
+  backdrop-filter: blur(12px);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.history-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  user-select: none;
+}
+
+.history-panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+}
+
+.history-panel-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.history-panel-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: #64748b;
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.history-panel-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.history-panel .history-sort {
+  padding: 8px 12px;
+  gap: 4px;
+}
+
+.history-panel .history-sort span {
+  font-size: 11px;
+  margin-right: 4px;
+}
+
+.history-panel .sort-btn {
+  padding: 4px 8px;
+  font-size: 10px;
+}
+
+.history-panel .history-list {
+  padding: 8px 12px;
+  max-height: calc(70vh - 120px);
+  overflow-y: auto;
+}
+
+.history-panel .history-item {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+
+.history-item-selected {
+  background: rgba(249, 115, 22, 0.15) !important;
+  border-color: rgba(249, 115, 22, 0.4) !important;
+}
+
+.history-item-delete {
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  opacity: 0.6;
+  transition: all 0.2s;
+}
+
+.history-item-delete:hover {
+  opacity: 1;
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.history-item-update-btn {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #f97316;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.history-item-update-btn:hover {
+  background: #ea580c;
+}
+
 .history-header {
   display: flex;
   justify-content: space-between;
