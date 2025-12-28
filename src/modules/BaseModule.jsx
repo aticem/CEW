@@ -10806,6 +10806,9 @@ export default function BaseModule({
             ? p.metersMultiplier
             : mvfCircuitsMultiplier;
         return sum + m * mult;
+      }, 0) + Array.from(mvfActiveSegmentKeys).reduce((sum, segKey) => {
+        const segLen = Number(mvfSegmentLenByKeyRef.current?.[segKey]) || 0;
+        return sum + segLen;
       }, 0)
     : 0;
   const mvfCommittedCableMeters = isMVF
@@ -13920,7 +13923,6 @@ export default function BaseModule({
               // Clear current selection after submit (submit button disables until new selection)
               setMvfSelectedTrenchParts([]);
               setMvfActiveSegmentKeys(new Set());
-            setMvfDoneSegmentKeys(new Set());
             
             alert('Work submitted successfully!');
             return;
