@@ -8,7 +8,7 @@ export const DC_MODULE_CONFIG = {
   stringTextToggle: false,
   stringTextDefaultOn: true,
   geojsonFiles: [
-    { url: '/dc-cable-pulling-progress/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
+    { url: '/dc-cable-pulling-progress/full.geojson', name: 'full', color: 'rgba(255,255,255,0.55)', fillColor: 'transparent' },
     { url: '/dc-cable-pulling-progress/string_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
     { url: '/dc-cable-pulling-progress/inv_id.geojson', name: 'inv_id', color: '#16a34a', fillColor: '#22c55e' },
     {
@@ -18,6 +18,15 @@ export const DC_MODULE_CONFIG = {
       fillColor: '#facc15',
       weight: 3,
       fillOpacity: 0.6,
+    },
+    {
+      url: '/dc-cable-pulling-progress/boundry.geojson',
+      name: 'boundry',
+      color: 'rgba(239, 68, 68, 0.7)',
+      fillColor: 'transparent',
+      weight: 1.2,
+      fillOpacity: 0,
+      interactive: false,
     },
   ],
 };
@@ -31,50 +40,66 @@ export const LV_MODULE_CONFIG = {
   stringTextVisibility: 'cursor', // show only near cursor position
   stringTextToggle: true,
   stringTextDefaultOn: false,
-  invIdTextScale: 1.2, // smaller
-  // LV inv_id text: grow by size (not weight) and remain readable when zoomed out
-  invIdTextBaseSize: 16,
-  invIdTextStyle: '400', // slimmer, not bold
-  invIdTextMinFontSize: 10,
-  invIdTextMaxFontSize: 18,
+  invIdTextScale: 0.8, // smaller scale for cleaner look
+  // LV inv_id text: SMALL and consistent - like AutoCAD
+  invIdTextBaseSize: 12,
+  invIdTextStyle: '600', // slightly bolder for readability
+  invIdTextMinFontSize: 7, // a bit more readable
+  invIdTextMaxFontSize: 14, // still capped to avoid chaos
   invIdTextRefZoom: 20,
-  invIdTextStrokeColor: 'rgba(0,0,0,0.65)',
+  invIdTextStrokeColor: 'rgba(0,0,0,0.8)',
   invIdTextStrokeWidthFactor: 1.0,
-  // Add a square background plate behind inv_id so it doesn't blend into tables
-  invIdTextBgColor: 'rgba(11,18,32,0.86)',
-  invIdTextBgPaddingX: 5,
-  invIdTextBgPaddingY: 2,
-  invIdTextBgStrokeColor: 'rgba(255,255,255,0.35)',
-  invIdTextBgStrokeWidth: 1,
+  // NO background plate behind inv_id - EVER (clean AutoCAD look)
+  invIdTextBgColor: null,
+  invIdTextBgPaddingX: 0,
+  invIdTextBgPaddingY: 0,
+  invIdTextBgStrokeColor: null,
+  invIdTextBgStrokeWidth: 0,
   invIdTextBgCornerRadius: 0,
-  // Completed inv_id highlight (make it really obvious on the map)
-  invIdDoneTextColor: 'rgba(11,18,32,0.98)',
-  invIdDoneTextColorNoBg: 'rgba(34,197,94,0.98)',
-  invIdDoneBgColor: 'rgba(34,197,94,0.92)',
-  invIdDoneBgStrokeColor: 'rgba(255,255,255,0.70)',
-  invIdDoneBgStrokeWidth: 2,
-  // Declutter: hide inv_id text/plate when zoomed out so it doesn't look like "soup"
-  // Show text earlier (readable sooner), but only show the background plate when closer.
-  invIdTextMinTextZoom: 16,
-  invIdTextMinBgZoom: 18,
+  // Completed inv_id - GREEN TEXT only (no background box)
+  invIdDoneTextColor: 'rgba(34,197,94,1)', // green text
+  invIdDoneTextColorNoBg: 'rgba(34,197,94,1)', // green text when no bg
+  invIdDoneBgColor: null, // NO background
+  invIdDoneBgStrokeColor: null,
+  invIdDoneBgStrokeWidth: 0,
+  // History highlight - ORANGE TEXT only (no background box)
+  invIdHighlightTextColor: 'rgba(249,115,22,1)', // orange text
+  invIdHighlightBgColor: null, // NO background
+  invIdHighlightBgStrokeColor: null,
+  invIdHighlightBgStrokeWidth: 0,
+  // Declutter: hide inv_id when zoomed out too far to avoid chaos
+  invIdTextMinTextZoom: 17, // only show text when zoomed in enough
+  invIdTextMinBgZoom: 99, // background plate NEVER shows (set very high)
   geojsonFiles: [
-    { url: '/LV_CABLE_PULLING _PROGRESS_TRACKING/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
+    // Tables: subtle gray (not white)
+    { url: '/LV_CABLE_PULLING _PROGRESS_TRACKING/full.geojson', name: 'full', color: 'rgba(100,116,139,0.45)', fillColor: 'transparent' },
     { url: '/LV_CABLE_PULLING _PROGRESS_TRACKING/string_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
     { url: '/LV_CABLE_PULLING _PROGRESS_TRACKING/inv_id.geojson', name: 'inv_id', color: '#16a34a', fillColor: '#22c55e' },
     {
+      // LV boxes: subtle yellow outline
       url: '/LV_CABLE_PULLING _PROGRESS_TRACKING/lv_box.geojson',
       name: 'lv_box',
-      color: '#eab308',
-      fillColor: '#facc15',
-      weight: 3,
-      fillOpacity: 0.6,
+      color: 'rgba(250,204,21,0.7)',
+      fillColor: 'transparent',
+      weight: 2,
+      fillOpacity: 0,
+    },
+    {
+      // Boundary: thin red line (same as DC)
+      url: '/LV_CABLE_PULLING _PROGRESS_TRACKING/boundry.geojson',
+      name: 'boundry',
+      color: 'rgba(239, 68, 68, 0.7)',
+      fillColor: 'transparent',
+      weight: 1.2,
+      fillOpacity: 0,
+      interactive: false,
     },
   ],
 };
 
 export const MV_FIBER_MODULE_CONFIG = {
   key: 'MVF',
-  label: 'MV+FIBER PULLING PROGRESS TRACKING',
+  label: 'MV PULLING PROGRESS TRACKING',
   // Files live in: public/MV_PULLING_PROGRESS_TRACKING/
   csvFormat: 'mvf', // from,to,length CSV
   csvPath: '/MV_PULLING_PROGRESS_TRACKING/mv_cable.csv',
@@ -85,16 +110,16 @@ export const MV_FIBER_MODULE_CONFIG = {
   stringTextToggle: true,
   stringTextDefaultOn: true,
   simpleCounters: true,
-  // subs_text styling (it is wired through the shared string_text renderer)
-  stringTextColor: 'rgba(250,204,21,0.98)', // yellow
-  stringTextBaseSize: 22, // bigger by size (not weight)
+  // subs_text styling - smaller and more muted
+  stringTextColor: 'rgba(250,204,21,0.65)', // muted yellow
+  stringTextBaseSize: 16, // smaller
   stringTextStyle: '400',
-  stringTextStrokeColor: 'rgba(0,0,0,0.85)',
-  stringTextStrokeWidthFactor: 1.2,
+  stringTextStrokeColor: 'rgba(0,0,0,0.6)',
+  stringTextStrokeWidthFactor: 1.0,
   // Make subs_text readable even when zoomed out (clamped font size + no min-zoom gate)
   stringTextMinZoom: 0,
-  stringTextMinFontSize: 14,
-  stringTextMaxFontSize: 26,
+  stringTextMinFontSize: 10,
+  stringTextMaxFontSize: 18,
   stringTextRefZoom: 20,
   geojsonFiles: [
     { url: '/MV_PULLING_PROGRESS_TRACKING/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
@@ -102,6 +127,16 @@ export const MV_FIBER_MODULE_CONFIG = {
     { url: '/MV_PULLING_PROGRESS_TRACKING/subs.geojson', name: 'subs', color: '#94a3b8', fillColor: '#94a3b8' },
     // Feed subs_text into the existing "string_text" rendering path (toggle + perf).
     { url: '/MV_PULLING_PROGRESS_TRACKING/subs_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
+    // Boundary layer - thin red
+    {
+      url: '/MV_PULLING_PROGRESS_TRACKING/boundry.geojson',
+      name: 'boundry',
+      color: 'rgba(239, 68, 68, 0.7)',
+      fillColor: 'transparent',
+      weight: 1.2,
+      fillOpacity: 0,
+      interactive: false,
+    },
   ],
 };
 

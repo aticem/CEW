@@ -294,6 +294,14 @@ const _isPointInsideFeature = (lat, lng, geometry) => {
   return false;
 };
 
+// FULL.GEOJSON base style across ALL modules (requested): subtle slate-grey, consistent thickness.
+// This is the "unselected" look for tables/panels coming from `full.geojson` in every module.
+const FULL_GEOJSON_BASE_COLOR = 'rgba(100,116,139,0.45)';
+const FULL_GEOJSON_BASE_WEIGHT = 1.05;
+
+// LV: map inverter IDs (inv_id labels) to nearest LV box geometry so the box can turn green on selection.
+const LV_INV_BOX_GRID_DEG = 0.001; // ~111m; search in neighboring cells for nearest inv_id
+
 // ═══════════════════════════════════════════════════════════════
 // ANA UYGULAMA
 // ═══════════════════════════════════════════════════════════════
@@ -345,17 +353,18 @@ export default function BaseModule({
       ? activeMode.circuitsMultiplier
       : 1;
   // Segment colors must never use green (reserved for "completed").
+  // Use VERY distinct, high-contrast colors that are easy to tell apart.
   const mvfSegmentPalette = [
-    '#ef4444', // red
-    '#f97316', // orange
-    '#eab308', // amber
+    '#dc2626', // bright red
+    '#2563eb', // strong blue
+    '#d946ef', // magenta/fuchsia
+    '#f59e0b', // amber/orange
     '#06b6d4', // cyan
-    '#3b82f6', // blue
-    '#6366f1', // indigo
-    '#a855f7', // purple
-    '#ec4899', // pink
-    '#0ea5e9', // sky
-    '#94a3b8', // slate
+    '#8b5cf6', // violet
+    '#f43f5e', // rose/pink
+    '#14b8a6', // teal
+    '#ea580c', // deep orange
+    '#7c3aed', // purple
   ];
   const mvfColorOfSegment = useCallback((key) => {
     const k = String(key || '');
@@ -939,6 +948,8 @@ export default function BaseModule({
   const mvfCompletedSegmentsRef = useRef(mvfCompletedSegments);
   const mvfSegmentLenByKeyRef = useRef({}); // key -> length
   const mvfHighlightLayerRef = useRef(null); // L.LayerGroup
+  const mvfHistoryHighlightLayerRef = useRef(null); // L.LayerGroup for history orange highlights
+  const mvfSegmentLinesByKeyRef = useRef({}); // key -> L.Polyline[] (for history highlighting)
   const mvfTrenchGraphRef = useRef(null); // { nodes, adj, grid }
   // MVF: mv_trench feature selection (click + box select)
   const [mvfSelectedTrenchIds, setMvfSelectedTrenchIds] = useState(() => new Set()); // Set<string>
@@ -1512,10 +1523,64 @@ export default function BaseModule({
   const [lvCompletedInvIds, setLvCompletedInvIds] = useState(() => new Set());
   const lvCompletedInvIdsRef = useRef(lvCompletedInvIds);
   const lvInvLabelByIdRef = useRef({}); // invIdNorm -> L.TextLabel
+  const lvInvLatLngByIdRef = useRef({}); // invIdNorm -> L.LatLng
+  const lvInvGridRef = useRef(new Map()); // cellKey -> string[] invIdNorm
+  const lvBoxLayersByInvIdRef = useRef({}); // invIdNorm -> L.Layer[] (lv_box geometries)
+  const lvAllBoxLayersRef = useRef([]); // L.Layer[] (all lv_box layers for reset)
+  const prevHistoryInvHighlightRef = useRef(new Set()); // invIdNorms highlighted by history selection
+
+  // LV: Track submitted/committed inv_id entries (locked until history record is deleted)
+  const [lvCommittedInvIds, setLvCommittedInvIds] = useState(() => new Set());
+  const lvCommittedInvIdsRef = useRef(lvCommittedInvIds);
 
   useEffect(() => {
     lvCompletedInvIdsRef.current = lvCompletedInvIds;
   }, [lvCompletedInvIds]);
+
+  // LV: rebuild a simple spatial index for inv_id positions so we can match LV boxes to inv_ids efficiently.
+  useEffect(() => {
+    if (!isLV) return;
+    const byId = lvInvLatLngByIdRef.current || {};
+    const grid = new Map();
+    const cellKey = (lat, lng) => {
+      const cx = Math.floor(lng / LV_INV_BOX_GRID_DEG);
+      const cy = Math.floor(lat / LV_INV_BOX_GRID_DEG);
+      return `${cx}:${cy}`;
+    };
+    Object.keys(byId).forEach((invIdNorm) => {
+      const ll = byId[invIdNorm];
+      if (!ll) return;
+      const key = cellKey(ll.lat, ll.lng);
+      const arr = grid.get(key);
+      if (arr) arr.push(invIdNorm);
+      else grid.set(key, [invIdNorm]);
+    });
+    lvInvGridRef.current = grid;
+  }, [isLV, lvCompletedInvIds]);
+
+  useEffect(() => {
+    lvCommittedInvIdsRef.current = lvCommittedInvIds;
+  }, [lvCommittedInvIds]);
+
+  // HARD GUARANTEE (LV):
+  // Once an inv_id is submitted (committed), it must NEVER be removed from lvCompletedInvIds
+  // until its history record is deleted (🗑️).
+  useEffect(() => {
+    if (!isLV) return;
+    const committed = lvCommittedInvIdsRef.current || lvCommittedInvIds;
+    if (!committed || committed.size === 0) return;
+
+    setLvCompletedInvIds((prev) => {
+      let missing = false;
+      committed.forEach((id) => {
+        if (!prev.has(id)) missing = true;
+      });
+      if (!missing) return prev;
+      const next = new Set(prev);
+      committed.forEach((id) => next.add(id));
+      return next;
+    });
+  }, [isLV, lvCompletedInvIds, lvCommittedInvIds]);
 
   useEffect(() => {
     if (!isLV) return;
@@ -2734,6 +2799,33 @@ export default function BaseModule({
     activeMode?.invIdDoneBgStrokeColor,
     activeMode?.invIdDoneBgStrokeWidth,
   ]);
+
+  // LV: When an inv_id is selected (done), also color its nearest LV box geometry green.
+  useEffect(() => {
+    if (!isLV) return;
+    const boxDefaultColor = activeMode?.geojsonFiles?.find?.((f) => f?.name === 'lv_box')?.color || 'rgba(250,204,21,0.7)';
+    const boxDefaultWeight = Number(activeMode?.geojsonFiles?.find?.((f) => f?.name === 'lv_box')?.weight) || 2;
+
+    const doneColor = 'rgba(34,197,94,0.95)';
+    const doneWeight = Math.max(2.2, boxDefaultWeight);
+
+    const boxMap = lvBoxLayersByInvIdRef.current || {};
+    // Fast reset: set all boxes to default
+    (lvAllBoxLayersRef.current || []).forEach((layer) => {
+      if (layer?.setStyle) {
+        try { layer.setStyle({ color: boxDefaultColor, weight: boxDefaultWeight, fill: false, fillOpacity: 0 }); } catch (_e) { void _e; }
+      }
+    });
+    // Apply green to selected inv boxes
+    lvCompletedInvIds.forEach((invIdNorm) => {
+      const layers = boxMap[invIdNorm] || [];
+      layers.forEach((layer) => {
+        if (layer?.setStyle) {
+          try { layer.setStyle({ color: doneColor, weight: doneWeight, fill: false, fillOpacity: 0 }); } catch (_e) { void _e; }
+        }
+      });
+    });
+  }, [isLV, lvCompletedInvIds, activeMode]);
 
   const getNoteYmd = (note) =>
     note?.noteDate ||
@@ -4216,10 +4308,19 @@ export default function BaseModule({
     }
   }, [historySelectedRecordId, dailyLog]);
   
-  // Calculate editingAmount from editingPolygonIds (auto-updates when polygons change)
+  // Calculate editingAmount from editingPolygonIds (auto-updates when selection changes)
   const editingAmount = useMemo(() => {
     if (!historySelectedRecordId || editingPolygonIds.length === 0) return 0;
     
+    // LV: selection list contains inv_id norms; calculate meters using CSV lengthData.
+    if (isLV) {
+      return editingPolygonIds.reduce((sum, invIdNorm) => {
+        const data = lengthData[normalizeId(invIdNorm)];
+        if (!data?.plus?.length) return sum;
+        return sum + data.plus.reduce((a, b) => a + b, 0);
+      }, 0);
+    }
+
     // For DC module, calculate based on string lengths
     if (isDC) {
       const stringIds = new Set();
@@ -4247,13 +4348,155 @@ export default function BaseModule({
     
     // For other modules, just count polygons
     return editingPolygonIds.length;
-  }, [historySelectedRecordId, editingPolygonIds, isDC, lengthData]);
+  }, [historySelectedRecordId, editingPolygonIds, isLV, isDC, lengthData]);
 
-  // History Record Selection: Highlight polygons from editingPolygonIds with orange color
+  // History Record Selection: Highlight selected record on map
   useEffect(() => {
+    // MVF: highlight trench parts and segments in orange
+    if (isMVF) {
+      const map = mapRef.current;
+      if (!map) return;
+      
+      // Create or clear history highlight layer
+      if (!mvfHistoryHighlightLayerRef.current) {
+        mvfHistoryHighlightLayerRef.current = L.layerGroup().addTo(map);
+      }
+      mvfHistoryHighlightLayerRef.current.clearLayers();
+      
+      // If no record selected, we're done
+      if (!historySelectedRecordId) {
+        return;
+      }
+      
+      // Find the selected record and get its IDs
+      const record = dailyLog.find((r) => r.id === historySelectedRecordId);
+      if (!record) return;
+      
+      const idsToHighlight = record.selectedPolygonIds || [];
+      if (idsToHighlight.length === 0) return;
+      
+      // Separate segment IDs from part IDs
+      const segmentKeys = new Set();
+      const partIds = new Set();
+      idsToHighlight.forEach((id) => {
+        if (String(id).startsWith('segment:')) {
+          segmentKeys.add(String(id).replace('segment:', ''));
+        } else {
+          partIds.add(String(id));
+        }
+      });
+      
+      // Highlight segments: use mvfSegmentLinesByKeyRef to find the segment polylines
+      const segmentLines = mvfSegmentLinesByKeyRef.current || {};
+      segmentKeys.forEach((segKey) => {
+        const lines = segmentLines[segKey];
+        if (!lines || !Array.isArray(lines)) return;
+        lines.forEach((lineLayer) => {
+          if (!lineLayer || typeof lineLayer.getLatLngs !== 'function') return;
+          try {
+            const latlngs = lineLayer.getLatLngs();
+            const orangeLine = L.polyline(latlngs, {
+              color: '#f97316', // orange
+              weight: 5,
+              opacity: 1,
+            });
+            mvfHistoryHighlightLayerRef.current.addLayer(orangeLine);
+          } catch (_e) {
+            void _e;
+          }
+        });
+      });
+      
+      // Highlight trench parts from committed parts
+      const committed = mvfCommittedTrenchPartsRef.current || [];
+      committed.forEach((part) => {
+        const partId = String(part?.id || '');
+        if (!partIds.has(partId)) return;
+        
+        const coords = part?.coords;
+        if (!coords || !Array.isArray(coords) || coords.length < 2) return;
+        
+        try {
+          const latlngs = coords.map((c) => [c[1], c[0]]); // GeoJSON is [lng, lat], Leaflet is [lat, lng]
+          const line = L.polyline(latlngs, {
+            color: '#f97316', // orange
+            weight: 4,
+            opacity: 1,
+          });
+          mvfHistoryHighlightLayerRef.current.addLayer(line);
+        } catch (_e) {
+          void _e;
+        }
+      });
+      
+      return;
+    }
+    
+    // LV: highlight inv_id labels (orange)
+    if (isLV) {
+      const labels = lvInvLabelByIdRef.current || {};
+      // When historySelectedRecordId is null, we must cleanup ALL previous highlights
+      const idsToHighlight = historySelectedRecordId ? new Set(editingPolygonIds.map(normalizeId)) : new Set();
+
+      // Default styling from config
+      const invBgColor = activeMode?.invIdTextBgColor || null;
+      const invBgStrokeColor = activeMode?.invIdTextBgStrokeColor || null;
+      const invBgStrokeWidth = typeof activeMode?.invIdTextBgStrokeWidth === 'number' ? activeMode.invIdTextBgStrokeWidth : 0;
+      const invDoneTextColor = activeMode?.invIdDoneTextColor || 'rgba(11,18,32,0.98)';
+      const invDoneTextColorNoBg = activeMode?.invIdDoneTextColorNoBg || 'rgba(34,197,94,0.98)';
+      const invDoneBgColor = activeMode?.invIdDoneBgColor || 'rgba(34,197,94,0.92)';
+      const invDoneBgStrokeColor = activeMode?.invIdDoneBgStrokeColor || 'rgba(255,255,255,0.70)';
+      const invDoneBgStrokeWidth = typeof activeMode?.invIdDoneBgStrokeWidth === 'number' ? activeMode.invIdDoneBgStrokeWidth : 2;
+
+      // Cleanup previous highlights (restore to normal/done state)
+      prevHistoryInvHighlightRef.current.forEach((invIdNorm) => {
+        if (idsToHighlight.has(invIdNorm)) return; // Will be re-highlighted below
+        const lbl = labels[invIdNorm];
+        if (!lbl) return;
+        // Restore based on completion state (green if done)
+        const done = lvCompletedInvIdsRef.current?.has(invIdNorm);
+
+        lbl.options.textColor = done ? invDoneTextColor : 'rgba(255,255,255,0.98)';
+        lbl.options.textColorNoBg = done ? invDoneTextColorNoBg : null;
+        lbl.options.bgColor = done ? invDoneBgColor : invBgColor;
+        lbl.options.bgStrokeColor = done ? invDoneBgStrokeColor : invBgStrokeColor;
+        lbl.options.bgStrokeWidth = done ? invDoneBgStrokeWidth : invBgStrokeWidth;
+        lbl.redraw?.();
+      });
+
+      // If no record is selected, we're done (cleanup completed above)
+      if (!historySelectedRecordId || idsToHighlight.size === 0) {
+        prevHistoryInvHighlightRef.current = new Set();
+        return;
+      }
+
+      // Apply orange highlight - use config values or visible defaults
+      const highlightTextColor = activeMode?.invIdHighlightTextColor || 'rgba(255,255,255,0.98)';
+      const highlightBgColor = activeMode?.invIdHighlightBgColor || 'rgba(249, 115, 22, 1)';
+      const highlightBgStrokeColor = activeMode?.invIdHighlightBgStrokeColor || 'rgba(255,255,255,0.9)';
+      const highlightBgStrokeWidth = activeMode?.invIdHighlightBgStrokeWidth || 2.5;
+      
+      idsToHighlight.forEach((invIdNorm) => {
+        const lbl = labels[invIdNorm];
+        if (!lbl) return;
+        lbl.options.textColor = highlightTextColor;
+        lbl.options.textColorNoBg = null;
+        lbl.options.bgColor = highlightBgColor;
+        lbl.options.bgStrokeColor = highlightBgStrokeColor;
+        lbl.options.bgStrokeWidth = highlightBgStrokeWidth;
+        lbl.redraw?.();
+      });
+
+      prevHistoryInvHighlightRef.current = idsToHighlight;
+      return;
+    }
+
     const panels = polygonById.current || {};
     const polygonIdsToHighlight = new Set(editingPolygonIds);
     
+    const unselectedColor = FULL_GEOJSON_BASE_COLOR;
+    const unselectedWeight = FULL_GEOJSON_BASE_WEIGHT;
+
     if (!historySelectedRecordId || editingPolygonIds.length === 0) {
       // Clean up previous highlights when no record is selected
       prevHistoryHighlightRef.current.forEach((polygonId) => {
@@ -4264,7 +4507,7 @@ export default function BaseModule({
           polygonInfo.layer.setStyle(
             isCommitted
               ? { color: '#22c55e', weight: 1.5, fill: false, fillOpacity: 0 }
-              : { color: 'rgba(255,255,255,0.35)', weight: 1.05, fill: false, fillOpacity: 0 }
+              : { color: unselectedColor, weight: unselectedWeight, fill: false, fillOpacity: 0 }
           );
         }
       });
@@ -4283,7 +4526,7 @@ export default function BaseModule({
           polygonInfo.layer.setStyle(
             isCommitted
               ? { color: '#22c55e', weight: 1.5, fill: false, fillOpacity: 0 }
-              : { color: 'rgba(255,255,255,0.35)', weight: 1.05, fill: false, fillOpacity: 0 }
+              : { color: unselectedColor, weight: unselectedWeight, fill: false, fillOpacity: 0 }
           );
         }
       }
@@ -4303,8 +4546,8 @@ export default function BaseModule({
     });
 
     prevHistoryHighlightRef.current = polygonIdsToHighlight;
-  }, [historySelectedRecordId, editingPolygonIds, committedPolygons]);
-
+  }, [historySelectedRecordId, editingPolygonIds, committedPolygons, isLV, isMVF, dailyLog, activeMode, lvCompletedInvIds]);
+  
   // Save notes to localStorage
   useEffect(() => {
     localStorage.setItem('cew_notes', JSON.stringify(notes));
@@ -5236,6 +5479,8 @@ export default function BaseModule({
         const keepFillForHover = !!isPL;
         // IMPORTANT: when unselecting, restore the exact base style used by the layer
         // so it doesn't appear "whiter" after toggling.
+        const unselectedColor = FULL_GEOJSON_BASE_COLOR;
+        const unselectedWeight = FULL_GEOJSON_BASE_WEIGHT;
         polygonInfo.layer.setStyle(
           isSelected
             ? {
@@ -5245,8 +5490,8 @@ export default function BaseModule({
                 fillOpacity: 0
               }
             : {
-                color: 'rgba(255,255,255,0.35)',
-                weight: 1.05,
+                color: unselectedColor,
+                weight: unselectedWeight,
                 fill: keepFillForHover,
                 fillOpacity: 0
               }
@@ -6184,8 +6429,8 @@ export default function BaseModule({
               renderer: canvasRenderer,
               interactive: false,
               style: () => ({
-                color: 'rgba(255,255,255,0.35)',
-                weight: 1.05,
+                color: FULL_GEOJSON_BASE_COLOR,
+                weight: FULL_GEOJSON_BASE_WEIGHT,
                 fill: false,
                 fillOpacity: 0,
               }),
@@ -6204,8 +6449,8 @@ export default function BaseModule({
               renderer: canvasRenderer,
               interactive: false,
               style: () => ({
-                color: 'rgba(255,255,255,0.35)',
-                weight: 1.05,
+                color: FULL_GEOJSON_BASE_COLOR,
+                weight: FULL_GEOJSON_BASE_WEIGHT,
                 fill: false,
                 fillOpacity: 0,
               }),
@@ -6229,8 +6474,9 @@ export default function BaseModule({
             // PL needs a filled (but invisible) hit-area so hover works over the whole table,
             // even after selection/unselection style updates.
             style: () => ({
-              color: 'rgba(255,255,255,0.35)',
-              weight: 1.05,
+              // FULL.GEOJSON: same base style across all modules (requested)
+              color: FULL_GEOJSON_BASE_COLOR,
+              weight: FULL_GEOJSON_BASE_WEIGHT,
               fill: !!isPL,
               fillOpacity: 0,
             }),
@@ -6625,13 +6871,13 @@ export default function BaseModule({
                   const polygonInfo = polygonById.current[polygonId];
                   if (polygonInfo && polygonInfo.stringId && polygonInfo.isSmallTable) {
                     // Check if any polygon in the group is committed
-                    const groupIds = [];
-                    Object.keys(polygonById.current).forEach(pid => {
-                      const info = polygonById.current[pid];
-                      if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
-                        groupIds.push(pid);
-                      }
-                    });
+                      const groupIds = [];
+                      Object.keys(polygonById.current).forEach(pid => {
+                        const info = polygonById.current[pid];
+                        if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
+                          groupIds.push(pid);
+                        }
+                      });
                     const anyGroupCommitted = groupIds.some(id => currentCommitted.has(id));
                     if (anyGroupCommitted) return; // Don't allow unselection of committed groups
                     
@@ -6699,9 +6945,9 @@ export default function BaseModule({
                   if (polygonInfo && polygonInfo.stringId && polygonInfo.isSmallTable) {
                     // Check if any in group is committed
                     const groupIds = [];
-                    Object.keys(polygonById.current).forEach(pid => {
-                      const info = polygonById.current[pid];
-                      if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
+                      Object.keys(polygonById.current).forEach(pid => {
+                        const info = polygonById.current[pid];
+                        if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
                         groupIds.push(pid);
                       }
                     });
@@ -7076,8 +7322,8 @@ export default function BaseModule({
             // Restore the "dim white" look for all layers, with a stronger LV box outline.
             if (file.name === 'lv_box') {
               return {
-                color: 'rgba(255,255,255,0.95)',
-                weight: 3.2,
+                color: file.color || 'rgba(255,255,255,0.95)',
+                weight: Number(file.weight) || 3.2,
                 fill: false,
                 fillOpacity: 0
               };
@@ -7110,6 +7356,16 @@ export default function BaseModule({
                 fillOpacity: 0
               };
             }
+            // Boundry layer = RED (thin, subtle) - applies to ALL modules
+            if (file.name === 'boundry' || file.name === 'boundary') {
+              return {
+                color: file.color || 'rgba(239, 68, 68, 0.7)',
+                weight: file.weight || 1.2,
+                opacity: 0.7,
+                fill: false,
+                fillOpacity: 0,
+              };
+            }
             return {
               color: 'rgba(255,255,255,0.26)',
               weight: 0.78,
@@ -7124,6 +7380,15 @@ export default function BaseModule({
               const invIdNorm = normalizeId(raw);
               const isDone = isLV && lvCompletedInvIdsRef.current?.has(invIdNorm);
               const displayId = String(raw).replace(/\s+/g, ''); // keep consistent with CSV style
+
+              // LV: store inv_id position for lv_box matching
+              if (isLV) {
+                try {
+                  lvInvLatLngByIdRef.current[invIdNorm] = latlng;
+                } catch (_e) {
+                  void _e;
+                }
+              }
               
               const invScale = typeof activeMode?.invIdTextScale === 'number' ? activeMode.invIdTextScale : 1;
               const invBase = typeof activeMode?.invIdTextBaseSize === 'number' ? activeMode.invIdTextBaseSize : 19;
@@ -7233,8 +7498,14 @@ export default function BaseModule({
                   }
                   setLvCompletedInvIds((prev) => {
                     const next = new Set(prev);
-                    if (next.has(invIdNorm)) next.delete(invIdNorm);
-                    else next.add(invIdNorm);
+                    // Don't allow unselecting committed/submitted inv_ids (only deletable via history 🗑️)
+                    if (next.has(invIdNorm)) {
+                      const committed = lvCommittedInvIdsRef.current || new Set();
+                      if (committed.has(invIdNorm)) return prev;
+                      next.delete(invIdNorm);
+                    } else {
+                      next.add(invIdNorm);
+                    }
                     return next;
                   });
                 });
@@ -7326,6 +7597,71 @@ export default function BaseModule({
           },
           
           onEachFeature: (feature, featureLayer) => {
+            // LV: index lv_box geometries so we can turn the box green when its inv_id is selected.
+            if (isLV && file.name === 'lv_box') {
+              try {
+                // compute a center point for the geometry
+                const g = feature?.geometry;
+                const coords = g?.coordinates;
+                let latSum = 0;
+                let lngSum = 0;
+                let n = 0;
+                const push = (c) => {
+                  const lng = Number(c?.[0]);
+                  const lat = Number(c?.[1]);
+                  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+                  latSum += lat;
+                  lngSum += lng;
+                  n += 1;
+                };
+                if (g?.type === 'LineString' && Array.isArray(coords)) {
+                  coords.forEach(push);
+                } else if (g?.type === 'Polygon' && Array.isArray(coords)) {
+                  (coords[0] || []).forEach(push);
+                } else if (g?.type === 'MultiPolygon' && Array.isArray(coords)) {
+                  ((coords[0] || [])[0] || []).forEach(push);
+                }
+                if (n > 0) {
+                  const center = L.latLng(latSum / n, lngSum / n);
+                  const cellKey = (lat, lng) => {
+                    const cx = Math.floor(lng / LV_INV_BOX_GRID_DEG);
+                    const cy = Math.floor(lat / LV_INV_BOX_GRID_DEG);
+                    return `${cx}:${cy}`;
+                  };
+                  const grid = lvInvGridRef.current || new Map();
+                  const baseKey = cellKey(center.lat, center.lng);
+                  const [cxStr, cyStr] = String(baseKey).split(':');
+                  const cx = Number(cxStr);
+                  const cy = Number(cyStr);
+                  let bestId = null;
+                  let bestDist = Infinity;
+                  for (let dx = -1; dx <= 1; dx++) {
+                    for (let dy = -1; dy <= 1; dy++) {
+                      const ids = grid.get(`${cx + dx}:${cy + dy}`) || [];
+                      for (const invIdNorm of ids) {
+                        const ll = lvInvLatLngByIdRef.current?.[invIdNorm];
+                        if (!ll) continue;
+                        const d = center.distanceTo(ll);
+                        if (d < bestDist) {
+                          bestDist = d;
+                          bestId = invIdNorm;
+                        }
+                      }
+                    }
+                  }
+                  // Only link if it's reasonably close (prevents random pairing)
+                  if (bestId && bestDist < 60) {
+                    const mapById = lvBoxLayersByInvIdRef.current;
+                    if (!mapById[bestId]) mapById[bestId] = [];
+                    mapById[bestId].push(featureLayer);
+                  }
+                  lvAllBoxLayersRef.current.push(featureLayer);
+                }
+              } catch (_e) {
+                void _e;
+              }
+            }
+
             // PTEP: table-to-table click handler (toggle white/green)
             if (ptepTableToTableInteractive && featureLayer && typeof featureLayer.on === 'function') {
               const fid = feature?.properties?.handle ?? feature?.properties?.fid ?? feature?.properties?.FID ?? feature?.properties?.id ?? feature?.id;
@@ -8134,6 +8470,7 @@ export default function BaseModule({
 
     const clear = () => {
       try { hl.clearLayers(); } catch (_e) { void _e; }
+      mvfSegmentLinesByKeyRef.current = {}; // Clear stored segment lines
     };
     clear();
 
@@ -8286,6 +8623,13 @@ export default function BaseModule({
       const color = done ? '#16a34a' : mvfColorOfSegment(k);
       const line = L.polyline(coords, { color, weight: 4.6, opacity: 0.98, interactive: true });
       line._mvfSegmentKey = k;
+      
+      // Store line for history highlighting
+      if (!mvfSegmentLinesByKeyRef.current[k]) {
+        mvfSegmentLinesByKeyRef.current[k] = [];
+      }
+      mvfSegmentLinesByKeyRef.current[k].push(line);
+      
       // Right-click on route removes segment highlight (does not erase completed parts).
       line.on('contextmenu', (evt) => {
         try {
@@ -9287,7 +9631,12 @@ export default function BaseModule({
             if (invIdsInBounds.length > 0) {
               setLvCompletedInvIds((prev) => {
                 const next = new Set(prev);
-                if (isRightClick) invIdsInBounds.forEach((id) => next.delete(id));
+                if (isRightClick) {
+                  const committed = lvCommittedInvIdsRef.current || new Set();
+                  invIdsInBounds.forEach((id) => {
+                    if (!committed.has(id)) next.delete(id);
+                  });
+                }
                 else invIdsInBounds.forEach((id) => next.add(id));
                 return next;
               });
@@ -10186,6 +10535,17 @@ export default function BaseModule({
       void _e;
       mvfHighlightLayerRef.current = null;
     }
+    
+    // MVF: history highlight layer (orange trench parts for history selection)
+    try {
+      if (mvfHistoryHighlightLayerRef.current) {
+        mvfHistoryHighlightLayerRef.current.remove();
+      }
+      mvfHistoryHighlightLayerRef.current = L.layerGroup().addTo(mapRef.current);
+    } catch (_e) {
+      void _e;
+      mvfHistoryHighlightLayerRef.current = null;
+    }
 
     // MVF: partial trench selection/completion overlay layers
     try {
@@ -10600,6 +10960,18 @@ export default function BaseModule({
     if (isDATP) return datpCompletedForSubmit;
     if (isPTEP) return ptepCompletedForSubmit;
     if (isMC4) return mc4Counts?.mc4Completed || 0;
+    if (isLV) {
+      // LV: calculate only NEW (unsubmitted) inv_id selections
+      const committed = lvCommittedInvIds || new Set();
+      let meters = 0;
+      lvCompletedInvIds.forEach((invIdNorm) => {
+        const id = normalizeId(invIdNorm);
+        if (committed.has(id)) return;
+        const data = lengthData[id];
+        if (data?.plus?.length) meters += data.plus.reduce((a, b) => a + b, 0);
+      });
+      return meters;
+    }
     
     // For DC and similar modules: calculate only NEW (uncommitted) polygons
     const newPolygonIds = new Set();
@@ -10635,7 +11007,7 @@ export default function BaseModule({
     }
     
     return newPolygonIds.size;
-  }, [isMVF, isDATP, isPTEP, isMC4, isDC, selectedPolygons, committedPolygons, mvfSelectedCableMeters, datpCompletedForSubmit, ptepCompletedForSubmit, mc4Counts, lengthData]);
+  }, [isMVF, isDATP, isPTEP, isMC4, isLV, isDC, selectedPolygons, committedPolygons, mvfSelectedCableMeters, datpCompletedForSubmit, ptepCompletedForSubmit, mc4Counts, lengthData, lvCompletedInvIds, lvCommittedInvIds]);
 
   const workAmount = isMVF 
     ? mvfSelectedCableMeters 
@@ -11565,13 +11937,21 @@ export default function BaseModule({
                   disabled={
                     noteMode ||
                     (isMC4 && !mc4SelectionMode) ||
-                    (isDATP
+                    (isMVF
+                      ? (mvfSelectedTrenchParts.length === 0 && mvfActiveSegmentKeys.size === 0)
+                      : (isDATP
                       ? datpCompletedForSubmit === 0
-                      : (isPTEP
-                        ? (ptepSubMode === 'tabletotable' ? ptepCompletedTableToTable.size === 0 : ptepCompletedParameterMeters === 0)
-                        : (isLVTT
+                        : isPTEP
+                          ? (ptepSubMode === 'tabletotable'
+                            ? ptepCompletedTableToTable.size === 0
+                            : ptepCompletedParameterMeters === 0)
+                          : isLVTT
                           ? (String(lvttSubMode || 'termination') === 'testing' || lvttCompletedForSubmit === 0)
-                          : (isMVT ? mvtCompletedForSubmit === 0 : workSelectionCount === 0))))
+                            : isMVT
+                              ? mvtCompletedForSubmit === 0
+                              : isLV
+                                ? workAmount === 0
+                                : workSelectionCount === 0))
                   }
                   className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
                   title={isMC4 && !mc4SelectionMode ? "Select MC4 Install or Cable Termination first" : "Submit Work"}
@@ -11582,7 +11962,7 @@ export default function BaseModule({
 
                 <button
                   onClick={() => setHistoryOpen(true)}
-                  disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || (dailyLog.length === 0 && notes.length === 0)}
+                  disabled={isLVTT && String(lvttSubMode || 'termination') === 'testing'}
                   className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
                   title={isLVTT && String(lvttSubMode || 'termination') === 'testing' ? 'History disabled in LV_TESTING' : 'History'}
                   aria-label="History"
@@ -11686,121 +12066,50 @@ export default function BaseModule({
           </div>
         </div>
 
-        {/* MV+FIBER: segments panel (right side, under header level) */}
+        {/* MV PULLING: segments panel - simple list, click to select/unselect (green on map) */}
         {isMVF && mvfSegments.length > 0 && (
-          <div className="fixed left-3 sm:left-5 top-[190px] z-[1190] w-[230px] border-2 border-slate-300 bg-white text-slate-900 shadow-[0_10px_26px_rgba(0,0,0,0.35)]">
-            <div className="flex items-center gap-2 border-b border-slate-200 px-2 py-2">
-              <span className="inline-block h-2 w-2 bg-pink-500" aria-hidden="true" />
-              <div className="text-[10px] font-extrabold uppercase tracking-wide">mv cable length</div>
+          <div className="fixed left-3 sm:left-5 top-[190px] z-[1190] w-[220px] border border-slate-600 bg-slate-900/95 text-white shadow-[0_10px_26px_rgba(0,0,0,0.5)] rounded">
+            <div className="border-b border-slate-700 px-3 py-2">
+              <div className="text-[10px] font-extrabold uppercase tracking-wide text-slate-300">mv cable route and length</div>
             </div>
-            <div className="max-h-[260px] overflow-y-auto p-2">
+            <div className="max-h-[280px] overflow-y-auto p-2">
               {mvfSegments.map((s) => {
                 const active = mvfActiveSegmentKeys.has(s.key);
-                const done = mvfDoneSegmentKeys.has(s.key);
-                const current = String(mvfCurrentSegmentKey || '') === String(s.key || '');
-                const segColor = mvfColorOfSegment(s.key);
                 return (
-                  <div
-                    key={s.key}
-                    className={`mb-2 flex w-full items-center justify-between border px-2 py-2 text-left ${
-                      done
-                        ? 'border-emerald-600 bg-emerald-100'
-                        : active
-                          ? 'border-slate-300 bg-slate-50'
-                          : 'border-slate-200 bg-white hover:bg-slate-50'
-                    } ${current ? 'ring-2 ring-sky-400 shadow-[0_0_0_3px_rgba(56,189,248,0.22)] animate-pulse' : ''}`}
-                  >
                     <button
+                    key={s.key}
                       type="button"
                       onClick={() => {
                         const ck = String(s.key || '');
-                        mvfCurrentSegmentKeyRef.current = ck; // immediate for box handler
-                        setMvfCurrentSegmentKey(ck);
+                      // Toggle selection - when selected, route shows GREEN on map
                         setMvfActiveSegmentKeys((prev) => {
-                          // If this segment route was already submitted (committed), don't allow recounting.
-                          try {
-                            const committed = mvfCommittedTrenchPartsRef.current || [];
-                            const sk = String(s.key || '');
-                            if (sk && committed.some((p) => p?.source === 'segment' && String(p?.segmentKey || '') === sk)) return prev;
-                          } catch (_e) {
-                            void _e;
-                          }
                           const next = new Set(prev);
                           if (next.has(s.key)) next.delete(s.key);
                           else next.add(s.key);
                           return next;
                         });
-                      }}
-                      className="flex min-w-0 flex-1 items-center gap-2 pr-2 text-left"
-                      title={done ? `${s.label} (DONE)` : active ? `${s.label} (selected)` : `${s.label} (select)`}
-                      aria-pressed={active}
-                    >
-                      <span
-                        className={`inline-block h-3 w-3 border ${current ? 'animate-pulse' : ''}`}
-                        style={{ background: segColor, borderColor: segColor }}
-                        aria-hidden="true"
-                      />
-                      <span className={`min-w-0 truncate text-[13px] font-semibold ${active ? 'text-emerald-900' : 'text-slate-800'}`}>
-                        {s.label}
-                      </span>
-                    </button>
-
-                    <div className="flex flex-shrink-0 items-center gap-2">
-                      <span className={`text-[13px] font-bold tabular-nums ${active ? 'text-emerald-900' : 'text-slate-600'}`}>
-                        {mvfCircuitsMultiplier > 1
-                          ? `${Math.round(Number(s.length || 0) / mvfCircuitsMultiplier)}*${mvfCircuitsMultiplier}`
-                          : `${Math.round(Number(s.length || 0))}`}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const key = String(s.key || '');
-                          if (!key) return;
-                          // Make sure the segment is visible/active when toggling Done.
-                          mvfCurrentSegmentKeyRef.current = key;
-                          setMvfCurrentSegmentKey(key);
-                          setMvfActiveSegmentKeys((prev) => {
-                            const next = new Set(prev);
-                            next.add(key);
-                            return next;
-                          });
+                      // Also mark as done when selected (so it appears green)
                           setMvfDoneSegmentKeys((prev) => {
                             const next = new Set(prev);
-                            if (next.has(key)) next.delete(key);
-                            else next.add(key);
+                        if (next.has(ck)) next.delete(ck);
+                        else next.add(ck);
                             return next;
                           });
-                          // When marking done: lock current selected parts for this segment by moving them to committed.
-                          if (!done) {
-                            setMvfCommittedTrenchParts((prev) => {
-                              const base = prev || [];
-                              const add = (mvfSelectedTrenchPartsRef.current || []).filter((p) => String(p?.segmentKey || '') === key);
-                              if (!add.length) return base;
-                              const seen = new Set(base.map((p) => String(p?.id || '')));
-                              const out = [...base];
-                              add.forEach((p) => {
-                                const id = String(p?.id || '');
-                                if (!id || seen.has(id)) return;
-                                seen.add(id);
-                                out.push(p);
-                              });
-                              return out;
-                            });
-                            setMvfSelectedTrenchParts((prev) => (prev || []).filter((p) => String(p?.segmentKey || '') !== key));
-                          }
-                        }}
-                        className={`inline-flex h-6 w-6 items-center justify-center border text-[12px] font-black leading-none ${
-                          done ? 'border-emerald-600 bg-white text-emerald-600' : 'border-slate-300 bg-white text-transparent hover:bg-slate-100'
-                        }`}
-                        title="Done"
-                        aria-pressed={done}
-                        aria-label={done ? `Undone ${s.label}` : `Done ${s.label}`}
-                      >
-                        {done ? '✓' : ''}
+                    }}
+                    className={`mb-1 flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-[12px] transition-colors ${
+                      active
+                        ? 'bg-emerald-600 text-white font-semibold'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                    title={active ? `${s.label} (selected - click to unselect)` : `${s.label} (click to select)`}
+                  >
+                    <span className="min-w-0 truncate">{s.label}</span>
+                    <span className="ml-2 tabular-nums text-[11px] opacity-80">
+                      {mvfCircuitsMultiplier > 1
+                        ? `${Math.round(Number(s.length || 0) / mvfCircuitsMultiplier)}*${mvfCircuitsMultiplier}`
+                        : `${Math.round(Number(s.length || 0))}`}
+                    </span>
                       </button>
-                    </div>
-                  </div>
                 );
               })}
             </div>
@@ -13521,7 +13830,33 @@ export default function BaseModule({
           // MVF: once submitted, lock selected mv_trench parts + segment routes so they cannot be changed/recounted.
           if (isMVF) {
             const toCommitParts = mvfSelectedTrenchPartsRef.current || [];
-            if (toCommitParts.length > 0 && recordDate) {
+            const activeSegments = mvfActiveSegmentKeysRef.current || new Set();
+            
+            // Check if there's anything to submit
+            if (toCommitParts.length === 0 && activeSegments.size === 0) {
+              alert('No selections to submit. Please select cable routes.');
+              return;
+            }
+            
+            // Calculate meters: from trench parts + from selected segments (via CSV)
+            let meters = 0;
+            const partIds = [];
+            const segmentIds = [];
+            
+            // Add meters from trench parts
+            toCommitParts.forEach((p) => {
+              meters += (Number(p?.meters) || 0) * (mvfCircuitsMultiplier || 1);
+              partIds.push(String(p?.id || ''));
+            });
+            
+            // Add meters from selected segments (full routes from CSV)
+            activeSegments.forEach((segKey) => {
+              const segLen = Number(mvfSegmentLenByKeyRef.current?.[segKey]) || 0;
+              meters += segLen;
+              segmentIds.push(`segment:${segKey}`);
+            });
+            
+            if (recordDate && toCommitParts.length > 0) {
               const key = `${mvfStoragePrefix}:trench_parts_committed:${recordDate}`;
               try {
                 const raw = localStorage.getItem(key);
@@ -13533,7 +13868,6 @@ export default function BaseModule({
                   const id = String(p?.id || '');
                   if (!id || seen.has(id)) return;
                   seen.add(id);
-                  // reduce payload size a bit (coords rounded)
                   const coords = Array.isArray(p?.coords)
                     ? p.coords.map((c) => [Number(c?.[0]).toFixed ? Number(c[0].toFixed(6)) : c[0], Number(c?.[1]).toFixed ? Number(c[1].toFixed(6)) : c[1]])
                     : [];
@@ -13572,12 +13906,192 @@ export default function BaseModule({
                   return next;
                 });
               }
+            }
+
+            // Save record with selectedPolygonIds for history highlighting
+            const recordWithSelections = {
+              ...record,
+              total_cable: meters,
+              notes: notesOnDate,
+              selectedPolygonIds: [...partIds, ...segmentIds], // MVF uses part IDs + segment IDs for history
+            };
+            addRecord(recordWithSelections);
 
               // Clear current selection after submit (submit button disables until new selection)
               setMvfSelectedTrenchParts([]);
               setMvfActiveSegmentKeys(new Set());
-            }
+            setMvfDoneSegmentKeys(new Set());
+            
+            alert('Work submitted successfully!');
+            return;
           }
+
+          // LV: submit ONLY the NEW (unsubmitted) inv_id selections (same behavior as DC: non-cumulative per submit)
+          if (isLV) {
+            const committed = lvCommittedInvIdsRef.current || new Set();
+            const newInvIds = new Set();
+            (lvCompletedInvIdsRef.current || lvCompletedInvIds).forEach((invIdNorm) => {
+              const id = normalizeId(invIdNorm);
+              if (!committed.has(id)) newInvIds.add(id);
+            });
+
+            if (newInvIds.size === 0) {
+              alert('No new selections to submit. Please select new areas.');
+              return;
+            }
+
+            let meters = 0;
+            newInvIds.forEach((invIdNorm) => {
+              const data = lengthData[normalizeId(invIdNorm)];
+              if (data?.plus?.length) meters += data.plus.reduce((a, b) => a + b, 0);
+            });
+
+            const recordWithSelections = {
+              ...record,
+              total_cable: meters,
+              notes: notesOnDate,
+              // Reuse key name for history highlight (LV uses inv_id norms here)
+              selectedPolygonIds: Array.from(newInvIds),
+            };
+            addRecord(recordWithSelections);
+
+            setLvCommittedInvIds((prev) => {
+              const next = new Set(prev);
+              newInvIds.forEach((id) => next.add(id));
+              // keep ref in sync immediately (handlers can fire before next render)
+              lvCommittedInvIdsRef.current = next;
+              return next;
+            });
+
+            alert('Work submitted successfully!');
+            return;
+          }
+
+          // MC4: Submit panel state selections (MC4 Install or Cable Termination)
+          if (isMC4) {
+            const currentStates = mc4PanelStatesRef.current || {};
+            const mode = mc4SelectionModeRef.current || 'mc4';
+            const keys = Object.keys(currentStates).filter((k) => {
+              const st = currentStates[k];
+              if (mode === 'termination') {
+                return st?.left === MC4_PANEL_STATES.TERMINATED || st?.right === MC4_PANEL_STATES.TERMINATED;
+              }
+              return st?.left === MC4_PANEL_STATES.MC4 || st?.right === MC4_PANEL_STATES.MC4 || st?.left === MC4_PANEL_STATES.TERMINATED || st?.right === MC4_PANEL_STATES.TERMINATED;
+            });
+
+            const recordWithSelections = {
+              ...record,
+              notes: notesOnDate,
+              selectedPolygonIds: keys, // MC4 uses string keys
+            };
+            addRecord(recordWithSelections);
+            alert('Work submitted successfully!');
+            return;
+          }
+
+          // DATP: Submit trench part selections
+          if (isDATP) {
+            const parts = datpSelectedTrenchPartsRef.current || [];
+            if (parts.length === 0) {
+              alert('No selections to submit.');
+              return;
+            }
+            const meters = parts.reduce((sum, p) => sum + (p?.meters || 0), 0);
+            const partIds = parts.map((p) => String(p?.id || ''));
+
+            const recordWithSelections = {
+              ...record,
+              total_cable: meters,
+              notes: notesOnDate,
+              selectedPolygonIds: partIds,
+            };
+            addRecord(recordWithSelections);
+
+            // Clear selection after submit
+            setDatpSelectedTrenchParts([]);
+            alert('Work submitted successfully!');
+            return;
+          }
+
+          // PTEP: Submit table-to-table or parameter selections
+          if (isPTEP) {
+            const mode = ptepSubModeRef.current || 'tabletotable';
+            if (mode === 'tabletotable') {
+              const completed = ptepCompletedTableToTableRef.current || new Set();
+              if (completed.size === 0) {
+                alert('No selections to submit.');
+                return;
+              }
+              const recordWithSelections = {
+                ...record,
+                notes: notesOnDate,
+                selectedPolygonIds: Array.from(completed),
+              };
+              addRecord(recordWithSelections);
+              // Clear after submit
+              setPtepCompletedTableToTable(new Set());
+            } else {
+              const parts = ptepSelectedParameterPartsRef.current || [];
+              if (parts.length === 0) {
+                alert('No selections to submit.');
+                return;
+              }
+              const meters = parts.reduce((sum, p) => sum + (p?.meters || 0), 0);
+              const partIds = parts.map((p) => String(p?.id || ''));
+              const recordWithSelections = {
+                ...record,
+                total_cable: meters,
+                notes: notesOnDate,
+                selectedPolygonIds: partIds,
+              };
+              addRecord(recordWithSelections);
+              // Clear after submit
+              setPtepSelectedParameterParts([]);
+            }
+            alert('Work submitted successfully!');
+            return;
+          }
+
+          // MVT: Submit station termination counts
+          if (isMVT) {
+            const terminations = mvtTerminationByStationRef.current || {};
+            const stationIds = Object.keys(terminations).filter((k) => (terminations[k] || 0) > 0);
+            if (stationIds.length === 0) {
+              alert('No terminations to submit.');
+              return;
+            }
+            const totalCables = Object.values(terminations).reduce((sum, v) => sum + Math.max(0, Math.min(3, Number(v) || 0)), 0);
+            const recordWithSelections = {
+              ...record,
+              total_cable: totalCables,
+              notes: notesOnDate,
+              selectedPolygonIds: stationIds,
+            };
+            addRecord(recordWithSelections);
+            alert('Work submitted successfully!');
+            return;
+          }
+
+          // LVTT: Submit inv termination counts (termination mode only)
+          if (isLVTT && String(lvttSubModeRef.current || 'termination') === 'termination') {
+            const terminations = lvttTerminationByInvRef.current || {};
+            const invIds = Object.keys(terminations).filter((k) => (terminations[k] || 0) > 0);
+            if (invIds.length === 0) {
+              alert('No terminations to submit.');
+              return;
+            }
+            const totalCables = Object.values(terminations).reduce((sum, v) => sum + Math.max(0, Math.min(3, Number(v) || 0)), 0);
+            const recordWithSelections = {
+              ...record,
+              total_cable: totalCables,
+              notes: notesOnDate,
+              selectedPolygonIds: invIds,
+            };
+            addRecord(recordWithSelections);
+            alert('Work submitted successfully!');
+            return;
+          }
+
           // Calculate ONLY the NEW polygons (not previously submitted)
           const newPolygonIds = new Set();
           selectedPolygons.forEach((id) => {
@@ -13736,7 +14250,7 @@ export default function BaseModule({
                 ×
               </button>
             </div>
-          </div>
+            </div>
           
           {/* Mouse/Touch move handlers for dragging */}
           {historyDragging && (
@@ -13759,84 +14273,84 @@ export default function BaseModule({
               onTouchEnd={() => setHistoryDragging(false)}
             />
           )}
-          
-          <div className="history-sort">
+            
+            <div className="history-sort">
             <span>Sort:</span>
-            <button 
-              className={`sort-btn ${historySortBy === 'date' ? 'active' : ''}`}
-              onClick={() => {
-                if (historySortBy === 'date') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
-                else { setHistorySortBy('date'); setHistorySortOrder('desc'); }
-              }}
-            >
-              Date {historySortBy === 'date' && (historySortOrder === 'desc' ? '↓' : '↑')}
-            </button>
-            <button 
-              className={`sort-btn ${historySortBy === 'workers' ? 'active' : ''}`}
-              onClick={() => {
-                if (historySortBy === 'workers') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
-                else { setHistorySortBy('workers'); setHistorySortOrder('desc'); }
-              }}
-            >
-              Workers {historySortBy === 'workers' && (historySortOrder === 'desc' ? '↓' : '↑')}
-            </button>
-            <button 
-              className={`sort-btn ${historySortBy === 'amount' ? 'active' : ''}`}
-              onClick={() => {
-                if (historySortBy === 'amount') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
-                else { setHistorySortBy('amount'); setHistorySortOrder('desc'); }
-              }}
-            >
-              Amount {historySortBy === 'amount' && (historySortOrder === 'desc' ? '↓' : '↑')}
-            </button>
-          </div>
-          
-          <div className="history-list">
-            {(() => {
-              const noteYmd = (n) => n.noteDate || (n.createdAt ? new Date(n.createdAt).toISOString().split('T')[0] : null);
+              <button 
+                className={`sort-btn ${historySortBy === 'date' ? 'active' : ''}`}
+                onClick={() => {
+                  if (historySortBy === 'date') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
+                  else { setHistorySortBy('date'); setHistorySortOrder('desc'); }
+                }}
+              >
+                Date {historySortBy === 'date' && (historySortOrder === 'desc' ? '↓' : '↑')}
+              </button>
+              <button 
+                className={`sort-btn ${historySortBy === 'workers' ? 'active' : ''}`}
+                onClick={() => {
+                  if (historySortBy === 'workers') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
+                  else { setHistorySortBy('workers'); setHistorySortOrder('desc'); }
+                }}
+              >
+                Workers {historySortBy === 'workers' && (historySortOrder === 'desc' ? '↓' : '↑')}
+              </button>
+              <button 
+                className={`sort-btn ${historySortBy === 'amount' ? 'active' : ''}`}
+                onClick={() => {
+                  if (historySortBy === 'amount') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
+                  else { setHistorySortBy('amount'); setHistorySortOrder('desc'); }
+                }}
+              >
+                Amount {historySortBy === 'amount' && (historySortOrder === 'desc' ? '↓' : '↑')}
+              </button>
+            </div>
+            
+            <div className="history-list">
+              {(() => {
+                const noteYmd = (n) => n.noteDate || (n.createdAt ? new Date(n.createdAt).toISOString().split('T')[0] : null);
 
-              const notesByDate = {};
-              notes.forEach(n => {
-                const d = noteYmd(n);
-                if (!d) return;
-                if (!notesByDate[d]) notesByDate[d] = [];
-                notesByDate[d].push(n);
-              });
+                const notesByDate = {};
+                notes.forEach(n => {
+                  const d = noteYmd(n);
+                  if (!d) return;
+                  if (!notesByDate[d]) notesByDate[d] = [];
+                  notesByDate[d].push(n);
+                });
 
-              const recordsByDate = {};
-              dailyLog.forEach(r => {
-                const d = r.date;
-                if (!d) return;
-                if (!recordsByDate[d]) recordsByDate[d] = [];
-                recordsByDate[d].push(r);
-              });
+                const recordsByDate = {};
+                dailyLog.forEach(r => {
+                  const d = r.date;
+                  if (!d) return;
+                  if (!recordsByDate[d]) recordsByDate[d] = [];
+                  recordsByDate[d].push(r);
+                });
 
-              const dates = Array.from(new Set([...Object.keys(recordsByDate), ...Object.keys(notesByDate)]));
-              const mult = historySortOrder === 'desc' ? -1 : 1;
+                const dates = Array.from(new Set([...Object.keys(recordsByDate), ...Object.keys(notesByDate)]));
+                const mult = historySortOrder === 'desc' ? -1 : 1;
 
-              const dateMetric = (d) => {
-                const recs = recordsByDate[d] || [];
-                if (historySortBy === 'workers') return recs.reduce((s, r) => s + (r.workers || 0), 0);
-                if (historySortBy === 'amount') return recs.reduce((s, r) => s + (r.total_cable || 0), 0);
-                return new Date(d).getTime();
-              };
+                const dateMetric = (d) => {
+                  const recs = recordsByDate[d] || [];
+                  if (historySortBy === 'workers') return recs.reduce((s, r) => s + (r.workers || 0), 0);
+                  if (historySortBy === 'amount') return recs.reduce((s, r) => s + (r.total_cable || 0), 0);
+                  return new Date(d).getTime();
+                };
 
-              dates.sort((a, b) => mult * (dateMetric(a) - dateMetric(b)));
+                dates.sort((a, b) => mult * (dateMetric(a) - dateMetric(b)));
 
-              if (dates.length === 0) {
-                return <div className="history-empty">No work records or notes yet</div>;
-              }
+                if (dates.length === 0) {
+                  return <div className="history-empty">No work records or notes yet</div>;
+                }
 
-              return dates.map((d) => {
-                const recs = [...(recordsByDate[d] || [])];
-                const dayNotes = [...(notesByDate[d] || [])].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+                return dates.map((d) => {
+                  const recs = [...(recordsByDate[d] || [])];
+                  const dayNotes = [...(notesByDate[d] || [])].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
                 const dateLabel = new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
-                return (
-                  <div key={d} className="history-day">
-                    <div className="history-day-header">
-                      <span className="history-day-date">{dateLabel}</span>
-                    </div>
+                  return (
+                    <div key={d} className="history-day">
+                      <div className="history-day-header">
+                        <span className="history-day-date">{dateLabel}</span>
+                      </div>
 
                     {recs.map((record) => {
                       const isSelected = historySelectedRecordId === record.id;
@@ -13855,25 +14369,49 @@ export default function BaseModule({
                             }
                           }}
                         >
-                          <div className="history-item-header">
-                            <span className="history-subcontractor">{record.subcontractor}</span>
+                              <div className="history-item-header">
+                                <span className="history-subcontractor">{record.subcontractor}</span>
                             <button
                               className="history-item-delete"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 if (window.confirm('Delete this record?')) {
-                                  // Remove from committedPolygons
-                                  setCommittedPolygons((prev) => {
-                                    const next = new Set(prev);
-                                    recordPolygonIds.forEach((id) => next.delete(id));
-                                    return next;
-                                  });
-                                  // Also remove from selectedPolygons (make them disappear from map)
-                                  setSelectedPolygons((prev) => {
-                                    const next = new Set(prev);
-                                    recordPolygonIds.forEach((id) => next.delete(id));
-                                    return next;
-                                  });
+                                  // LV records store inv_id norms in selectedPolygonIds
+                                  if (isLV) {
+                                    setLvCommittedInvIds((prev) => {
+                                      const next = new Set(prev);
+                                      recordPolygonIds.forEach((id) => next.delete(normalizeId(id)));
+                                      lvCommittedInvIdsRef.current = next;
+                                      return next;
+                                    });
+                                    setLvCompletedInvIds((prev) => {
+                                      const next = new Set(prev);
+                                      recordPolygonIds.forEach((id) => next.delete(normalizeId(id)));
+                                      return next;
+                                    });
+                                  } else if (isMVF) {
+                                    // MVF: remove committed trench parts by ID
+                                    setMvfCommittedTrenchParts((prev) => {
+                                      const idsToRemove = new Set(recordPolygonIds);
+                                      return prev.filter((p) => !idsToRemove.has(String(p?.id || '')));
+                                    });
+                                    mvfCommittedTrenchPartsRef.current = (mvfCommittedTrenchPartsRef.current || []).filter(
+                                      (p) => !recordPolygonIds.includes(String(p?.id || ''))
+                                    );
+                                  } else {
+                                    // Remove from committedPolygons
+                                    setCommittedPolygons((prev) => {
+                                      const next = new Set(prev);
+                                      recordPolygonIds.forEach((id) => next.delete(id));
+                                      return next;
+                                    });
+                                    // Also remove from selectedPolygons (make them disappear from map)
+                                    setSelectedPolygons((prev) => {
+                                      const next = new Set(prev);
+                                      recordPolygonIds.forEach((id) => next.delete(id));
+                                      return next;
+                                    });
+                                  }
                                   deleteRecord(record.id);
                                   if (historySelectedRecordId === record.id) {
                                     setHistorySelectedRecordId(null);
@@ -13884,45 +14422,45 @@ export default function BaseModule({
                             >
                               🗑️
                             </button>
-                          </div>
-                          <div className="history-item-stats">
-                            <div className="stat">
-                              <span>{record.workers} workers</span>
-                            </div>
-                            <div className="stat stat-total">
+                              </div>
+                              <div className="history-item-stats">
+                                <div className="stat">
+                                  <span>{record.workers} workers</span>
+                                </div>
+                                <div className="stat stat-total">
                               <span>
                                 {(record.total_cable || 0).toFixed(0)} {record.unit || 'm'}
                               </span>
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                        </div>
                       );
                     })}
 
-                    {dayNotes.length > 0 && (
-                      <div className="history-day-section">
-                        <div className="history-day-section-title">Notes</div>
-                        <div className="history-notes">
-                          {dayNotes.map((n) => {
-                            const time = n.createdAt ? new Date(n.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
-                            const hasPhoto = Boolean(n.photoDataUrl);
-                            return (
-                              <div key={n.id} className="history-note">
-                                <div className="history-note-top">
-                                  <span className="history-note-time">{time}</span>
-                                  {hasPhoto && <span className="history-note-photo">📷</span>}
+                      {dayNotes.length > 0 && (
+                        <div className="history-day-section">
+                          <div className="history-day-section-title">Notes</div>
+                          <div className="history-notes">
+                            {dayNotes.map((n) => {
+                              const time = n.createdAt ? new Date(n.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
+                              const hasPhoto = Boolean(n.photoDataUrl);
+                              return (
+                                <div key={n.id} className="history-note">
+                                  <div className="history-note-top">
+                                    <span className="history-note-time">{time}</span>
+                                    {hasPhoto && <span className="history-note-photo">📷</span>}
+                                  </div>
+                                  <div className="history-note-text">{n.text || '(empty note)'}</div>
                                 </div>
-                                <div className="history-note-text">{n.text || '(empty note)'}</div>
-                              </div>
-                            );
-                          })}
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              });
-            })()}
+                      )}
+                    </div>
+                  );
+                });
+              })()}
           </div>
         </div>
       )}
