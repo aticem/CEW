@@ -156,7 +156,7 @@ export const MV_FIBRE_TRENCH_PROGRESS_TRACKING_CONFIG = {
   stringTextToggle: true,
   stringTextDefaultOn: true,
   // Keep labels readable
-  stringTextColor: 'rgba(250,204,21,0.98)',
+  stringTextColor: 'rgba(250,204,21,0.60)',
   stringTextBaseSize: 22,
   stringTextStyle: '400',
   stringTextStrokeColor: 'rgba(0,0,0,0.85)',
@@ -167,7 +167,7 @@ export const MV_FIBRE_TRENCH_PROGRESS_TRACKING_CONFIG = {
   stringTextRefZoom: 20,
   geojsonFiles: [
     { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/full.geojson', name: 'full', color: 'rgba(255,255,255,0.55)', fillColor: 'transparent', interactive: false },
-    { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/mv_trench.geojson', name: 'trench', color: '#3b82f6', fillColor: '#3b82f6', weight: 2.5 },
+    { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/mv_trench.geojson', name: 'trench', color: 'rgba(255,255,255,0.55)', fillColor: 'rgba(255,255,255,0.55)', weight: 1.5 },
     { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/subs.geojson', name: 'subs', color: '#94a3b8', fillColor: '#94a3b8' },
     { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/subs_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
     {
