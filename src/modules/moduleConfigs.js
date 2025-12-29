@@ -166,8 +166,8 @@ export const MV_FIBRE_TRENCH_PROGRESS_TRACKING_CONFIG = {
   stringTextMaxFontSize: 26,
   stringTextRefZoom: 20,
   geojsonFiles: [
-    { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6', interactive: false },
-    { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/mv_trench.geojson', name: 'trench', color: '#eab308', fillColor: '#facc15' },
+    { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/full.geojson', name: 'full', color: 'rgba(255,255,255,0.55)', fillColor: 'transparent', interactive: false },
+    { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/mv_trench.geojson', name: 'trench', color: '#3b82f6', fillColor: '#3b82f6', weight: 2.5 },
     { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/subs.geojson', name: 'subs', color: '#94a3b8', fillColor: '#94a3b8' },
     { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/subs_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
     {

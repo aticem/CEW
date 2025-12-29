@@ -349,7 +349,13 @@ export default function BaseModule({
     ? (activeMode?.geojsonFiles || []).find((f) => String(f?.name || '').toLowerCase() === 'trench')?.color || '#3b82f6'
     : '#3b82f6';
 
+  // MVFT trench line color (blue like DATP)
+  const mvftTrenchLineColor = isMVFT
+    ? (activeMode?.geojsonFiles || []).find((f) => String(f?.name || '').toLowerCase() === 'trench')?.color || '#3b82f6'
+    : '#3b82f6';
+
   const datpCompletedLineColor = '#22c55e';
+  const mvftCompletedLineColor = '#22c55e';
   const mvfCircuitsMultiplier =
     typeof activeMode?.circuitsMultiplier === 'number' && Number.isFinite(activeMode.circuitsMultiplier)
       ? activeMode.circuitsMultiplier
@@ -7383,6 +7389,9 @@ export default function BaseModule({
         // DATP: trench lines are interactive for selection
         const datpTrenchInteractive = isDATP && file.name === 'trench';
         const mvftTrenchInteractive = isMVFT && file.name === 'trench';
+        if (isMVFT) {
+          console.log('[MVFT Debug] file.name:', file.name, 'mvftTrenchInteractive:', mvftTrenchInteractive, 'isMVFT:', isMVFT);
+        }
         // MVT: we don't want table selection interactions in this mode.
         const disableInteractions = (isMVT || isLVTT) && (file.name === 'full' || file.name === 'subs');
 
@@ -7497,6 +7506,49 @@ export default function BaseModule({
                 return {
                   color: 'rgba(255,255,255,0.26)',
                   weight: 0.78,
+                  fill: false,
+                  fillOpacity: 0
+                };
+              }
+            }
+            // MVFT (MV&FIBRE Trench Progress): apply colors from config (similar to DATP)
+            if (isMVFT) {
+              const layerName = file.name?.toLowerCase();
+              if (layerName === 'boundry' || layerName === 'boundary') {
+                // Boundary - RED (thinner)
+                return {
+                  color: '#ef4444',
+                  weight: 2,
+                  opacity: 1,
+                  fill: false,
+                  fillOpacity: 0,
+                };
+              }
+              if (layerName === 'trench') {
+                // Trench lines - BLUE (selectable)
+                return {
+                  color: file.color || mvftTrenchLineColor,
+                  weight: Number(file.weight) || 2.5,
+                  opacity: 1,
+                  fill: false,
+                  fillOpacity: 0,
+                };
+              }
+              if (layerName === 'full') {
+                // Full panels - dim white background (like DC CABLE PULLING)
+                return {
+                  color: 'rgba(255,255,255,0.55)',
+                  weight: 0.78,
+                  fill: false,
+                  fillColor: 'transparent',
+                  fillOpacity: 0
+                };
+              }
+              // MVFT subs layer
+              if (layerName === 'subs') {
+                return {
+                  color: '#94a3b8',
+                  weight: 1.5,
                   fill: false,
                   fillOpacity: 0
                 };
@@ -8213,6 +8265,7 @@ export default function BaseModule({
 
             // MVFT: allow selecting mv_trench lines (DATP-style selection)
             if (mvftTrenchInteractive && featureLayer && typeof featureLayer.on === 'function') {
+              console.log('[MVFT] Setting up trench click handler for feature:', feature?.properties);
               const fid = feature?.properties?.handle ?? feature?.properties?.fid ?? feature?.properties?.id ?? feature?.id ?? `mvft_${Math.random().toString(36).slice(2)}`;
               const uniqueId = `mvft_${String(fid)}`;
               featureLayer._mvftTrenchId = uniqueId;
@@ -8240,9 +8293,24 @@ export default function BaseModule({
                 setMvftTotalTrenchMeters((prev) => prev + meters);
               } catch (_e) {
                 void _e;
+                mvftTrenchLenByIdRef.current[uniqueId] = 0;
+              }
+
+              // Ensure layer is interactive
+              if (featureLayer.options) {
+                featureLayer.options.interactive = true;
               }
 
               featureLayer.on('click', (e) => {
+                console.log('[MVFT] Trench line clicked!', uniqueId);
+                try {
+                  if (e?.originalEvent) {
+                    L.DomEvent.stopPropagation(e.originalEvent);
+                    L.DomEvent.preventDefault(e.originalEvent);
+                  }
+                } catch (_e) {
+                  void _e;
+                }
                 if (disableInteractions || noteMode) return;
 
                 const isRightClick = e?.originalEvent?.button === 2;
@@ -11152,14 +11220,17 @@ export default function BaseModule({
 
   // MVF Total must come from CSV (already represents 3 circuits); completed comes from selected trench meters * 3.
   // DATP: use fixed total (15993 m)
-  const overallTotal = isTIP ? tipTotal : (isDATP ? 15993 : (isMVF ? totalPlus : ((isLV || useSimpleCounters) ? totalPlus : (totalPlus + totalMinus))));
+  // MVFT: use total from mv_trench.geojson (calculated at load time)
+  const overallTotal = isTIP ? tipTotal : (isDATP ? 15993 : (isMVFT ? mvftTotalTrenchMeters : (isMVF ? totalPlus : ((isLV || useSimpleCounters) ? totalPlus : (totalPlus + totalMinus)))));
   const completedTotal = isTIP
     ? tipCompletedTables
     : (isDATP
       ? datpCompletedTrenchMeters
-      : (isLV
-        ? lvCompletedLength
-        : (isMVF ? (mvfSelectedCableMeters + mvfCommittedCableMeters + mvfDoneCableMeters) : (completedPlus + completedMinus))));
+      : (isMVFT
+        ? mvftCompletedTrenchMeters
+        : (isLV
+          ? lvCompletedLength
+          : (isMVF ? (mvfSelectedCableMeters + mvfCommittedCableMeters + mvfDoneCableMeters) : (completedPlus + completedMinus)))));
   const completedPct = overallTotal > 0 ? (completedTotal / overallTotal) * 100 : 0;
   const remainingPlus = Math.max(0, totalPlus - completedPlus);
   const remainingMinus = Math.max(0, totalMinus - completedMinus);
@@ -11282,6 +11353,7 @@ export default function BaseModule({
   const newWorkAmount = useMemo(() => {
     if (isMVF) return mvfSelectedCableMeters;
     if (isDATP) return datpCompletedForSubmit;
+    if (isMVFT) return mvftCompletedForSubmit;
     if (isPTEP) return ptepCompletedForSubmit;
     if (isMC4) return mc4Counts?.mc4Completed || 0;
     if (isLV) {
@@ -11331,7 +11403,7 @@ export default function BaseModule({
     }
     
     return newPolygonIds.size;
-  }, [isMVF, isDATP, isPTEP, isMC4, isLV, isDC, selectedPolygons, committedPolygons, mvfSelectedCableMeters, datpCompletedForSubmit, ptepCompletedForSubmit, mc4Counts, lengthData, lvCompletedInvIds, lvCommittedInvIds]);
+  }, [isMVF, isDATP, isMVFT, isPTEP, isMC4, isLV, isDC, selectedPolygons, committedPolygons, mvfSelectedCableMeters, datpCompletedForSubmit, mvftCompletedForSubmit, ptepCompletedForSubmit, mc4Counts, lengthData, lvCompletedInvIds, lvCommittedInvIds]);
 
   const workAmount = isMVF 
     ? mvfSelectedCableMeters 
@@ -12305,45 +12377,53 @@ export default function BaseModule({
                         ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST')
                         : (isDATP
                           ? 'DATP'
-                          : (isPTEP
-                            ? (ptepSubMode === 'tabletotable' ? 'PTEP_TT' : 'PTEP_PARAM')
-                            : (isMVT
-                              ? 'MVT_TERM'
-                              : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-                                ? 'LVTT_TERM'
-                                : (activeMode?.key || '')))),
+                          : (isMVFT
+                            ? 'MVFT'
+                            : (isPTEP
+                              ? (ptepSubMode === 'tabletotable' ? 'PTEP_TT' : 'PTEP_PARAM')
+                              : (isMVT
+                                ? 'MVT_TERM'
+                                : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                                  ? 'LVTT_TERM'
+                                  : (activeMode?.key || ''))))),
                       moduleLabel: isMC4
                         ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
                         : (isDATP
                           ? 'DC&AC Trench'
-                          : (isPTEP
-                            ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
-                            : (isMVT
-                              ? 'Cable Termination'
-                              : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                          : (isMVFT
+                            ? 'MV&Fibre Trench'
+                            : (isPTEP
+                              ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+                              : (isMVT
                                 ? 'Cable Termination'
-                                : moduleName))),
+                                : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                                  ? 'Cable Termination'
+                                  : moduleName)))),
                       unit: isMC4
                         ? 'ends'
-                        : (isDATP
+                        : (isDATP || isMVFT
                           ? 'm'
                           : (isPTEP
                             ? (ptepSubMode === 'tabletotable' ? 'pcs' : 'm')
                             : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination')) ? 'cables' : 'm'))),
                       chartSheetName: isDATP
                         ? 'DC&AC Trench Progress'
-                        : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
-                          ? 'Cable Termination'
-                          : (isPTEP
-                            ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
-                            : undefined)),
+                        : (isMVFT
+                          ? 'MV&Fibre Trench Progress'
+                          : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
+                            ? 'Cable Termination'
+                            : (isPTEP
+                              ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+                              : undefined))),
                       chartTitle: isDATP
                         ? 'DC&AC Trench Progress'
-                        : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
-                          ? 'Cable Termination'
-                          : (isPTEP
-                            ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
-                            : undefined)),
+                        : (isMVFT
+                          ? 'MV&Fibre Trench Progress'
+                          : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
+                            ? 'Cable Termination'
+                            : (isPTEP
+                              ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+                              : undefined))),
                     })
                   }
                   disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || dailyLog.length === 0}
@@ -12600,6 +12680,23 @@ export default function BaseModule({
                       <line x1="0" y1="6" x2="24" y2="6" stroke={datpCompletedLineColor} strokeWidth="2" />
                     </svg>
                     <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: datpCompletedLineColor }}>Completed</span>
+                  </div>
+                </>
+              ) : isMVFT ? (
+                <>
+                  {/* Blue line for Uncompleted */}
+                  <div className="flex items-center gap-2">
+                    <svg width="24" height="12" aria-hidden="true">
+                      <line x1="0" y1="6" x2="24" y2="6" stroke={mvftTrenchLineColor} strokeWidth="2" />
+                    </svg>
+                    <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: mvftTrenchLineColor }}>Uncompleted</span>
+                  </div>
+                  {/* Green line for Completed */}
+                  <div className="mt-2 flex items-center gap-2">
+                    <svg width="24" height="12" aria-hidden="true">
+                      <line x1="0" y1="6" x2="24" y2="6" stroke={mvftCompletedLineColor} strokeWidth="2" />
+                    </svg>
+                    <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: mvftCompletedLineColor }}>Completed</span>
                   </div>
                 </>
               ) : isDCCT ? (
@@ -14510,37 +14607,43 @@ export default function BaseModule({
           ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST')
           : (isDATP
             ? 'DATP'
-            : (isPTEP
-              ? (ptepSubMode === 'tabletotable' ? 'PTEP_TT' : 'PTEP_PARAM')
-              : (isMVT
-                ? 'MVT_TERM'
-                : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-                  ? 'LVTT_TERM'
-                  : (activeMode?.key || ''))))}
+            : (isMVFT
+              ? 'MVFT'
+              : (isPTEP
+                ? (ptepSubMode === 'tabletotable' ? 'PTEP_TT' : 'PTEP_PARAM')
+                : (isMVT
+                  ? 'MVT_TERM'
+                  : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                    ? 'LVTT_TERM'
+                    : (activeMode?.key || '')))))}
         moduleLabel={isMC4
           ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
           : (isDATP
             ? 'DC&AC Trench'
-            : (isPTEP
-              ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
-              : (isMVT
-                ? 'Cable Termination'
-                : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+            : (isMVFT
+              ? 'MV&Fibre Trench'
+              : (isPTEP
+                ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+                : (isMVT
                   ? 'Cable Termination'
-                  : moduleName)))}
+                  : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                    ? 'Cable Termination'
+                    : moduleName))))}
         workAmount={isMC4
           ? mc4SelectionMode === 'termination'
             ? mc4Counts?.terminatedCompleted || 0
             : mc4Counts?.mc4Completed || 0
           : isDATP
             ? datpCompletedForSubmit
-            : isPTEP
-              ? ptepCompletedForSubmit
-              : isMVT
-                ? mvtCompletedForSubmit
-                : isLVTT && String(lvttSubMode || 'termination') === 'termination'
-                  ? lvttCompletedForSubmit
-                  : workAmount
+            : isMVFT
+              ? mvftCompletedForSubmit
+              : isPTEP
+                ? ptepCompletedForSubmit
+                : isMVT
+                  ? mvtCompletedForSubmit
+                  : isLVTT && String(lvttSubMode || 'termination') === 'termination'
+                    ? lvttCompletedForSubmit
+                    : workAmount
         }
         workUnit={
           isMC4
