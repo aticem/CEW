@@ -342,6 +342,8 @@ export default function BaseModule({
   const isLVIB = String(activeMode?.key || '').toUpperCase() === 'LVIB' || Boolean(activeMode?.boxLabelsEnabled);
   // DC&AC TRENCH PROGRESS mode
   const isDATP = String(activeMode?.key || '').toUpperCase() === 'DATP';
+  // MV&FIBRE TRENCH PROGRESS mode
+  const isMVFT = String(activeMode?.key || '').toUpperCase() === 'MVFT';
 
   const datpTrenchLineColor = isDATP
     ? (activeMode?.geojsonFiles || []).find((f) => String(f?.name || '').toLowerCase() === 'trench')?.color || '#3b82f6'
@@ -1664,6 +1666,24 @@ export default function BaseModule({
   const datpHistorySuspendRef = useRef(false);
   const [datpHistoryTick, setDatpHistoryTick] = useState(0);
 
+  // ======== MVFT (MV&Fibre Trench Progress) ========
+  // Storage key for persistence
+  const mvftStorageKey = `mvft_completed_parts_${String(activeMode?.key || 'MVFT')}`;
+  // parts: [{ id, uid, lineIndex, startM, endM, coords:[[lat,lng],...], meters }]
+  const [mvftSelectedTrenchParts, setMvftSelectedTrenchParts] = useState(() => []);
+  const mvftSelectedTrenchPartsRef = useRef(mvftSelectedTrenchParts);
+  const mvftTrenchSelectedLayerRef = useRef(null); // L.LayerGroup for selected green parts
+  const [mvftTotalTrenchMeters, setMvftTotalTrenchMeters] = useState(0);
+  const mvftTrenchByIdRef = useRef({}); // uniqueId -> featureLayer
+  const mvftTrenchLenByIdRef = useRef({}); // uniqueId -> length in meters
+  const mvftSvgRendererRef = useRef(null); // dedicated SVG renderer for trench lines
+
+  // MVFT: Undo/Redo history for trench parts
+  const mvftHistoryRef = useRef({ past: [], future: [] });
+  const mvftPrevSnapshotRef = useRef([]);
+  const mvftHistorySuspendRef = useRef(false);
+  const [mvftHistoryTick, setMvftHistoryTick] = useState(0);
+
   useEffect(() => {
     ptepCompletedTableToTableRef.current = ptepCompletedTableToTable;
   }, [ptepCompletedTableToTable]);
@@ -1688,6 +1708,19 @@ export default function BaseModule({
     datpPrevSnapshotRef.current = datpSelectedTrenchParts || [];
     setDatpHistoryTick((t) => t + 1);
   }, [isDATP, datpSelectedTrenchParts]);
+
+  // MVFT: Undo/Redo history for trench parts
+  useEffect(() => {
+    if (!isMVFT) return;
+    if (mvftHistorySuspendRef.current) return;
+    const current = JSON.stringify(mvftSelectedTrenchParts || []);
+    const prev = JSON.stringify(mvftPrevSnapshotRef.current || []);
+    if (current === prev) return;
+    mvftHistoryRef.current.past = [...mvftHistoryRef.current.past, mvftPrevSnapshotRef.current || []].slice(-HISTORY_LIMIT);
+    mvftHistoryRef.current.future = [];
+    mvftPrevSnapshotRef.current = mvftSelectedTrenchParts || [];
+    setMvftHistoryTick((t) => t + 1);
+  }, [isMVFT, mvftSelectedTrenchParts]);
 
   // Track PTEP table-to-table changes for undo/redo
   useEffect(() => {
@@ -1714,6 +1747,10 @@ export default function BaseModule({
     ptepParamPrevSnapshotRef.current = ptepSelectedParameterParts || [];
     setPtepParamHistoryTick((t) => t + 1);
   }, [isPTEP, ptepSelectedParameterParts]);
+
+  useEffect(() => {
+    mvftSelectedTrenchPartsRef.current = mvftSelectedTrenchParts;
+  }, [mvftSelectedTrenchParts]);
 
   // Load PTEP table-to-table completions from localStorage
   useEffect(() => {
@@ -1945,6 +1982,29 @@ export default function BaseModule({
     }
   }, [isDATP, datpStorageKey, datpSelectedTrenchParts]);
 
+  // Load MVFT trench parts from localStorage
+  useEffect(() => {
+    if (!isMVFT) return;
+    try {
+      const raw = localStorage.getItem(mvftStorageKey);
+      const parts = raw ? JSON.parse(raw) : [];
+      setMvftSelectedTrenchParts(parts);
+    } catch (_e) {
+      void _e;
+      setMvftSelectedTrenchParts([]);
+    }
+  }, [isMVFT, mvftStorageKey]);
+
+  // Save MVFT trench parts to localStorage
+  useEffect(() => {
+    if (!isMVFT) return;
+    try {
+      localStorage.setItem(mvftStorageKey, JSON.stringify(mvftSelectedTrenchParts || []));
+    } catch (_e) {
+      void _e;
+    }
+  }, [isMVFT, mvftStorageKey, mvftSelectedTrenchParts]);
+
   // DATP: Render selected trench PARTS as green overlay
   useEffect(() => {
     if (!isDATP) return;
@@ -1974,6 +2034,33 @@ export default function BaseModule({
     }
   }, [isDATP, datpSelectedTrenchParts, datpCompletedLineColor]);
 
+  // Render MVFT selected trench parts (green lines)
+  useEffect(() => {
+    if (!isMVFT) return;
+    const map = mapRef.current;
+    if (!map) return;
+    try {
+      if (!mvftTrenchSelectedLayerRef.current) {
+        mvftTrenchSelectedLayerRef.current = L.layerGroup({ pane: 'mvftTrenchSelectedPane' }).addTo(map);
+      }
+      const lg = mvftTrenchSelectedLayerRef.current;
+      lg.clearLayers();
+      const parts = mvftSelectedTrenchPartsRef.current || [];
+      parts.forEach((p) => {
+        if (!p?.coords?.length) return;
+        const line = L.polyline(p.coords, {
+          color: '#22c55e', // green for completed
+          weight: 4,
+          opacity: 1,
+          interactive: false,
+        });
+        lg.addLayer(line);
+      });
+    } catch (_e) {
+      void _e;
+    }
+  }, [isMVFT, mvftSelectedTrenchParts, datpCompletedLineColor]);
+
   // Compute completed DATP trench meters
   const datpCompletedTrenchMeters = useMemo(() => {
     const parts = datpSelectedTrenchParts || [];
@@ -1984,6 +2071,17 @@ export default function BaseModule({
     }
     return sum;
   }, [datpSelectedTrenchParts]);
+
+  // Compute completed MVFT trench meters
+  const mvftCompletedTrenchMeters = useMemo(() => {
+    const parts = mvftSelectedTrenchParts || [];
+    let sum = 0;
+    for (const p of parts) {
+      const m = Number(p?.meters);
+      if (Number.isFinite(m) && m > 0) sum += m;
+    }
+    return sum;
+  }, [mvftSelectedTrenchParts]);
 
   // Compute completed parameter meters
   const ptepCompletedParameterMeters = useMemo(() => {
@@ -2431,14 +2529,46 @@ export default function BaseModule({
     setTimeout(() => { datpHistorySuspendRef.current = false; }, 0);
   }, [setDatpSelectedTrenchParts]);
 
+  // MVFT: Undo/Redo functions for trench parts
+  const mvftCanUndo = isMVFT && mvftHistoryRef.current.past.length > 0;
+  const mvftCanRedo = isMVFT && mvftHistoryRef.current.future.length > 0;
+  const mvftUndo = useCallback(() => {
+    const h = mvftHistoryRef.current;
+    if (!h.past.length) return;
+    const current = mvftSelectedTrenchPartsRef.current || [];
+    const previous = h.past[h.past.length - 1] || [];
+    h.past = h.past.slice(0, -1);
+    h.future = [current, ...h.future].slice(0, HISTORY_LIMIT);
+    mvftHistorySuspendRef.current = true;
+    mvftPrevSnapshotRef.current = previous;
+    setMvftSelectedTrenchParts(previous);
+    setMvftHistoryTick((t) => t + 1);
+    setTimeout(() => { mvftHistorySuspendRef.current = false; }, 0);
+  }, [setMvftSelectedTrenchParts]);
+
+  const mvftRedo = useCallback(() => {
+    const h = mvftHistoryRef.current;
+    if (!h.future.length) return;
+    const current = mvftSelectedTrenchPartsRef.current || [];
+    const next = h.future[0] || [];
+    h.future = h.future.slice(1);
+    h.past = [...h.past, current].slice(-HISTORY_LIMIT);
+    mvftHistorySuspendRef.current = true;
+    mvftPrevSnapshotRef.current = next;
+    setMvftSelectedTrenchParts(next);
+    setMvftHistoryTick((t) => t + 1);
+    setTimeout(() => { mvftHistorySuspendRef.current = false; }, 0);
+  }, [setMvftSelectedTrenchParts]);
+
   const globalCanUndo = noteMode
     ? canUndoNotes
     : (isMC4 ? mc4CanUndo
       : isLVTT ? lvttCanUndo
         : isMVT ? mvtCanUndo
           : isDATP ? datpCanUndo
-            : isPTEP ? (ptepSubMode === 'tabletotable' ? ptepTTCanUndo : ptepParamCanUndo)
-              : isLV ? lvInvCanUndo
+            : isMVFT ? mvftCanUndo
+              : isPTEP ? (ptepSubMode === 'tabletotable' ? ptepTTCanUndo : ptepParamCanUndo)
+                : isLV ? lvInvCanUndo
                 : isMVF ? mvfPartsCanUndo
                   : selectionCanUndo);
 
@@ -2448,7 +2578,8 @@ export default function BaseModule({
       : isLVTT ? lvttCanRedo
         : isMVT ? mvtCanRedo
           : isDATP ? datpCanRedo
-            : isPTEP ? (ptepSubMode === 'tabletotable' ? ptepTTCanRedo : ptepParamCanRedo)
+            : isMVFT ? mvftCanRedo
+              : isPTEP ? (ptepSubMode === 'tabletotable' ? ptepTTCanRedo : ptepParamCanRedo)
               : isLV ? lvInvCanRedo
                 : isMVF ? mvfPartsCanRedo
                   : selectionCanRedo);
@@ -2459,11 +2590,12 @@ export default function BaseModule({
     if (isLVTT) return void lvttUndo();
     if (isMVT) return void mvtUndo();
     if (isDATP) return void datpUndo();
+    if (isMVFT) return void mvftUndo();
     if (isPTEP) return void (ptepSubModeRef.current === 'tabletotable' ? ptepTTUndo() : ptepParamUndo());
     if (isLV) return void lvInvUndo();
     if (isMVF) return void mvfPartsUndo();
     return void selectionUndo();
-  }, [noteMode, undoNotes, isMC4, mc4Undo, isLVTT, lvttUndo, isMVT, mvtUndo, isDATP, datpUndo, isPTEP, ptepTTUndo, ptepParamUndo, isLV, lvInvUndo, isMVF, mvfPartsUndo, selectionUndo]);
+  }, [noteMode, undoNotes, isMC4, mc4Undo, isLVTT, lvttUndo, isMVT, mvtUndo, isDATP, datpUndo, isMVFT, mvftUndo, isPTEP, ptepTTUndo, ptepParamUndo, isLV, lvInvUndo, isMVF, mvfPartsUndo, selectionUndo]);
 
   const globalRedo = useCallback(() => {
     if (noteMode) return void redoNotes();
@@ -2471,11 +2603,12 @@ export default function BaseModule({
     if (isLVTT) return void lvttRedo();
     if (isMVT) return void mvtRedo();
     if (isDATP) return void datpRedo();
+    if (isMVFT) return void mvftRedo();
     if (isPTEP) return void (ptepSubModeRef.current === 'tabletotable' ? ptepTTRedo() : ptepParamRedo());
     if (isLV) return void lvInvRedo();
     if (isMVF) return void mvfPartsRedo();
     return void selectionRedo();
-  }, [noteMode, redoNotes, isMC4, mc4Redo, isLVTT, lvttRedo, isMVT, mvtRedo, isDATP, datpRedo, isPTEP, ptepTTRedo, ptepParamRedo, isLV, lvInvRedo, isMVF, mvfPartsRedo, selectionRedo]);
+  }, [noteMode, redoNotes, isMC4, mc4Redo, isLVTT, lvttRedo, isMVT, mvtRedo, isDATP, datpRedo, isMVFT, mvftRedo, isPTEP, ptepTTRedo, ptepParamRedo, isLV, lvInvRedo, isMVF, mvfPartsRedo, selectionRedo]);
 
   useEffect(() => {
     if (!isMC4) return;
@@ -5643,6 +5776,19 @@ export default function BaseModule({
     datpTrenchByIdRef.current = {};
     datpTrenchLenByIdRef.current = {};
     setDatpTotalTrenchMeters(0);
+    if (datpTrenchSelectedLayerRef.current) {
+      try { datpTrenchSelectedLayerRef.current.remove(); } catch (_e) { void _e; }
+      datpTrenchSelectedLayerRef.current = null;
+    }
+
+    // MVFT: clear trench refs on reload
+    mvftTrenchByIdRef.current = {};
+    mvftTrenchLenByIdRef.current = {};
+    setMvftTotalTrenchMeters(0);
+    if (mvftTrenchSelectedLayerRef.current) {
+      try { mvftTrenchSelectedLayerRef.current.remove(); } catch (_e) { void _e; }
+      mvftTrenchSelectedLayerRef.current = null;
+    }
     
     const allBounds = L.latLngBounds();
     let totalFeatures = 0;
@@ -5805,6 +5951,38 @@ export default function BaseModule({
         }
         
         // Special handling for full.geojson - tables will be selectable (MultiPolygon)
+        // DATP/MVFT: full layer is background only; trench lines are the selectable layer.
+        if (file.name === 'full' && (isDATP || isMVFT)) {
+          const fullLayer = L.geoJSON(data, {
+            renderer: canvasRenderer,
+            interactive: false,
+            bubblingMouseEvents: false,
+            style: () => {
+              if (isDATP) {
+                return {
+                  color: 'rgba(255,255,255,0.26)',
+                  weight: 0.78,
+                  fill: false,
+                  fillOpacity: 0,
+                };
+              }
+              return {
+                color: file.color || 'rgba(255,255,255,0.26)',
+                weight: Number(file.weight) || 0.78,
+                opacity: typeof file.opacity === 'number' ? file.opacity : 1,
+                fill: false,
+                fillOpacity: 0,
+              };
+            },
+          }).addTo(mapRef.current);
+          layersRef.current.push(fullLayer);
+          if (typeof fullLayer.getBounds === 'function') {
+            const b = fullLayer.getBounds();
+            if (b?.isValid?.()) allBounds.extend(b);
+          }
+          continue;
+        }
+
         if (file.name === 'full') {
           // PUNCH_LIST: if full layer is backed by full_plot.geojson (LineString segments),
           // build table polygons in-memory so selections work per-table (click + selection box).
@@ -7204,6 +7382,7 @@ export default function BaseModule({
         const ptepParameterInteractive = isPTEP && file.name === 'earthing_parameter';
         // DATP: trench lines are interactive for selection
         const datpTrenchInteractive = isDATP && file.name === 'trench';
+        const mvftTrenchInteractive = isMVFT && file.name === 'trench';
         // MVT: we don't want table selection interactions in this mode.
         const disableInteractions = (isMVT || isLVTT) && (file.name === 'full' || file.name === 'subs');
 
@@ -7211,19 +7390,23 @@ export default function BaseModule({
         const ptepPaneName = ptepTableToTableInteractive ? 'ptepTableToTablePane' : (ptepParameterInteractive ? 'ptepParameterPane' : undefined);
         // For DATP trench, also use SVG pane
         const datpPaneName = datpTrenchInteractive ? 'datpTrenchPane' : undefined;
+        // For MVFT trench, also use SVG pane
+        const mvftPaneName = mvftTrenchInteractive ? 'mvftTrenchPane' : undefined;
         const useRenderer = ptepTableToTableInteractive
           ? (ptepTableToTableSvgRendererRef.current || L.svg({ pane: 'ptepTableToTablePane' }))
           : ptepParameterInteractive
           ? (ptepParameterSvgRendererRef.current || L.svg({ pane: 'ptepParameterPane' }))
           : datpTrenchInteractive
           ? (datpSvgRendererRef.current || L.svg({ pane: 'datpTrenchPane' }))
+          : mvftTrenchInteractive
+          ? (mvftSvgRendererRef.current || L.svg({ pane: 'mvftTrenchPane' }))
           : canvasRenderer;
 
         const layer = L.geoJSON(data, {
-          pane: ptepPaneName || datpPaneName,
+          pane: ptepPaneName || datpPaneName || mvftPaneName,
           renderer: useRenderer,
-          interactive: !disableInteractions && (invInteractive || mvfTrenchInteractive || ptepTableToTableInteractive || ptepParameterInteractive || datpTrenchInteractive),
-          bubblingMouseEvents: !(ptepTableToTableInteractive || ptepParameterInteractive || datpTrenchInteractive),
+          interactive: !disableInteractions && (invInteractive || mvfTrenchInteractive || ptepTableToTableInteractive || ptepParameterInteractive || datpTrenchInteractive || mvftTrenchInteractive),
+          bubblingMouseEvents: !(ptepTableToTableInteractive || ptepParameterInteractive || datpTrenchInteractive || mvftTrenchInteractive),
           
           style: (feature) => {
             // PTEP: earthing_full = background only (dim), but boundry layer = red
@@ -7954,6 +8137,116 @@ export default function BaseModule({
 
                 const isRightClick = e?.originalEvent?.button === 2;
                 setDatpSelectedTrenchParts((prev) => {
+                  const parts = Array.isArray(prev) ? prev : [];
+
+                  // Right-click: remove all selected parts for this feature
+                  if (isRightClick) {
+                    return parts.filter((p) => String(p?.uid || '') !== uniqueId);
+                  }
+
+                  // Left-click: toggle FULL coverage for this feature
+                  const kept = parts.filter((p) => String(p?.uid || '') !== uniqueId);
+
+                  // Determine whether this feature is already fully covered
+                  let fullyCovered = true;
+                  try {
+                    const lines = asLineStrings(featureLayer.getLatLngs());
+                    const byLine = new Map();
+                    parts.forEach((p) => {
+                      if (String(p?.uid || '') !== uniqueId) return;
+                      const li = Number(p?.lineIndex);
+                      const a = Number(p?.startM);
+                      const b = Number(p?.endM);
+                      if (!Number.isFinite(li) || !Number.isFinite(a) || !Number.isFinite(b)) return;
+                      const lo = Math.min(a, b);
+                      const hi = Math.max(a, b);
+                      if (!(hi > lo)) return;
+                      if (!byLine.has(li)) byLine.set(li, []);
+                      byLine.get(li).push([lo, hi]);
+                    });
+                    lines.forEach((lineLL, lineIndex) => {
+                      if (!Array.isArray(lineLL) || lineLL.length < 2) return;
+                      const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+                      const totalM = cumData?.cum?.[cumData.cum.length - 1] || 0;
+                      if (!(totalM > 0)) return;
+                      const merged = mergeIntervals(byLine.get(lineIndex) || []);
+                      const ok = merged.length === 1 && merged[0][0] <= 0.2 && merged[0][1] >= totalM - 0.2;
+                      if (!ok) fullyCovered = false;
+                    });
+                  } catch (_e) {
+                    void _e;
+                    fullyCovered = false;
+                  }
+
+                  // If fully covered -> toggle off (remove all parts)
+                  if (fullyCovered) return kept;
+
+                  // Not fully covered -> add full coverage
+                  const toAdd = [];
+                  try {
+                    const lines = asLineStrings(featureLayer.getLatLngs());
+                    lines.forEach((lineLL, lineIndex) => {
+                      if (!Array.isArray(lineLL) || lineLL.length < 2) return;
+                      const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+                      const totalM = cumData?.cum?.[cumData.cum.length - 1] || 0;
+                      if (!(totalM > 0)) return;
+                      const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: 0, endM: totalM });
+                      if (!coords || coords.length < 2) return;
+                      toAdd.push({
+                        id: `${uniqueId}:${lineIndex}:0.00-${totalM.toFixed(2)}`,
+                        uid: uniqueId,
+                        lineIndex,
+                        startM: 0,
+                        endM: totalM,
+                        coords,
+                        meters: totalM,
+                      });
+                    });
+                  } catch (_e) {
+                    void _e;
+                  }
+
+                  return toAdd.length > 0 ? [...kept, ...toAdd] : kept;
+                });
+              });
+            }
+
+            // MVFT: allow selecting mv_trench lines (DATP-style selection)
+            if (mvftTrenchInteractive && featureLayer && typeof featureLayer.on === 'function') {
+              const fid = feature?.properties?.handle ?? feature?.properties?.fid ?? feature?.properties?.id ?? feature?.id ?? `mvft_${Math.random().toString(36).slice(2)}`;
+              const uniqueId = `mvft_${String(fid)}`;
+              featureLayer._mvftTrenchId = uniqueId;
+              mvftTrenchByIdRef.current[uniqueId] = featureLayer;
+
+              // Compute line length in meters
+              try {
+                const geom = feature?.geometry;
+                let meters = 0;
+                const addLineMeters = (coords) => {
+                  if (!Array.isArray(coords) || coords.length < 2) return;
+                  let prev = null;
+                  for (const c of coords) {
+                    const lng = c?.[0];
+                    const lat = c?.[1];
+                    if (typeof lat !== 'number' || typeof lng !== 'number') continue;
+                    const ll = L.latLng(lat, lng);
+                    if (prev) meters += prev.distanceTo(ll);
+                    prev = ll;
+                  }
+                };
+                if (geom?.type === 'LineString') addLineMeters(geom.coordinates);
+                else if (geom?.type === 'MultiLineString') (geom.coordinates || []).forEach(addLineMeters);
+                mvftTrenchLenByIdRef.current[uniqueId] = meters;
+                setMvftTotalTrenchMeters((prev) => prev + meters);
+              } catch (_e) {
+                void _e;
+              }
+
+              featureLayer.on('click', (e) => {
+                if (disableInteractions || noteMode) return;
+
+                const isRightClick = e?.originalEvent?.button === 2;
+                setMvftSelectedTrenchParts((prev) => {
                   const parts = Array.isArray(prev) ? prev : [];
 
                   // Right-click: remove all selected parts for this feature
@@ -10511,6 +10804,31 @@ export default function BaseModule({
       void _e;
     }
 
+    // MVFT: trench lines pane (for interactive selection)
+    try {
+      const paneName = 'mvftTrenchPane';
+      if (!mapRef.current.getPane(paneName)) {
+        const pane = mapRef.current.createPane(paneName);
+        pane.style.zIndex = '439';
+        pane.style.pointerEvents = 'auto';
+      }
+      mvftSvgRendererRef.current = L.svg({ pane: paneName });
+    } catch (_e) {
+      mvftSvgRendererRef.current = null;
+    }
+
+    // MVFT: selected trench parts overlay pane (always pointerEvents:none)
+    try {
+      const paneName = 'mvftTrenchSelectedPane';
+      if (!mapRef.current.getPane(paneName)) {
+        const pane = mapRef.current.createPane(paneName);
+        pane.style.zIndex = '440';
+        pane.style.pointerEvents = 'none';
+      }
+    } catch (_e) {
+      void _e;
+    }
+
     // Dedicated canvas renderer + pane for string_text labels (prevents ghosting when hiding/showing)
     try {
       const paneName = 'stringTextPane';
@@ -10956,6 +11274,9 @@ export default function BaseModule({
   // DATP completed amounts for submit
   const datpCompletedForSubmit = isDATP ? datpCompletedTrenchMeters : 0;
   const datpWorkUnit = 'm';
+  // MVFT completed amounts for submit
+  const mvftCompletedForSubmit = isMVFT ? mvftCompletedTrenchMeters : 0;
+  const mvftWorkUnit = 'm';
 
   // Calculate NEW work amount (only uncommitted selections) for display in Submit button/modal
   const newWorkAmount = useMemo(() => {
@@ -11016,11 +11337,13 @@ export default function BaseModule({
     ? mvfSelectedCableMeters 
     : (isDATP
       ? datpCompletedForSubmit
-      : (isPTEP
-        ? ptepCompletedForSubmit
-        : (isMC4 
-          ? (mc4Counts?.mc4Completed || 0) 
-          : newWorkAmount))); // Use newWorkAmount for DC and similar modules
+      : (isMVFT
+        ? mvftCompletedForSubmit
+        : (isPTEP
+          ? ptepCompletedForSubmit
+          : (isMC4 
+            ? (mc4Counts?.mc4Completed || 0) 
+            : newWorkAmount)))); // Use newWorkAmount for DC and similar modules
 
   const [dwgUrl, setDwgUrl] = useState('');
   useEffect(() => {
@@ -11944,9 +12267,11 @@ export default function BaseModule({
                       ? (mvfSelectedTrenchParts.length === 0 && mvfActiveSegmentKeys.size === 0)
                       : (isDATP
                       ? datpCompletedForSubmit === 0
-                        : isPTEP
-                          ? (ptepSubMode === 'tabletotable'
-                            ? ptepCompletedTableToTable.size === 0
+                        : (isMVFT
+                        ? mvftCompletedForSubmit === 0
+                          : isPTEP
+                            ? (ptepSubMode === 'tabletotable'
+                              ? ptepCompletedTableToTable.size === 0
                             : ptepCompletedParameterMeters === 0)
                           : isLVTT
                           ? (String(lvttSubMode || 'termination') === 'testing' || lvttCompletedForSubmit === 0)
@@ -11954,7 +12279,7 @@ export default function BaseModule({
                               ? mvtCompletedForSubmit === 0
                               : isLV
                                 ? workAmount === 0
-                                : workSelectionCount === 0))
+                                : workSelectionCount === 0)))
                   }
                   className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
                   title={isMC4 && !mc4SelectionMode ? "Select MC4 Install or Cable Termination first" : "Submit Work"}
@@ -14015,6 +14340,30 @@ export default function BaseModule({
             return;
           }
 
+          // MVFT: Submit trench part selections
+          if (isMVFT) {
+            const parts = mvftSelectedTrenchPartsRef.current || [];
+            if (parts.length === 0) {
+              alert('No selections to submit.');
+              return;
+            }
+            const meters = parts.reduce((sum, p) => sum + (p?.meters || 0), 0);
+            const partIds = parts.map((p) => String(p?.id || ''));
+
+            const recordWithSelections = {
+              ...record,
+              total_cable: meters,
+              notes: notesOnDate,
+              selectedPolygonIds: partIds,
+            };
+            addRecord(recordWithSelections);
+
+            // Clear selection after submit
+            setMvftSelectedTrenchParts([]);
+            alert('Work submitted successfully!');
+            return;
+          }
+
           // PTEP: Submit table-to-table or parameter selections
           if (isPTEP) {
             const mode = ptepSubModeRef.current || 'tabletotable';
@@ -14180,32 +14529,35 @@ export default function BaseModule({
                   ? 'Cable Termination'
                   : moduleName)))}
         workAmount={isMC4
-          ? (mc4SelectionMode === 'termination'
-            ? (mc4Counts?.terminatedCompleted || 0)
-            : (mc4Counts?.mc4Completed || 0))
-          : (isDATP
+          ? mc4SelectionMode === 'termination'
+            ? mc4Counts?.terminatedCompleted || 0
+            : mc4Counts?.mc4Completed || 0
+          : isDATP
             ? datpCompletedForSubmit
-            : (isPTEP
+            : isPTEP
               ? ptepCompletedForSubmit
-              : (isMVT
+              : isMVT
                 ? mvtCompletedForSubmit
-                : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                : isLVTT && String(lvttSubMode || 'termination') === 'termination'
                   ? lvttCompletedForSubmit
-                  : workAmount)))}
+                  : workAmount
+        }
         workUnit={
           isMC4
             ? (mc4SelectionMode === 'termination' ? 'cables terminated' : 'mc4')
-            : (isDATP
+            : isDATP
               ? datpWorkUnit
-              : (isPTEP
-                ? ptepWorkUnit
-                : (isMVT
-                  ? 'cables terminated'
-                  : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-                    ? lvttWorkUnit
-                    : (activeMode?.submitWorkUnit
+              : isMVFT
+                ? mvftWorkUnit
+                : isPTEP
+                  ? ptepWorkUnit
+                  : isMVT
+                    ? 'cables terminated'
+                    : isLVTT && String(lvttSubMode || 'termination') === 'termination'
+                      ? lvttWorkUnit
+                    : activeMode?.submitWorkUnit
                       ? String(activeMode.submitWorkUnit)
-                      : (activeMode?.workUnitWeights ? 'panels' : 'm')))))
+                      : activeMode?.workUnitWeights ? 'panels' : 'm'
         }
       />
       

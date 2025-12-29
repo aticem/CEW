@@ -142,7 +142,7 @@ export const MV_FIBER_MODULE_CONFIG = {
 
 export const MV_FIBRE_TRENCH_PROGRESS_TRACKING_CONFIG = {
   key: 'MVFT',
-  label: 'MV+FIBRE_TRENCH_PROGRESS_TRACKING',
+  label: 'MV&FIBRE TRENCH PROGRESS',
   // Files live in: public/MV+FIBRE_TRENCH_PROGRESS_TRACKING/
   // This scaffold is GeoJSON-only by default (no CSV required).
   csvFormat: null,
@@ -166,10 +166,19 @@ export const MV_FIBRE_TRENCH_PROGRESS_TRACKING_CONFIG = {
   stringTextMaxFontSize: 26,
   stringTextRefZoom: 20,
   geojsonFiles: [
-    { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
-    { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/mv_trench.geojson', name: 'mv_trench', color: '#eab308', fillColor: '#facc15' },
+    { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6', interactive: false },
+    { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/mv_trench.geojson', name: 'trench', color: '#eab308', fillColor: '#facc15' },
     { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/subs.geojson', name: 'subs', color: '#94a3b8', fillColor: '#94a3b8' },
     { url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/subs_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
+    {
+      url: '/MV+FIBRE_TRENCH_PROGRESS_TRACKING/boundry.geojson',
+      name: 'boundry',
+      color: 'rgba(239, 68, 68, 0.7)',
+      fillColor: 'transparent',
+      weight: 1.2,
+      fillOpacity: 0,
+      interactive: false,
+    },
   ],
 };
 

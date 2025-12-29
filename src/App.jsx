@@ -20,7 +20,7 @@ const MODULES = {
   DC: { key: 'DC', label: 'DC Cable Pulling Progress', Component: DCModule },
   LV: { key: 'LV', label: 'LV Cable Pulling Progress', Component: LVModule },
   MVF: { key: 'MVF', label: 'MV Cable Pulling Progress', Component: MVFiberModule },
-  MVFT: { key: 'MVFT', label: 'MV+Fibre Trench Progress', Component: MVFiberTrenchProgressTrackingModule },
+  MVFT: { key: 'MVFT', label: 'MV&Fibre Trench Progress', Component: MVFiberTrenchProgressTrackingModule },
   FIB: { key: 'FIB', label: 'Fibre Pulling Progress', Component: FibreModule },
   MC4: { key: 'MC4', label: 'MC4 Installation', Component: MC4Module },
   MVT: { key: 'MVT', label: 'MV Termination Progress', Component: MVTerminationModule },
