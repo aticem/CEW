@@ -14,3 +14,8 @@ html, body, #root {
 body {
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
 }
+
+/* Force classic arrow cursor everywhere */
+*, *::before, *::after {
+  cursor: default !important;
+}

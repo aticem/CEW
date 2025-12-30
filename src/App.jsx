@@ -22,9 +22,9 @@ const MODULES = {
   MVF: { key: 'MVF', label: 'MV Cable Pulling Progress', Component: MVFiberModule },
   MVFT: { key: 'MVFT', label: 'MV&Fibre Trench Progress', Component: MVFiberTrenchProgressTrackingModule },
   FIB: { key: 'FIB', label: 'Fibre Pulling Progress', Component: FibreModule },
-  MC4: { key: 'MC4', label: 'MC4 Installation', Component: MC4Module },
-  MVT: { key: 'MVT', label: 'MV Termination Progress', Component: MVTerminationModule },
-  LVTT: { key: 'LVTT', label: 'LV Termination & Testing', Component: LVTerminationTestingModule },
+  MC4: { key: 'MC4', label: 'MC4 Installation & DC Termination Progress', Component: MC4Module },
+  MVT: { key: 'MVT', label: 'MV Termination & Testing Progress', Component: MVTerminationModule },
+  LVTT: { key: 'LVTT', label: 'LV Termination & Testing Progress', Component: LVTerminationTestingModule },
   DCCT: { key: 'DCCT', label: 'DC Cable Testing Progress', Component: DCCableTestingProgressModule },
   MIPT: { key: 'MIPT', label: 'Module Installation Progress', Component: ModuleInstallationProgressTrackingModule },
   TIP: { key: 'TIP', label: 'Table Installation Progress', Component: TableInstallationProgressModule },
@@ -104,7 +104,7 @@ export default function App() {
 
       {/* Mode button (left) - hidden for QAQC module */}
       {activeKey !== 'QAQC' && (
-      <div className="fixed left-3 sm:left-5 top-[102px] z-[1200]" ref={menuRef}>
+      <div className="fixed left-3 sm:left-5 top-[calc(var(--cewHeaderH,92px)+8px)] z-[1200]" ref={menuRef}>
         <div className="relative">
           <button
             type="button"
@@ -122,14 +122,12 @@ export default function App() {
 
           {menuOpen && (
             <div className="absolute left-0 mt-2 w-72 max-h-[70vh] overflow-y-auto border-2 border-slate-700 bg-slate-900 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
-              {Object.values(MODULES).map((m, idx) => (
+              {Object.values(MODULES).map((m) => (
                 <a
                   key={m.key}
                   href={buildModuleHref(m.key)}
                   onClick={(e) => handleModuleNavigate(e, m.key)}
-                  className={`block w-full px-3 py-2.5 text-left text-[11px] font-medium tracking-wide ${
-                    idx === 0 ? 'border-b border-slate-700/50' : ''
-                  } ${activeKey === m.key ? 'bg-amber-500 text-black' : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+                  className={`block w-full px-3 py-2.5 text-left text-[11px] font-medium tracking-wide ${activeKey === m.key ? 'bg-amber-500 text-black' : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white'}`}
                 >
                   {m.label}
                 </a>
@@ -146,14 +144,12 @@ export default function App() {
           ref={menuRef}
           className="fixed left-3 top-[42px] z-[1300] w-72 max-h-[70vh] overflow-y-auto border-2 border-slate-700 bg-slate-900 shadow-[0_10px_26px_rgba(0,0,0,0.55)]"
         >
-          {Object.values(MODULES).map((m, idx) => (
+          {Object.values(MODULES).map((m) => (
             <a
               key={m.key}
               href={buildModuleHref(m.key)}
               onClick={(e) => handleModuleNavigate(e, m.key)}
-              className={`block w-full px-3 py-2.5 text-left text-[11px] font-medium tracking-wide ${
-                idx === 0 ? 'border-b border-slate-700/50' : ''
-              } ${activeKey === m.key ? 'bg-amber-500 text-black' : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+              className={`block w-full px-3 py-2.5 text-left text-[11px] font-medium tracking-wide ${activeKey === m.key ? 'bg-amber-500 text-black' : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white'}`}
             >
               {m.label}
             </a>

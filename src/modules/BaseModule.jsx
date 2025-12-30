@@ -5,6 +5,7 @@ import '../App.css';
 import SubmitModal from '../components/SubmitModal';
 import useDailyLog from '../hooks/useDailyLog';
 import { useChartExport } from '../hooks/useChartExport';
+import Papa from 'papaparse';
 import {
   asLineStrings,
   mergeIntervals,
@@ -316,10 +317,19 @@ export default function BaseModule({
   customPanelLogic: _customPanelLogic = null,
   customBoundaryLogic = null,
 }) {
-  const activeMode = customBoundaryLogic ? customBoundaryLogic(moduleConfig) : moduleConfig;
-  const moduleName = name || activeMode?.label || 'MODULE';
-  const showCounters = Boolean(counters);
+  // Global status line used across module load/parsing flows.
+  const [status, setStatus] = useState('Loading...');
+
+  // In this codebase, each module passes a single immutable config object.
+  // Historically we called this the "activeMode".
+  const activeMode = moduleConfig || {};
+  const moduleName = name || activeMode?.label || activeMode?.key || 'Module';
+
+  // Whether to show counter UI in header
+  const showCounters = counters;
+
   const isLV = String(activeMode?.key || '').toUpperCase() === 'LV';
+  const isFIB = String(activeMode?.key || '').toUpperCase() === 'FIB';
   // DC Cable Pulling Progress mode
   const isDC = String(activeMode?.key || '').toUpperCase() === 'DC';
   // Treat any module with mvf-style CSV/logic as MVF-mode (e.g., MV + FIBRE modules).
@@ -332,6 +342,10 @@ export default function BaseModule({
   const isPTEP = String(activeMode?.key || '').toUpperCase() === 'PTEP' || Boolean(activeMode?.earthingMode);
   // DC Cable Testing Progress mode
   const isDCCT = String(activeMode?.key || '').toUpperCase() === 'DCCT' || Boolean(activeMode?.dcctMode);
+  const isMVTRef = useRef(isMVT);
+  useEffect(() => {
+    isMVTRef.current = isMVT;
+  }, [isMVT]);
   const isDCCTRef = useRef(isDCCT);
   useEffect(() => {
     isDCCTRef.current = isDCCT;
@@ -344,6 +358,26 @@ export default function BaseModule({
   const isDATP = String(activeMode?.key || '').toUpperCase() === 'DATP';
   // MV&FIBRE TRENCH PROGRESS mode
   const isMVFT = String(activeMode?.key || '').toUpperCase() === 'MVFT';
+
+  // ─────────────────────────────────────────────────────────────
+  // GENERIC POLYGON SELECTION (shared across many modules)
+  // ─────────────────────────────────────────────────────────────
+  const [selectedPolygons, setSelectedPolygons] = useState(() => new Set());
+  const selectedPolygonsRef = useRef(selectedPolygons);
+  useEffect(() => {
+    selectedPolygonsRef.current = selectedPolygons;
+  }, [selectedPolygons]);
+
+  // "Committed" (submitted) polygon selections. Many modules lock these until history deletion.
+  const [committedPolygons, setCommittedPolygons] = useState(() => new Set());
+  const committedPolygonsRef = useRef(committedPolygons);
+  useEffect(() => {
+    committedPolygonsRef.current = committedPolygons;
+  }, [committedPolygons]);
+
+  // CSV-derived length lookup used by LV/DC/MC4/MVF counters and history editing meters.
+  // Shape varies by module, but generally: idNorm -> { plus?: number[], minus?: number[], total?: number }
+  const [lengthData, setLengthData] = useState(() => ({}));
 
   const datpTrenchLineColor = isDATP
     ? (activeMode?.geojsonFiles || []).find((f) => String(f?.name || '').toLowerCase() === 'trench')?.color || '#3b82f6'
@@ -393,6 +427,13 @@ export default function BaseModule({
     ? (stringTextUserOn ? 'always' : 'none')
     : (activeMode?.stringTextVisibility || 'always'); // 'always' | 'hover' | 'cursor' | 'none'
 
+  // String-text points used for hit-testing and drag-selection (populated after string_text is loaded).
+  const [stringPoints, setStringPoints] = useState(() => []);
+  const stringPointsRef = useRef(stringPoints);
+  useEffect(() => {
+    stringPointsRef.current = stringPoints;
+  }, [stringPoints]);
+
   // Module-configurable string_text label styling (used by MVF subs_text and others)
   const stringTextBaseSizeCfg =
     typeof activeMode?.stringTextBaseSize === 'number' ? activeMode.stringTextBaseSize : 11;
@@ -412,6 +453,37 @@ export default function BaseModule({
     typeof activeMode?.stringTextMaxFontSize === 'number' ? activeMode.stringTextMaxFontSize : null;
   const stringTextRefZoomCfg =
     typeof activeMode?.stringTextRefZoom === 'number' ? activeMode.stringTextRefZoom : 20;
+
+  // Expose current header height for App-level positioning (e.g., hamburger button).
+  // Header height varies by module/counters, so we keep this dynamic.
+  useEffect(() => {
+    const el = headerBarRef.current;
+    if (!el) return;
+
+    const setVar = () => {
+      try {
+        const h = el.getBoundingClientRect().height;
+        const px = `${Math.round(h)}px`;
+        document.documentElement.style.setProperty('--cewHeaderH', px);
+      } catch (_e) {
+        void _e;
+      }
+    };
+
+    setVar();
+    let ro = null;
+    try {
+      ro = new ResizeObserver(() => setVar());
+      ro.observe(el);
+    } catch (_e) {
+      void _e;
+    }
+    window.addEventListener('resize', setVar);
+    return () => {
+      window.removeEventListener('resize', setVar);
+      if (ro) ro.disconnect();
+    };
+  }, []);
 
   // Keep current visibility in refs so Leaflet event handlers never call stale closures.
   const effectiveStringTextVisibilityRef = useRef(effectiveStringTextVisibility);
@@ -448,6 +520,7 @@ export default function BaseModule({
   }, [_customPanelLogic, moduleName, activeMode]);
 
   const mapRef = useRef(null);
+  const headerBarRef = useRef(null);
   const [mapReady, setMapReady] = useState(false);
   const stringTextRendererRef = useRef(null); // dedicated canvas renderer for string_text to avoid ghosting
   const lvttInvIdRendererRef = useRef(null); // dedicated canvas renderer for LVTT inv_id labels to avoid overlap when switching modes
@@ -458,21 +531,76 @@ export default function BaseModule({
   const polygonIdCounter = useRef(0); // Counter for unique polygon IDs
   const polygonById = useRef({}); // uniqueId -> {layer, stringId}
   const prevHistoryHighlightRef = useRef(new Set()); // Track previously highlighted history polygons
+  const mvtHistoryHighlightStationSetRef = useRef(new Set()); // stationNorms highlighted by history selection (MVT termination)
                 const boxRectRef = useRef(null);
   const draggingRef = useRef(null);
   const rafRef = useRef(null);
   const stringTextPointsRef = useRef([]); // [{lat,lng,text,angle,stringId}]
   const stringTextLayerRef = useRef(null); // L.LayerGroup
-  // MVT: separate interactive layer for clickable "TESTED" labels (must not be in pointerEvents:none pane).
-  const mvtTestedLayerRef = useRef(null); // L.LayerGroup
-  const mvtTestedLabelPoolRef = useRef([]); // L.TextLabel[]
-  const mvtTestedLabelActiveCountRef = useRef(0);
+  // MVT: cache SS/SUB station label points for reliable MV_TESTING click hit-testing.
+  const mvtStationPointsRef = useRef([]); // [{lat,lng,stationKey,stationLabel}]
   // MVT: separate interactive layer for clickable termination counters (0/3..3/3).
   const mvtCounterLayerRef = useRef(null); // L.LayerGroup
   const mvtCounterLabelPoolRef = useRef([]); // L.TextLabel[]
   const mvtCounterLabelActiveCountRef = useRef(0);
   const mvtTestCsvByFromRef = useRef({}); // fromNorm -> { L1: 'PASS'|'FAIL'|..., L2, L3 }
-  const mvtTerminationByStationRef = useRef({}); // ssNorm -> 0..3
+  const mvtTerminationByStationRef = useRef({}); // stationNorm -> 0..max (per station)
+
+  // MVT termination: station-specific max counts
+  // SUB1-3 => max 3, SUB4-6 => max 6, CSS => max 9
+  const mvtCanonicalTerminationStationNorm = (rawNorm) => {
+    const norm = normalizeId(rawNorm);
+    if (!norm) return '';
+    if (norm === 'css') return 'css';
+    const m = norm.match(/^(ss|sub)(\d{1,2})$/i);
+    if (!m) return norm;
+    const prefix = String(m[1] || '').toLowerCase();
+    const nn = String(parseInt(m[2], 10)).padStart(2, '0');
+    return `${prefix}${nn}`;
+  };
+  const isMvtTerminationStationNorm = (stationNorm) => {
+    const norm = mvtCanonicalTerminationStationNorm(stationNorm);
+    if (norm === 'css') return true;
+    const m = norm.match(/^(ss|sub)(\d{2})$/i);
+    if (!m) return false;
+    const n = parseInt(m[2], 10);
+    return Number.isFinite(n) && n >= 1 && n <= 6;
+  };
+  const mvtTerminationMaxForNorm = (stationNorm) => {
+    const norm = mvtCanonicalTerminationStationNorm(stationNorm);
+    if (!isMvtTerminationStationNorm(norm)) return 0;
+    if (norm === 'css') return 9;
+    const m = norm.match(/^(ss|sub)(\d{2})$/i);
+    const n = m ? parseInt(m[2], 10) : 0;
+    if (n >= 1 && n <= 3) return 3;
+    if (n >= 4 && n <= 6) return 6;
+    return 0;
+  };
+  const clampMvtTerminationCount = (stationNorm, value) => {
+    const max = mvtTerminationMaxForNorm(stationNorm);
+    if (!max) return 0;
+    return Math.max(0, Math.min(max, Number(value) || 0));
+  };
+  // MVT: sub-mode selector (single module with two internal modes)
+  const [mvtSubMode, setMvtSubMode] = useState(() => {
+    try {
+      const raw = localStorage.getItem('cew:mvt:submode');
+      const v = String(raw || '').toLowerCase();
+      return v === 'testing' ? 'testing' : 'termination';
+    } catch (_e) {
+      void _e;
+      return 'termination';
+    }
+  }); // 'termination' | 'testing'
+  const mvtSubModeRef = useRef(mvtSubMode);
+  useEffect(() => {
+    mvtSubModeRef.current = mvtSubMode;
+    try {
+      localStorage.setItem('cew:mvt:submode', String(mvtSubMode || 'termination'));
+    } catch (_e) {
+      void _e;
+    }
+  }, [mvtSubMode]);
   // LVTT: LV Termination & Testing mode - CSV data by inverter ID
   const lvttTestCsvByInvRef = useRef({}); // invNorm -> { L1: {value, status}, L2: {value, status}, L3: {value, status} }
   const lvttInvMetaByNormRef = useRef({}); // invNorm -> { lat, lng, angle, raw, displayId }
@@ -517,6 +645,9 @@ export default function BaseModule({
   // DCCT: Full CSV values per ID (for click-to-show overlays)
   // { [normalizedId]: { plus: string, minus: string, status: 'passed'|'failed'|null, remarkRaw: string } }
   const dcctRisoByIdRef = useRef({});
+  // DCCT: Preserve original CSV row ordering (and duplicates) for Export parity with dc_riso.csv
+  // rows: [{ originalId: string, idNorm: string }]
+  const dcctRowsRef = useRef([]);
   // DCCT: overlay labels for clicked tables
   const dcctOverlayLayerRef = useRef(null); // L.LayerGroup
   const dcctOverlayLabelsByIdRef = useRef({}); // normalizedId -> L.TextLabel
@@ -534,6 +665,10 @@ export default function BaseModule({
   }, [dcctFilter]);
   // DCCT: CSV totals
   const [dcctCsvTotals, setDcctCsvTotals] = useState(() => ({ total: 0, passed: 0, failed: 0 }));
+  const [dcctTestResultsDirty, setDcctTestResultsDirty] = useState(false);
+  const dcctTestResultsSubmittedRef = useRef(null); // { risoById, updatedAt, source } | null
+  const dcctTestImportFileInputRef = useRef(null);
+  const [dcctPopup, setDcctPopup] = useState(null); // { idNorm, displayId, draftPlus, draftMinus, draftStatus, x, y } | null
 
   const dcctClearTestOverlays = useCallback(() => {
     try {
@@ -545,303 +680,208 @@ export default function BaseModule({
     dcctOverlayLabelsByIdRef.current = {};
   }, []);
 
-  // DCCT: Track open popups by idNorm
-  const dcctOpenPopupsRef = useRef({}); // idNorm -> L.Popup
-  // DCCT: Hidden file input ref for CSV import
-  const dcctFileInputRef = useRef(null);
+  const dcctNormalizeStatus = (raw) => {
+    const v = String(raw || '').trim().toLowerCase();
+    if (v === 'passed' || v === 'pass') return 'passed';
+    if (v === 'failed' || v === 'fail') return 'failed';
+    return null;
+  };
 
-  // DCCT: Save popup changes to state (called when popup is closed)
-  const dcctSavePopupChanges = useCallback((idNorm, popupContent) => {
-    if (!idNorm || !popupContent) return;
-    
-    const plusInput = popupContent.querySelector('input[data-field="plus"]');
-    const minusInput = popupContent.querySelector('input[data-field="minus"]');
-    const statusSelect = popupContent.querySelector('select[data-field="status"]');
-    
-    const newPlus = plusInput?.value?.trim() || '0';
-    const newMinus = minusInput?.value?.trim() || '0';
-    const newStatus = statusSelect?.value || 'not_tested';
-    
-    // Update dcctRisoByIdRef - preserve originalId if it exists
-    const risoData = dcctRisoByIdRef.current || {};
-    const existingRec = risoData[idNorm] || {};
-    risoData[idNorm] = {
-      plus: newPlus,
-      minus: newMinus,
-      status: newStatus === 'not_tested' ? null : newStatus,
-      remarkRaw: newStatus === 'passed' ? 'PASSED' : newStatus === 'failed' ? 'FAILED' : '',
-      originalId: existingRec.originalId || idNorm.toUpperCase().replace(/TX(\d+)INV(\d+)STR(\d+)/i, 'TX$1-INV$2-STR$3'),
-    };
-    dcctRisoByIdRef.current = risoData;
-    
-    // Update dcctTestData state to trigger re-render and color update
-    setDcctTestData((prev) => {
-      const next = { ...prev };
-      if (newStatus === 'passed') {
-        next[idNorm] = 'passed';
-      } else if (newStatus === 'failed') {
-        next[idNorm] = 'failed';
-      } else {
-        delete next[idNorm];
-      }
-      return next;
-    });
-    
-    // Trigger map update for table colors
-    setStringMatchVersion((v) => v + 1);
+  const dcctNormalizeId = useCallback((raw) => {
+    const rawText = String(raw ?? '').replace(/^\uFEFF/, '').trim();
+    if (!rawText) return '';
+    const compact = rawText.replace(/\s+/g, '').replace(/^['\"]+|['\"]+$/g, '');
+    const low = compact.toLowerCase();
+
+    // Canonicalize the common DCCT key shapes:
+    // - TX2-INV1-STR1
+    // - TX2_INV1_STR1
+    // - TX2INV1STR1
+    const m = low.match(/^tx(\d+)[_\-]?inv(\d+)[_\-]?str(\d+)$/i) || low.match(/tx(\d+).*inv(\d+).*str(\d+)/i);
+    if (m) return `tx${m[1]}-inv${m[2]}-str${m[3]}`;
+
+    return normalizeId(rawText);
   }, []);
 
-  const dcctToggleTestOverlay = useCallback((idNorm, latlng) => {
-    const map = mapRef.current;
-    if (!map || !idNorm || !latlng) return;
+  const dcctFormatDisplayId = (idNorm, recOriginalId) => {
+    const original = String(recOriginalId || '').trim();
+    if (original) return original;
+    return String(idNorm || '')
+      .toUpperCase()
+      .replace(/TX(\d+)INV(\d+)STR(\d+)/i, 'TX$1-INV$2-STR$3');
+  };
 
-    const openPopups = dcctOpenPopupsRef.current || {};
-    const existingPopup = openPopups[idNorm];
-
-    // If popup exists and is open, close it (toggle off)
-    if (existingPopup) {
-      try {
-        // Save changes before closing
-        const content = existingPopup.getContent();
-        if (content instanceof HTMLElement) {
-          dcctSavePopupChanges(idNorm, content);
-        }
-        map.closePopup(existingPopup);
-      } catch (_e) {
-        void _e;
-      }
-      delete openPopups[idNorm];
-      dcctOpenPopupsRef.current = openPopups;
-      return;
-    }
-
-    // Get test data from CSV or state
-    const rec = dcctRisoByIdRef.current?.[idNorm] || null;
-    // Check if ID is in map but not in CSV (not_tested) - use 0 as default
-    const isInCsv = rec !== null;
-    const plus = rec?.plus != null ? String(rec.plus).trim() : '';
-    const minus = rec?.minus != null ? String(rec.minus).trim() : '';
-    const status = rec?.status || 'not_tested'; // 'passed', 'failed', 'not_tested'
-
-    // For items not in CSV, default to 0; for items in CSV with no value, use 999
-    const plusVal = plus || (isInCsv ? '999' : '0');
-    const minusVal = minus || (isInCsv ? '999' : '0');
-
-    // Status colors
-    const passColor = '#059669';
-    const failColor = '#dc2626';
-    const naColor = '#64748b';
-    const statusColor = status === 'passed' ? passColor : status === 'failed' ? failColor : naColor;
-
-    // Create editable HTML content
-    const popupContent = document.createElement('div');
-    popupContent.style.cssText = `
-      font-family: sans-serif;
-      font-size: 13px;
-      font-weight: 600;
-      color: #10b981;
-      min-width: 160px;
-      user-select: none;
-    `;
-    popupContent.innerHTML = `
-      <div style="display: flex; flex-direction: column; gap: 6px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-          <span style="color: #10b981;">Ins. Res (+):</span>
-          <input type="text" value="${plusVal}" 
-            style="width: 50px; background: #1e293b; border: 1px solid #334155; border-radius: 4px; 
-                   color: #10b981; font-weight: 600; font-size: 13px; padding: 2px 6px; text-align: right;"
-            data-field="plus" />
-        </div>
-        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-          <span style="color: #10b981;">Ins. Res (-):</span>
-          <input type="text" value="${minusVal}"
-            style="width: 50px; background: #1e293b; border: 1px solid #334155; border-radius: 4px;
-                   color: #10b981; font-weight: 600; font-size: 13px; padding: 2px 6px; text-align: right;"
-            data-field="minus" />
-        </div>
-        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; padding-top: 6px; border-top: 1px solid #334155;">
-          <span style="color: ${statusColor};">Status:</span>
-          <select data-field="status"
-            style="background: #1e293b; border: 1px solid #334155; border-radius: 4px;
-                   color: ${statusColor}; font-weight: 600; font-size: 12px; padding: 2px 6px; cursor: pointer;">
-            <option value="passed" ${status === 'passed' ? 'selected' : ''} style="color: ${passColor};">PASSED</option>
-            <option value="failed" ${status === 'failed' ? 'selected' : ''} style="color: ${failColor};">FAILED</option>
-            <option value="not_tested" ${status === 'not_tested' || !status ? 'selected' : ''} style="color: ${naColor};">N/A</option>
-          </select>
-        </div>
-      </div>
-    `;
-
-    // Add event listeners for changes
-    const selectEl = popupContent.querySelector('select[data-field="status"]');
-    if (selectEl) {
-      selectEl.addEventListener('change', (e) => {
-        const newStatus = e.target.value;
-        const newColor = newStatus === 'passed' ? passColor : newStatus === 'failed' ? failColor : naColor;
-        e.target.style.color = newColor;
-        // Update the label span color too
-        const labelSpan = e.target.parentElement?.querySelector('span');
-        if (labelSpan) labelSpan.style.color = newColor;
-      });
-    }
-
-    // Create popup
-    const popup = L.popup({
-      closeButton: true,
-      autoClose: false,
-      closeOnEscapeKey: true,
-      closeOnClick: false,
-      className: 'dcct-test-popup',
-      maxWidth: 250,
-      minWidth: 160,
-    })
-      .setLatLng(latlng)
-      .setContent(popupContent);
-
-    // Track popup close event - save changes when popup is removed
-    popup.on('remove', () => {
-      // Save changes before removing from tracking
-      const content = popup.getContent();
-      if (content instanceof HTMLElement) {
-        dcctSavePopupChanges(idNorm, content);
-      }
-      const pops = dcctOpenPopupsRef.current || {};
-      delete pops[idNorm];
-      dcctOpenPopupsRef.current = pops;
-    });
-
-    // Open popup and track it
-    popup.openOn(map);
-    openPopups[idNorm] = popup;
-    dcctOpenPopupsRef.current = openPopups;
-
-  }, [dcctSavePopupChanges]);
-
-  // Clear DCCT popups when switching modules
-  const dcctClearAllPopups = useCallback(() => {
-    const map = mapRef.current;
-    const openPopups = dcctOpenPopupsRef.current || {};
-    Object.values(openPopups).forEach((popup) => {
-      try {
-        if (map) map.closePopup(popup);
-      } catch (_e) {
-        void _e;
-      }
-    });
-    dcctOpenPopupsRef.current = {};
-  }, []);
-
-  // DCCT: Import CSV file
-  const dcctImportCsv = useCallback((file) => {
-    if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const text = e.target?.result;
-        if (typeof text !== 'string') return;
-        
-        const lines = text.split(/\r?\n/).filter((l) => l && l.trim());
-        if (lines.length <= 1) {
-          setDcctTestData({});
-          setDcctCsvTotals({ total: 0, passed: 0, failed: 0 });
-          dcctRisoByIdRef.current = {};
-          setStringMatchVersion((v) => v + 1);
-          return;
-        }
-
-        const header = (lines[0] || '').split(',').map((h) => h.trim().toLowerCase());
-        const idIdx = header.findIndex((h) => h === 'id');
-        const remarkIdx = header.findIndex((h) => h === 'remark');
-        const minusIdx = header.findIndex((h) => h.includes('insulation') && h.includes('(-'));
-        const plusIdx = header.findIndex((h) => h.includes('insulation') && h.includes('(+)'));
-
-        const testResults = {}; // normalizedId -> 'passed' | 'failed'
-        const risoById = {}; // normalizedId -> { plus, minus, status, remarkRaw, originalId }
-        let passedCount = 0;
-        let failedCount = 0;
-        const uniqueIds = new Set();
-
-        for (let i = 1; i < lines.length; i++) {
-          const line = lines[i];
-          if (!line || !line.trim()) continue;
-          const parts = line.split(',');
-          const rawId = idIdx >= 0 ? parts[idIdx] : parts[0];
-          const rawRemark = remarkIdx >= 0 ? parts[remarkIdx] : parts[parts.length - 1];
-          const rawMinus = minusIdx >= 0 ? parts[minusIdx] : (parts.length >= 2 ? parts[1] : '');
-          const rawPlus = plusIdx >= 0 ? parts[plusIdx] : (parts.length >= 3 ? parts[2] : '');
-
-          const id = normalizeId(rawId);
-          const originalId = String(rawId || '').trim(); // Preserve original format
-          const remarkRaw = String(rawRemark || '').trim();
-          const remark = remarkRaw.toLowerCase();
-
-          if (!id) continue;
-
-          // Only count unique IDs for totals
-          if (!uniqueIds.has(id)) {
-            uniqueIds.add(id);
-            // Determine test result (use first occurrence if duplicate rows exist)
-            let status = null;
-            if (remark === 'passed' || remark === 'pass') {
-              status = 'passed';
-              testResults[id] = 'passed';
-              passedCount++;
-            } else if (remark === 'failed' || remark === 'fail') {
-              status = 'failed';
-              testResults[id] = 'failed';
-              failedCount++;
-            }
-
-            risoById[id] = {
-              plus: String(rawPlus ?? '').trim(),
-              minus: String(rawMinus ?? '').trim(),
-              status,
-              remarkRaw,
-              originalId,
-            };
-          }
-        }
-
-        setDcctTestData(testResults);
-        dcctRisoByIdRef.current = risoById;
-        setDcctCsvTotals({
-          total: uniqueIds.size,
-          passed: passedCount,
-          failed: failedCount,
-        });
-        
-        // Trigger map update for table colors
-        setStringMatchVersion((v) => v + 1);
-        
-      } catch (err) {
-        console.error('Error parsing imported CSV:', err);
-      }
-    };
-    reader.readAsText(file);
-  }, []);
-
-  // DCCT: Export CSV file with current state
-  const dcctExportCsv = useCallback(() => {
+  const dcctImportTestResultsFromText = useCallback((text, source = 'import') => {
     try {
-      const risoData = dcctRisoByIdRef.current || {};
+      // Clear transient UI state so the user immediately sees the imported data.
+      setDcctFilter(null);
+      dcctClearTestOverlays();
+
+      const cleaned = String(text || '').replace(/^\uFEFF/, '');
+      const parsed = Papa.parse(cleaned, {
+        header: false,
+        skipEmptyLines: true,
+        delimiter: '',
+      });
+
+      const rowsArr = Array.isArray(parsed?.data) ? parsed.data : [];
+      if (rowsArr.length <= 1) {
+        setDcctTestData({});
+        setDcctCsvTotals({ total: 0, passed: 0, failed: 0 });
+        dcctRisoByIdRef.current = {};
+        dcctRowsRef.current = [];
+        setDcctTestResultsDirty(true);
+        dcctTestResultsSubmittedRef.current = null;
+        try { localStorage.removeItem('cew:dcct:test_results_submitted'); } catch (_e) { void _e; }
+        setDcctPopup(null);
+        setStringMatchVersion((v) => v + 1);
+        return;
+      }
+
+      const headerRow = Array.isArray(rowsArr[0]) ? rowsArr[0] : [];
+      const header = headerRow.map((h) => String(h ?? '').trim().toLowerCase());
+      const idIdx = header.findIndex((h) => h === 'id' || h.includes('id'));
+      const remarkIdx = header.findIndex((h) => h === 'remark' || h.includes('remark') || h.includes('status') || h.includes('result'));
+      const minusIdx = header.findIndex((h) => h.includes('insulation') && (h.includes('(-') || h.includes('-)')));
+      const plusIdx = header.findIndex((h) => h.includes('insulation') && (h.includes('(+)') || h.includes('+)')));
+
+      const risoById = {}; // normalizedId -> { plus, minus, status, remarkRaw, originalId }
+      const rows = []; // preserve duplicates + original order
+
+      for (let i = 1; i < rowsArr.length; i++) {
+        const parts = Array.isArray(rowsArr[i]) ? rowsArr[i] : [];
+        if (parts.length === 0) continue;
+        const rawId = idIdx >= 0 ? parts[idIdx] : parts[0];
+        const rawRemark = remarkIdx >= 0 ? parts[remarkIdx] : parts[parts.length - 1];
+        const rawMinus = minusIdx >= 0 ? parts[minusIdx] : (parts.length >= 2 ? parts[1] : '');
+        const rawPlus = plusIdx >= 0 ? parts[plusIdx] : (parts.length >= 3 ? parts[2] : '');
+
+        const id = dcctNormalizeId(rawId);
+        const originalId = String(rawId || '').trim();
+        const remarkRaw = String(rawRemark || '').trim();
+
+        if (!id) continue;
+        rows.push({ originalId, idNorm: id });
+
+        const nextPlus = String(rawPlus ?? '').trim();
+        const nextMinus = String(rawMinus ?? '').trim();
+        const nextStatus = dcctNormalizeStatus(remarkRaw);
+
+        const prev = risoById[id];
+        if (!prev) {
+          risoById[id] = {
+            plus: nextPlus,
+            minus: nextMinus,
+            status: nextStatus,
+            remarkRaw,
+            originalId,
+          };
+        } else {
+          // Prefer existing originalId (first occurrence), but fill missing values if needed.
+          const merged = {
+            ...prev,
+            plus: prev.plus && String(prev.plus).trim() !== '' ? prev.plus : nextPlus,
+            minus: prev.minus && String(prev.minus).trim() !== '' ? prev.minus : nextMinus,
+            status: prev.status != null ? prev.status : nextStatus,
+            remarkRaw: prev.remarkRaw && String(prev.remarkRaw).trim() !== '' ? prev.remarkRaw : remarkRaw,
+          };
+          risoById[id] = merged;
+        }
+      }
+
+      const testResults = {}; // normalizedId -> 'passed' | 'failed'
+      let passedCount = 0;
+      let failedCount = 0;
+      Object.keys(risoById || {}).forEach((id) => {
+        const st = dcctNormalizeStatus(risoById[id]?.status || risoById[id]?.remarkRaw);
+        if (st === 'passed') {
+          testResults[id] = 'passed';
+          passedCount++;
+        } else if (st === 'failed') {
+          testResults[id] = 'failed';
+          failedCount++;
+        }
+      });
+
+      setDcctTestData(testResults);
+      dcctRisoByIdRef.current = risoById;
+      dcctRowsRef.current = rows;
+      setDcctCsvTotals({ total: Object.keys(risoById || {}).length, passed: passedCount, failed: failedCount });
+
+      setDcctTestResultsDirty(true);
+      dcctTestResultsSubmittedRef.current = null;
+      try { localStorage.removeItem('cew:dcct:test_results_submitted'); } catch (_e) { void _e; }
+
+      setDcctPopup(null);
+      setStringMatchVersion((v) => v + 1);
+      void source;
+    } catch (err) {
+      console.error('Error parsing imported DCCT CSV:', err);
+    }
+  }, [dcctClearTestOverlays, dcctNormalizeId]);
+
+  const dcctSubmitTestResults = useCallback(() => {
+    if (!isDCCT) return;
+    if (!dcctTestResultsDirty) return;
+    const payload = {
+      risoById: { ...(dcctRisoByIdRef.current || {}) },
+      rows: Array.isArray(dcctRowsRef.current) ? dcctRowsRef.current : [],
+      updatedAt: Date.now(),
+      source: 'submit',
+    };
+    dcctTestResultsSubmittedRef.current = payload;
+    try {
+      localStorage.setItem('cew:dcct:test_results_submitted', JSON.stringify(payload));
+    } catch (_e) {
+      void _e;
+    }
+    setDcctTestResultsDirty(false);
+  }, [isDCCT, dcctTestResultsDirty]);
+
+  const dcctExportTestResultsCsv = useCallback(() => {
+    try {
+      if (dcctTestResultsDirty) return;
+      let submitted = dcctTestResultsSubmittedRef.current;
+      if (!submitted) {
+        try {
+          const raw = localStorage.getItem('cew:dcct:test_results_submitted');
+          if (raw) submitted = JSON.parse(raw);
+        } catch (_e) {
+          void _e;
+        }
+      }
+      const risoData = (submitted && typeof submitted === 'object') ? (submitted.risoById || {}) : {};
+      const submittedRows = (submitted && typeof submitted === 'object' && Array.isArray(submitted.rows)) ? submitted.rows : [];
       const mapIds = dcctMapIdsRef.current || new Set();
-      
-      // Collect all IDs: from CSV data + from map
-      const allIds = new Set([...Object.keys(risoData), ...mapIds]);
-      
-      // Build CSV content
+
       const header = 'ID,Insulation Resistance (-),Insulation Resistance (+),remark';
       const rows = [header];
-      
-      // Sort IDs for consistent output
-      const sortedIds = Array.from(allIds).sort((a, b) => {
-        // Try to parse TX-INV-STR format for better sorting
+
+      const pushed = new Set(); // idNorms present in submittedRows
+      if (submittedRows.length > 0) {
+        for (const row of submittedRows) {
+          const originalId = String(row?.originalId || '').trim();
+          const idNorm = row?.idNorm ? String(row.idNorm) : dcctNormalizeId(originalId);
+          if (!idNorm) continue;
+          pushed.add(idNorm);
+
+          const rec = risoData[idNorm] || {};
+          const displayId = originalId || dcctFormatDisplayId(idNorm, rec.originalId);
+          const minus = (rec.minus != null && String(rec.minus).trim() !== '') ? String(rec.minus).trim() : '0';
+          const plus = (rec.plus != null && String(rec.plus).trim() !== '') ? String(rec.plus).trim() : '0';
+          const status = dcctNormalizeStatus(rec.status || rec.remarkRaw);
+          const remark = status === 'passed' ? 'PASSED' : status === 'failed' ? 'FAILED' : '';
+          rows.push(`${displayId},${minus},${plus},${remark}`);
+        }
+      }
+
+      // Append any IDs that exist in data/map but were not in the original CSV rows.
+      const allIds = new Set([...Object.keys(risoData), ...mapIds]);
+      const remaining = Array.from(allIds).filter((id) => !pushed.has(id));
+      const sortedRemaining = remaining.sort((a, b) => {
         const parseId = (id) => {
           const match = String(id).match(/tx(\d+)-inv(\d+)-str(\d+)/i);
-          if (match) {
-            return [parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3], 10)];
-          }
+          if (match) return [parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3], 10)];
           return [0, 0, 0];
         };
         const [aTx, aInv, aStr] = parseId(a);
@@ -850,21 +890,17 @@ export default function BaseModule({
         if (aInv !== bInv) return aInv - bInv;
         return aStr - bStr;
       });
-      
-      for (const idNorm of sortedIds) {
+      for (const idNorm of sortedRemaining) {
         const rec = risoData[idNorm] || {};
-        // Use original ID format if available, otherwise use normalized
-        const displayId = rec.originalId || idNorm.toUpperCase().replace(/TX(\d+)INV(\d+)STR(\d+)/i, 'TX$1-INV$2-STR$3');
-        const minus = rec.minus || '0';
-        const plus = rec.plus || '0';
-        const remark = rec.status === 'passed' ? 'PASSED' : rec.status === 'failed' ? 'FAILED' : '';
-        
+        const displayId = dcctFormatDisplayId(idNorm, rec.originalId);
+        const minus = (rec.minus != null && String(rec.minus).trim() !== '') ? String(rec.minus).trim() : '0';
+        const plus = (rec.plus != null && String(rec.plus).trim() !== '') ? String(rec.plus).trim() : '0';
+        const status = dcctNormalizeStatus(rec.status || rec.remarkRaw);
+        const remark = status === 'passed' ? 'PASSED' : status === 'failed' ? 'FAILED' : '';
         rows.push(`${displayId},${minus},${plus},${remark}`);
       }
-      
+
       const csvContent = rows.join('\n');
-      
-      // Create and download file
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -874,38 +910,113 @@ export default function BaseModule({
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      
     } catch (err) {
-      console.error('Error exporting CSV:', err);
+      console.error('Error exporting DCCT CSV:', err);
     }
-  }, []);
+  }, [dcctTestResultsDirty, dcctNormalizeId]);
 
-  // Clear DCCT overlays when switching modules
+  const dcctExportFilteredTestResultsCsv = useCallback(() => {
+    try {
+      if (dcctTestResultsDirty) return;
+      const activeFilter = dcctFilterRef.current;
+      if (!activeFilter) return;
+
+      let submitted = dcctTestResultsSubmittedRef.current;
+      if (!submitted) {
+        try {
+          const raw = localStorage.getItem('cew:dcct:test_results_submitted');
+          if (raw) submitted = JSON.parse(raw);
+        } catch (_e) {
+          void _e;
+        }
+      }
+
+      const risoData = (submitted && typeof submitted === 'object') ? (submitted.risoById || {}) : {};
+      const submittedRows = (submitted && typeof submitted === 'object' && Array.isArray(submitted.rows)) ? submitted.rows : [];
+      const mapIds = dcctMapIdsRef.current || new Set();
+
+      const selected = new Set();
+      if (activeFilter === 'not_tested') {
+        // Not tested = on map but missing in submitted CSV data
+        mapIds.forEach((id) => {
+          const idNorm = dcctNormalizeId(id);
+          if (idNorm && !Object.prototype.hasOwnProperty.call(risoData, idNorm)) selected.add(idNorm);
+        });
+      } else {
+        Object.keys(risoData || {}).forEach((id) => {
+          const rec = risoData[id] || {};
+          const st = dcctNormalizeStatus(rec.status || rec.remarkRaw);
+          if (st && st === activeFilter) selected.add(String(id));
+        });
+      }
+
+      const header = 'ID,Insulation Resistance (-),Insulation Resistance (+),remark';
+      const rows = [header];
+
+      const pushed = new Set();
+      if (submittedRows.length > 0) {
+        for (const row of submittedRows) {
+          const originalId = String(row?.originalId || '').trim();
+          const idNorm = row?.idNorm ? String(row.idNorm) : dcctNormalizeId(originalId);
+          if (!idNorm) continue;
+          if (!selected.has(idNorm)) continue;
+          pushed.add(idNorm);
+
+          const rec = risoData[idNorm] || {};
+          const displayId = originalId || dcctFormatDisplayId(idNorm, rec.originalId);
+          const minus = (rec.minus != null && String(rec.minus).trim() !== '') ? String(rec.minus).trim() : '0';
+          const plus = (rec.plus != null && String(rec.plus).trim() !== '') ? String(rec.plus).trim() : '0';
+          const status = dcctNormalizeStatus(rec.status || rec.remarkRaw);
+          const remark = status === 'passed' ? 'PASSED' : status === 'failed' ? 'FAILED' : '';
+          rows.push(`${displayId},${minus},${plus},${remark}`);
+        }
+      }
+
+      // Append remaining selected IDs not present in original rows (common for not_tested)
+      const remaining = Array.from(selected).filter((id) => !pushed.has(id));
+      const sortedRemaining = remaining.sort((a, b) => {
+        const parseId = (id) => {
+          const match = String(id).match(/tx(\d+)-inv(\d+)-str(\d+)/i);
+          if (match) return [parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3], 10)];
+          return [0, 0, 0];
+        };
+        const [aTx, aInv, aStr] = parseId(a);
+        const [bTx, bInv, bStr] = parseId(b);
+        if (aTx !== bTx) return aTx - bTx;
+        if (aInv !== bInv) return aInv - bInv;
+        return aStr - bStr;
+      });
+      for (const idNorm of sortedRemaining) {
+        const rec = risoData[idNorm] || {};
+        const displayId = dcctFormatDisplayId(idNorm, rec.originalId);
+        const minus = (rec.minus != null && String(rec.minus).trim() !== '') ? String(rec.minus).trim() : '0';
+        const plus = (rec.plus != null && String(rec.plus).trim() !== '') ? String(rec.plus).trim() : '0';
+        const status = dcctNormalizeStatus(rec.status || rec.remarkRaw);
+        const remark = status === 'passed' ? 'PASSED' : status === 'failed' ? 'FAILED' : '';
+        rows.push(`${displayId},${minus},${plus},${remark}`);
+      }
+
+      const csvContent = rows.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const tag = String(activeFilter).toLowerCase();
+      link.download = `dc_riso_${tag}_export_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error exporting filtered DCCT CSV:', err);
+    }
+  }, [dcctTestResultsDirty, dcctNormalizeId]);
+
+  // Clear DCCT overlays/popup when switching modules
   useEffect(() => {
     dcctClearTestOverlays();
-    dcctClearAllPopups();
-  }, [activeMode?.key, dcctClearTestOverlays, dcctClearAllPopups]);
-  
-  const [_status, setStatus] = useState('Initializing map...');
-  const [lengthData, setLengthData] = useState({}); // Length data from CSV
-  const [stringPoints, setStringPoints] = useState([]); // String points (id, lat, lng)
-  const [selectedPolygons, setSelectedPolygons] = useState(new Set()); // Selected polygon unique IDs
-  const selectedPolygonsRef = useRef(selectedPolygons);
-  useEffect(() => {
-    selectedPolygonsRef.current = selectedPolygons;
-  }, [selectedPolygons]);
-  
-  // Track previously submitted/committed polygons (so we only count NEW selections on each submit)
-  const [committedPolygons, setCommittedPolygons] = useState(new Set());
-  const committedPolygonsRef = useRef(committedPolygons);
-  useEffect(() => {
-    committedPolygonsRef.current = committedPolygons;
-  }, [committedPolygons]);
-
-  // HARD GUARANTEE:
-  // Once a polygon is submitted (committed), it must NEVER disappear from `selectedPolygons`
-  // until its history record is deleted (🗑️). This protects against any "global/common"
-  // selection logic accidentally unselecting committed polygons.
+    setDcctPopup(null);
+  }, [activeMode?.key, dcctClearTestOverlays]);
   useEffect(() => {
     const committed = committedPolygonsRef.current || committedPolygons;
     if (!committed || committed.size === 0) return;
@@ -926,16 +1037,36 @@ export default function BaseModule({
   // MVT: test panel state for "TESTED" click
   const [mvtTestPanel, setMvtTestPanel] = useState(null); // { stationLabel, fromKey, phases: {L1,L2,L3} } | null
   // MVT: manual termination counter state (persistent)
-  const [mvtTerminationByStation, setMvtTerminationByStation] = useState(() => ({})); // ssNorm -> 0..3
+  const [mvtTerminationByStation, setMvtTerminationByStation] = useState(() => ({})); // stationNorm -> 0..max
   useEffect(() => {
     mvtTerminationByStationRef.current = mvtTerminationByStation || {};
   }, [mvtTerminationByStation]);
   const [mvtTermPopup, setMvtTermPopup] = useState(null); // { stationLabel, stationNorm, draft, x, y } | null
   const [mvtTestPopup, setMvtTestPopup] = useState(null); // { stationLabel, fromKey, phases, x, y } | null
   const [mvtCsvTotals, setMvtCsvTotals] = useState(() => ({ total: 0, fromRows: 0, toRows: 0 })); // generic total
+  const [mvtTestResultsDirty, setMvtTestResultsDirty] = useState(false);
+  // MVT: Active test filter ('passed' | 'failed' | 'not_tested' | null)
+  const [mvtTestFilter, setMvtTestFilter] = useState(null);
+  const mvtTestFilterRef = useRef(mvtTestFilter);
+  useEffect(() => {
+    mvtTestFilterRef.current = mvtTestFilter;
+  }, [mvtTestFilter]);
+  const mvtTestToByFromRef = useRef({}); // fromNorm -> raw `to` string (for export)
+  const mvtTestResultsSubmittedRef = useRef(null); // { byFrom, toByFrom, updatedAt, source } | null
+  const mvtTestImportFileInputRef = useRef(null);
   // LVTT: popup state (content depends on sub-mode)
   const [lvttPopup, setLvttPopup] = useState(null);
   const [lvttCsvTotals, setLvttCsvTotals] = useState(() => ({ total: 0, passed: 0, failed: 0 }));
+  const [lvttTestResultsDirty, setLvttTestResultsDirty] = useState(false);
+  // LVTT: Active test filter ('passed' | 'failed' | 'not_tested' | null)
+  const [lvttTestFilter, setLvttTestFilter] = useState(null);
+  const lvttTestFilterRef = useRef(lvttTestFilter);
+  useEffect(() => {
+    lvttTestFilterRef.current = lvttTestFilter;
+  }, [lvttTestFilter]);
+  const lvttTestResultsSubmittedRef = useRef(null); // { byInv, updatedAt, source } | null
+  const lvttTestImportFileInputRef = useRef(null);
+  const [lvttCsvVersion, setLvttCsvVersion] = useState(0);
   const [mvtCsvVersion, setMvtCsvVersion] = useState(0);
   const [mvtCsvDebug, setMvtCsvDebug] = useState(() => ({ url: '', textLen: 0, rawLines: 0, filteredLines: 0, keys: 0 }));
   // When string_id ↔ polygon matching completes, bump this to recompute counters immediately (no extra click needed).
@@ -978,6 +1109,18 @@ export default function BaseModule({
   // MVF: committed (submitted/locked) trenches by day
   const [mvfCommittedTrenchIds, setMvfCommittedTrenchIds] = useState(() => new Set()); // Set<string>
   const mvfCommittedTrenchIdsRef = useRef(mvfCommittedTrenchIds);
+
+  // Clear testing filters when switching modules or leaving testing sub-modes
+  useEffect(() => {
+    setMvtTestFilter(null);
+    setLvttTestFilter(null);
+  }, [activeMode?.key]);
+  useEffect(() => {
+    if (!isMVT || String(mvtSubMode || 'termination') !== 'testing') setMvtTestFilter(null);
+  }, [isMVT, mvtSubMode]);
+  useEffect(() => {
+    if (!isLVTT || String(lvttSubMode || 'termination') !== 'testing') setLvttTestFilter(null);
+  }, [isLVTT, lvttSubMode]);
   
   // TABLE_INSTALLATION: küçük ve büyük masa sayaçları (masa = 2 panel üst üste)
   const [tableSmallCount, setTableSmallCount] = useState(0); // 2V14 küçük masalar
@@ -1023,6 +1166,10 @@ export default function BaseModule({
   const [completedMinus, setCompletedMinus] = useState(0); // Selected -DC Cable
   const [modalOpen, setModalOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const historyOpenRef = useRef(false);
+  useEffect(() => {
+    historyOpenRef.current = Boolean(historyOpen);
+  }, [historyOpen]);
   const [historySortBy, setHistorySortBy] = useState('date'); // 'date', 'workers', 'cable'
   const [historySortOrder, setHistorySortOrder] = useState('desc'); // 'asc', 'desc'
   
@@ -2490,7 +2637,7 @@ export default function BaseModule({
     h.index -= 1;
     setMvtTerminationByStation((prev) => {
       const base = prev && typeof prev === 'object' ? { ...prev } : {};
-      base[action.stationNorm] = Math.max(0, Math.min(3, Number(action.prev ?? 0)));
+      base[action.stationNorm] = clampMvtTerminationCount(action.stationNorm, action.prev ?? 0);
       return base;
     });
     setMvtTermHistoryTick((t) => t + 1);
@@ -2503,7 +2650,7 @@ export default function BaseModule({
     h.index += 1;
     setMvtTerminationByStation((prev) => {
       const base = prev && typeof prev === 'object' ? { ...prev } : {};
-      base[action.stationNorm] = Math.max(0, Math.min(3, Number(action.next ?? 0)));
+      base[action.stationNorm] = clampMvtTerminationCount(action.stationNorm, action.next ?? 0);
       return base;
     });
     setMvtTermHistoryTick((t) => t + 1);
@@ -3089,8 +3236,6 @@ export default function BaseModule({
         }
         stringTextLabelActiveCountRef.current = 0;
         lastStringLabelKeyRef.current = '';
-        // Also clear MVT "TESTED" labels if present
-        clearMvtTestedLabelsNow();
         clearMvtCounterLabelsNow();
         return;
       }
@@ -3117,7 +3262,6 @@ export default function BaseModule({
         }
         stringTextLabelActiveCountRef.current = 0;
         lastStringLabelKeyRef.current = '';
-        clearMvtTestedLabelsNow();
         clearMvtCounterLabelsNow();
         return;
       }
@@ -3145,8 +3289,6 @@ export default function BaseModule({
         }
         stringTextLabelActiveCountRef.current = 0;
         lastStringLabelKeyRef.current = '';
-        // TESTED labels are not used in cursor mode; ensure they're hidden.
-        clearMvtTestedLabelsNow();
         clearMvtCounterLabelsNow();
         return;
       }
@@ -3246,7 +3388,10 @@ export default function BaseModule({
           const phases = row && typeof row === 'object' ? row : {};
           const normStatus = (s) => {
             const u = String(s || '').trim().toUpperCase();
-            return u === 'PASS' ? 'PASS' : (u ? 'FAIL' : 'N/A');
+            if (!u || u === 'N/A' || u === 'NA') return 'N/A';
+            if (u === 'PASS') return 'PASS';
+            if (u.startsWith('FAIL')) return 'FAIL';
+            return 'FAIL';
           };
           const l1s = normStatus(phases?.L1?.status || phases?.L1);
           const l2s = normStatus(phases?.L2?.status || phases?.L2);
@@ -3300,13 +3445,16 @@ export default function BaseModule({
       }
 
       const runTotal = cursorCandidates ? cursorCandidates.length : total;
-      // MVT: slightly larger labels for SS / counter / TESTED only
-      const mvtBaseSizeLocal = isMVT ? (Number(stringTextBaseSizeCfg) * 1.25) : Number(stringTextBaseSizeCfg);
+      // MVT: keep label sizing consistent with other modules (avoid oversized SS/subs_text + TEST_RESULTS)
+      const mvtBaseSizeLocal = Number(stringTextBaseSizeCfg);
 
       // DCCT: Get test data and filter state for coloring
       const dcctTestResults = isDCCT ? (dcctTestDataRef.current || {}) : null;
       const dcctActiveFilter = isDCCT ? dcctFilterRef.current : null;
       const dcctMapIdsSet = isDCCT ? (dcctMapIdsRef.current || new Set()) : null;
+
+      // MVT/LVTT: filters for testing-mode label highlighting
+      const mvtActiveFilter = isMVT ? mvtTestFilterRef.current : null;
 
       for (let k = 0; k < runTotal; k++) {
         if (count >= maxCount) break;
@@ -3315,18 +3463,52 @@ export default function BaseModule({
         if (!pt) continue;
         if (!bounds.contains([pt.lat, pt.lng])) continue;
 
-        // MVT: SS label color depends on manual counter; the counter itself is a separate clickable label.
+        // MVT: substation label color depends on mode (termination counters vs testing results).
         let nextText = pt.text;
         let nextTextColor = stringTextColorCfg;
         let nextOpacity = 1.0;
 
-        if (isMVT && mvtCountsByStation) {
+        if (isMVT) {
           const raw = String(pt.text || '').trim();
-          const norm = normalizeId(raw);
-          if (norm && /^ss\d{1,2}$/i.test(norm)) {
-            const terminated = Math.max(0, Math.min(3, Number(mvtCountsByStation[norm] ?? 0)));
-            // MVT rule: 3/3 => GREEN, otherwise WHITE (not red)
-            nextTextColor = terminated === 3 ? 'rgba(34,197,94,0.98)' : 'rgba(255,255,255,0.98)';
+          const stationKey = mvtCanonicalTerminationStationNorm(raw);
+          const mode = String(mvtSubModeRef.current || 'termination');
+          if (stationKey && isMvtTerminationStationNorm(stationKey)) {
+            // MVT: CSS is not part of MV testing; keep it WHITE in testing mode.
+            if (stationKey === 'css' && mode === 'testing') {
+              nextTextColor = 'rgba(255,255,255,0.98)';
+            } else
+            if (mode === 'termination' && mvtCountsByStation) {
+              const max = mvtTerminationMaxForNorm(stationKey);
+              const terminated = clampMvtTerminationCount(stationKey, mvtCountsByStation[stationKey] ?? 0);
+              // MVT rule: max/max => GREEN, otherwise WHITE (not red)
+              nextTextColor = (max > 0 && terminated === max) ? 'rgba(34,197,94,0.98)' : 'rgba(255,255,255,0.98)';
+            } else if (mode === 'testing' && mvtTestStatusByStation) {
+              const st = mvtTestStatusByStation.statusOf(raw);
+              if (!st?.hasTested) nextTextColor = 'rgba(148,163,184,0.98)';
+              else if (st?.allPass) nextTextColor = 'rgba(34,197,94,0.98)';
+              else nextTextColor = 'rgba(220,38,38,0.98)';
+
+              // Filter highlighting (DCCT-style): when active, recolor matches and dim non-matches
+              if (mvtActiveFilter) {
+                const l1s = String(st?.phases?.L1?.status || 'N/A').trim().toUpperCase();
+                const l2s = String(st?.phases?.L2?.status || 'N/A').trim().toUpperCase();
+                const l3s = String(st?.phases?.L3?.status || 'N/A').trim().toUpperCase();
+                const hasPass = l1s === 'PASS' || l2s === 'PASS' || l3s === 'PASS';
+                const hasFail = l1s === 'FAIL' || l2s === 'FAIL' || l3s === 'FAIL' || l1s === 'FAILED' || l2s === 'FAILED' || l3s === 'FAILED';
+                const hasNA = (!l1s || l1s === 'N/A') || (!l2s || l2s === 'N/A') || (!l3s || l3s === 'N/A');
+                const matches = mvtActiveFilter === 'passed' ? hasPass : mvtActiveFilter === 'failed' ? hasFail : hasNA;
+                if (matches) {
+                  nextTextColor = mvtActiveFilter === 'passed'
+                    ? 'rgba(34,197,94,0.98)'
+                    : mvtActiveFilter === 'failed'
+                    ? 'rgba(220,38,38,0.98)'
+                    : 'rgba(148,163,184,0.98)';
+                } else {
+                  nextTextColor = 'rgba(148,163,184,0.18)';
+                  nextOpacity = 0.18;
+                }
+              }
+            }
           }
         }
 
@@ -3367,7 +3549,7 @@ export default function BaseModule({
             minFontSize: stringTextMinFontSizeCfg,
             maxFontSize: stringTextMaxFontSizeCfg,
             rotation: pt.angle || 0,
-            // MVT: make SS labels clickable too (same action as counter click)
+            // MVT: make SS labels clickable in both termination and testing modes
             interactive: isMVT,
             radius: isMVT ? 22 : 0,
             bubblingMouseEvents: false,
@@ -3383,20 +3565,59 @@ export default function BaseModule({
                   L.DomEvent.preventDefault(evt.originalEvent);
                 }
               } catch (_e) { void _e; }
+              const modeNow = String(mvtSubModeRef.current || 'termination');
+              const stationLabel = String(label._mvtStationLabel || '').trim();
               const stationNorm = String(label._mvtStationNorm || '');
-              const lockedNow = Boolean(label._mvtLocked);
-              if (!stationNorm || lockedNow) return;
+
+              if (!stationNorm) return;
+
               const oe = evt?.originalEvent;
               const x = oe?.clientX ?? 0;
               const y = oe?.clientY ?? 0;
-              const cur = Math.max(0, Math.min(3, Number(mvtTerminationByStationRef.current?.[stationNorm] ?? 0)));
-              setMvtTermPopup({
-                stationLabel: String(label._mvtStationLabel || '').trim() || stationNorm,
-                stationNorm,
-                draft: cur,
-                x,
-                y,
-              });
+
+              if (modeNow === 'termination') {
+                const lockedNow = Boolean(label._mvtLocked);
+                if (lockedNow) return;
+                const cur = clampMvtTerminationCount(stationNorm, mvtTerminationByStationRef.current?.[stationNorm] ?? 0);
+                setMvtTermPopup({
+                  stationLabel: stationLabel || stationNorm,
+                  stationNorm,
+                  draft: cur,
+                  x,
+                  y,
+                });
+                return;
+              }
+
+              if (modeNow === 'testing') {
+                // Lookup fromKey directly from CSV ref to ensure latest data.
+                const csv = mvtTestCsvByFromRef.current || {};
+                const normSt = normalizeId(stationLabel || stationNorm);
+                const candKeys = [normSt];
+                const pad2 = (n) => String(n).padStart(2, '0');
+                const mSs = normSt.match(/^ss(\d{1,2})$/i);
+                const mSub = normSt.match(/^sub(\d{1,2})$/i);
+                if (mSs) {
+                  const nn = pad2(mSs[1]);
+                  candKeys.push(`ss${nn}`);
+                  candKeys.push(`sub${nn}`);
+                }
+                if (mSub) {
+                  const nn = pad2(mSub[1]);
+                  candKeys.push(`sub${nn}`);
+                  candKeys.push(`ss${nn}`);
+                }
+                let fromKey = '';
+                for (const k of candKeys) {
+                  if (csv[k]) { fromKey = k; break; }
+                }
+                if (!fromKey) {
+                  const preferred = candKeys.find((k) => /^sub\d{2}$/i.test(k)) || candKeys[0] || '';
+                  fromKey = preferred;
+                }
+                setMvtTestPanel(null);
+                setMvtTestPopup({ stationLabel: stationLabel || stationNorm, fromKey, x, y });
+              }
             });
           }
         }
@@ -3420,20 +3641,78 @@ export default function BaseModule({
         if (isMVT) {
           const raw = String(pt.text || '').trim();
           const norm = normalizeId(raw);
-          if (norm && /^ss\d{1,2}$/i.test(norm)) {
-            const terminated = Math.max(0, Math.min(3, Number(mvtTerminationByStationRef.current?.[norm] ?? 0)));
-            label._mvtStationNorm = norm;
-            label._mvtStationLabel = raw;
-            label._mvtLocked = terminated === 3;
-            if (label.options.radius !== 22) { label.options.radius = 22; needsRedraw = true; }
-            if (label.options.interactive !== true) { label.options.interactive = true; needsRedraw = true; }
+          {
+            const stationKey = mvtCanonicalTerminationStationNorm(raw);
+            if (stationKey && isMvtTerminationStationNorm(stationKey)) {
+              const modeNow = String(mvtSubModeRef.current || 'termination');
+              const termMode = modeNow === 'termination';
+              const testMode = modeNow === 'testing';
+
+              // MVT: CSS is excluded from MV testing. Keep it WHITE and non-interactive in testing mode.
+              if (stationKey === 'css' && testMode) {
+                label._mvtStationNorm = '';
+                label._mvtStationLabel = raw;
+                label._mvtLocked = false;
+                if (label.options.radius !== 0) { label.options.radius = 0; needsRedraw = true; }
+                if (label.options.interactive !== false) { label.options.interactive = false; needsRedraw = true; }
+                if (label.options.textBaseSize !== mvtBaseSizeLocal) { label.options.textBaseSize = mvtBaseSizeLocal; needsRedraw = true; }
+                const desiredTextColor = historyHighlighted ? 'rgba(11,18,32,0.98)' : 'rgba(255,255,255,0.98)';
+                if (label.options.textColor !== desiredTextColor) { label.options.textColor = desiredTextColor; needsRedraw = true; }
+                // Keep history highlight behavior consistent if user opens history.
+                if (historyHighlighted) {
+                  if (label.options.bgColor !== 'rgba(249,115,22,1)') { label.options.bgColor = 'rgba(249,115,22,1)'; needsRedraw = true; }
+                  if (label.options.bgPaddingX !== 4) { label.options.bgPaddingX = 4; needsRedraw = true; }
+                  if (label.options.bgPaddingY !== 2) { label.options.bgPaddingY = 2; needsRedraw = true; }
+                  if (label.options.bgCornerRadius !== 3) { label.options.bgCornerRadius = 3; needsRedraw = true; }
+                } else {
+                  if (label.options.bgColor != null) { label.options.bgColor = null; needsRedraw = true; }
+                  if (label.options.bgPaddingX !== 0) { label.options.bgPaddingX = 0; needsRedraw = true; }
+                  if (label.options.bgPaddingY !== 0) { label.options.bgPaddingY = 0; needsRedraw = true; }
+                  if (label.options.bgCornerRadius !== 0) { label.options.bgCornerRadius = 0; needsRedraw = true; }
+                }
+              } else {
+              const max = mvtTerminationMaxForNorm(stationKey);
+              const terminated = clampMvtTerminationCount(stationKey, mvtTerminationByStationRef.current?.[stationKey] ?? 0);
+              const locked = (max > 0 && terminated === max);
+
+              let baseTextColor = locked ? 'rgba(34,197,94,0.98)' : 'rgba(255,255,255,0.98)';
+              if (testMode && mvtTestStatusByStation) {
+                const st = mvtTestStatusByStation.statusOf(raw);
+                if (!st?.hasTested) baseTextColor = 'rgba(148,163,184,0.98)';
+                else if (st?.allPass) baseTextColor = 'rgba(34,197,94,0.98)';
+                else baseTextColor = 'rgba(220,38,38,0.98)';
+              }
+
+              const historyHighlighted =
+                Boolean(historyOpenRef.current) &&
+                Boolean(historySelectedRecordIdRef.current) &&
+                Boolean(mvtHistoryHighlightStationSetRef.current?.has(stationKey));
+              const highlightBgColor = 'rgba(249,115,22,1)'; // #f97316
+              const highlightTextColor = 'rgba(11,18,32,0.98)';
+              label._mvtStationNorm = stationKey;
+              label._mvtStationLabel = raw;
+              label._mvtLocked = locked;
+            if (label.options.radius !== ((termMode || testMode) ? 22 : 0)) { label.options.radius = (termMode || testMode) ? 22 : 0; needsRedraw = true; }
+            if (label.options.interactive !== (termMode || testMode)) { label.options.interactive = (termMode || testMode); needsRedraw = true; }
             if (label.options.textBaseSize !== mvtBaseSizeLocal) { label.options.textBaseSize = mvtBaseSizeLocal; needsRedraw = true; }
-            // Background pill for visibility
-            if (label.options.bgColor !== 'rgba(10,15,25,0.75)') { label.options.bgColor = 'rgba(10,15,25,0.75)'; needsRedraw = true; }
-            if (label.options.bgPaddingX !== 4) { label.options.bgPaddingX = 4; needsRedraw = true; }
-            if (label.options.bgPaddingY !== 2) { label.options.bgPaddingY = 2; needsRedraw = true; }
-            if (label.options.bgCornerRadius !== 3) { label.options.bgCornerRadius = 3; needsRedraw = true; }
-          } else {
+            // MVT station labels: base color (white/green) OR history-highlight (orange)
+            {
+              const desiredTextColor = historyHighlighted ? highlightTextColor : baseTextColor;
+              if (label.options.textColor !== desiredTextColor) { label.options.textColor = desiredTextColor; needsRedraw = true; }
+              if (historyHighlighted) {
+                if (label.options.bgColor !== highlightBgColor) { label.options.bgColor = highlightBgColor; needsRedraw = true; }
+                if (label.options.bgPaddingX !== 4) { label.options.bgPaddingX = 4; needsRedraw = true; }
+                if (label.options.bgPaddingY !== 2) { label.options.bgPaddingY = 2; needsRedraw = true; }
+                if (label.options.bgCornerRadius !== 3) { label.options.bgCornerRadius = 3; needsRedraw = true; }
+              } else {
+                if (label.options.bgColor != null) { label.options.bgColor = null; needsRedraw = true; }
+                if (label.options.bgPaddingX !== 0) { label.options.bgPaddingX = 0; needsRedraw = true; }
+                if (label.options.bgPaddingY !== 0) { label.options.bgPaddingY = 0; needsRedraw = true; }
+                if (label.options.bgCornerRadius !== 0) { label.options.bgCornerRadius = 0; needsRedraw = true; }
+              }
+            }
+              }
+            } else {
             label._mvtStationNorm = '';
             label._mvtStationLabel = '';
             label._mvtLocked = false;
@@ -3445,6 +3724,7 @@ export default function BaseModule({
             if (label.options.bgPaddingX !== 0) { label.options.bgPaddingX = 0; needsRedraw = true; }
             if (label.options.bgPaddingY !== 0) { label.options.bgPaddingY = 0; needsRedraw = true; }
             if (label.options.bgCornerRadius !== 0) { label.options.bgCornerRadius = 0; needsRedraw = true; }
+            }
           }
         }
         const nextRot = pt.angle || 0;
@@ -3472,7 +3752,7 @@ export default function BaseModule({
       };
 
       // MVT: draw clickable termination counters next to each substation label.
-      if (isMVT && mvtCounterLayerRef.current && mvtCountsByStation && !cursorBounds) {
+      if (isMVT && String(mvtSubModeRef.current || 'termination') === 'termination' && mvtCounterLayerRef.current && mvtCountsByStation && !cursorBounds) {
         const counterLayer = mvtCounterLayerRef.current;
         const counterPool = mvtCounterLabelPoolRef.current;
         let counterCount = 0;
@@ -3491,8 +3771,8 @@ export default function BaseModule({
           if (!bounds.contains([pt.lat, pt.lng])) continue;
 
           const rawStation = String(pt.text || '').trim();
-          const norm = normalizeId(rawStation);
-          if (!(norm && /^ss\d{1,2}$/i.test(norm))) continue;
+          const stationKey = mvtCanonicalTerminationStationNorm(rawStation);
+          if (!(stationKey && isMvtTerminationStationNorm(stationKey))) continue;
 
           // Place the label at the actual on-screen text location (important for click hit-testing).
           const fs = computeFontSizePx(mvtBaseSizeLocal);
@@ -3503,11 +3783,20 @@ export default function BaseModule({
           const dy = Math.sin(rot) * offX;
           const ll = map.containerPointToLatLng([baseP.x + dx, baseP.y + dy]);
 
-          const terminated = Math.max(0, Math.min(3, Number(mvtCountsByStation[norm] ?? 0)));
-          const locked = terminated === 3;
-          const counterText = `${terminated}/3`;
-          // MVT rule: 3/3 => GREEN, otherwise WHITE (not red)
-          const counterColor = locked ? 'rgba(34,197,94,0.98)' : 'rgba(255,255,255,0.98)';
+          const max = mvtTerminationMaxForNorm(stationKey);
+          const terminated = clampMvtTerminationCount(stationKey, Number(mvtCountsByStation[stationKey] ?? 0));
+          const locked = max > 0 && terminated === max;
+          const counterText = `${terminated}/${max}`;
+          // MVT rule: max/max => GREEN, otherwise WHITE (not red)
+          const baseCounterColor = locked ? 'rgba(34,197,94,0.98)' : 'rgba(255,255,255,0.98)';
+          const historyHighlighted =
+            Boolean(historyOpenRef.current) &&
+            Boolean(historySelectedRecordIdRef.current) &&
+            Boolean(mvtHistoryHighlightStationSetRef.current?.has(stationKey));
+          const highlightBgColor = 'rgba(249,115,22,1)'; // #f97316
+          const highlightTextColor = 'rgba(11,18,32,0.98)';
+          const counterColor = historyHighlighted ? highlightTextColor : baseCounterColor;
+          const counterBg = historyHighlighted ? highlightBgColor : 'rgba(10,15,25,0.75)';
 
           let lbl = counterPool[counterCount];
           if (!lbl) {
@@ -3525,7 +3814,7 @@ export default function BaseModule({
               rotation: pt.angle || 0,
               underline: true,
               underlineColor: counterColor,
-              bgColor: 'rgba(10,15,25,0.75)',
+              bgColor: counterBg,
               bgPaddingX: 4,
               bgPaddingY: 2,
               bgCornerRadius: 3,
@@ -3545,13 +3834,14 @@ export default function BaseModule({
                   L.DomEvent.preventDefault(evt.originalEvent);
                 }
               } catch (_e) { void _e; }
+              if (String(mvtSubModeRef.current || 'termination') !== 'termination') return;
               const stationNorm = String(lbl._mvtStationNorm || '');
               const lockedNow = Boolean(lbl._mvtLocked);
               if (!stationNorm || lockedNow) return;
               const oe = evt?.originalEvent;
               const x = oe?.clientX ?? 0;
               const y = oe?.clientY ?? 0;
-              const cur = Math.max(0, Math.min(3, Number(mvtTerminationByStationRef.current?.[stationNorm] ?? 0)));
+              const cur = clampMvtTerminationCount(stationNorm, mvtTerminationByStationRef.current?.[stationNorm] ?? 0);
               setMvtTermPopup({
                 stationLabel: String(lbl._mvtStationLabel || '').trim() || stationNorm,
                 stationNorm,
@@ -3571,7 +3861,7 @@ export default function BaseModule({
             counterPool[counterCount] = lbl;
           }
 
-          lbl._mvtStationNorm = norm;
+          lbl._mvtStationNorm = stationKey;
           lbl._mvtLocked = locked;
           lbl._mvtStationLabel = rawStation;
 
@@ -3584,7 +3874,7 @@ export default function BaseModule({
           if (lbl.options.textBaseSize !== mvtBaseSizeLocal) { lbl.options.textBaseSize = mvtBaseSizeLocal; redraw = true; }
           if (lbl.options.underline !== true) { lbl.options.underline = true; redraw = true; }
           if (lbl.options.underlineColor !== counterColor) { lbl.options.underlineColor = counterColor; redraw = true; }
-          if (lbl.options.bgColor !== 'rgba(10,15,25,0.75)') { lbl.options.bgColor = 'rgba(10,15,25,0.75)'; redraw = true; }
+          if (lbl.options.bgColor !== counterBg) { lbl.options.bgColor = counterBg; redraw = true; }
           if (lbl.options.bgPaddingX !== 4) { lbl.options.bgPaddingX = 4; redraw = true; }
           if (lbl.options.bgPaddingY !== 2) { lbl.options.bgPaddingY = 2; redraw = true; }
           if (lbl.options.bgCornerRadius !== 3) { lbl.options.bgCornerRadius = 3; redraw = true; }
@@ -3604,162 +3894,7 @@ export default function BaseModule({
         clearMvtCounterLabelsNow();
       }
 
-      // MVT: draw clickable "TESTED" labels under each substation label (always visible when text is visible).
-      if (isMVT && mvtTestedLayerRef.current && mvtTestStatusByStation && !cursorBounds) {
-        const testedLayer = mvtTestedLayerRef.current;
-        const testedPool = mvtTestedLabelPoolRef.current;
-        let testedCount = 0;
-
-        for (let k = 0; k < runTotal; k++) {
-          const idx = cursorCandidates ? cursorCandidates[k] : (iterateIndices ? iterateIndices[k] : k);
-          const pt = points[idx];
-          if (!pt) continue;
-          if (!bounds.contains([pt.lat, pt.lng])) continue;
-
-          const rawStation = String(pt.text || '').trim();
-          const normStation = normalizeId(rawStation);
-          // Only render under Substation IDs (SSxx or SUBxx)
-          if (!(normStation && (/^ss\d{1,2}$/i.test(normStation) || /^sub\d{1,2}$/i.test(normStation)))) continue;
-
-          // Place the label at the actual on-screen "below" location.
-          const fs = computeFontSizePx(mvtBaseSizeLocal);
-          const rot = (pt.angle || 0) * Math.PI / 180;
-          const baseP = map.latLngToContainerPoint([pt.lat, pt.lng]);
-          const offY = 1.25 * fs;
-          const dx = -Math.sin(rot) * offY;
-          const dy = Math.cos(rot) * offY;
-          const ll = map.containerPointToLatLng([baseP.x + dx, baseP.y + dy]);
-
-          const st = mvtTestStatusByStation.statusOf(rawStation);
-          // NOT TESTED = white, PASSED = green, FAILED = red
-          let testedText = 'NOT TESTED';
-          let testedColor = 'rgba(255,255,255,0.98)'; // white for NOT TESTED
-          if (st.hasTested) {
-            if (st.allPass) {
-              testedText = 'PASSED';
-              testedColor = 'rgba(34,197,94,0.98)'; // green
-            } else {
-              testedText = 'FAILED';
-              testedColor = 'rgba(220,38,38,0.98)'; // red
-            }
-          }
-
-          let lbl = testedPool[testedCount];
-          if (!lbl) {
-            lbl = L.textLabel(ll, {
-              text: testedText,
-              renderer: canvasRenderer,
-              textBaseSize: mvtBaseSizeLocal,
-              refZoom: stringTextRefZoomCfg,
-              textStyle: stringTextStyleCfg,
-              textColor: testedColor,
-              textStrokeColor: stringTextStrokeColorCfg,
-              textStrokeWidthFactor: stringTextStrokeWidthFactorCfg,
-              minFontSize: stringTextMinFontSizeCfg,
-              maxFontSize: stringTextMaxFontSizeCfg,
-              rotation: pt.angle || 0,
-              bgColor: 'rgba(10,15,25,0.75)',
-              bgPaddingX: 4,
-              bgPaddingY: 2,
-              bgCornerRadius: 3,
-              underline: true,
-              underlineColor: testedColor,
-              offsetYFactor: 0,
-              offsetXFactor: 0,
-              radius: 18, // hitbox for canvas event detection
-              interactive: true,
-              pane: 'overlayPane',
-              bubblingMouseEvents: false,
-            });
-            // Attach click handlers once; use mutable fields on the label for latest station key.
-            // IMPORTANT: Read phases directly from CSV ref at click time to avoid stale cache.
-            lbl.on('click', (evt) => {
-              try {
-                if (evt?.originalEvent) {
-                  evt.originalEvent.stopImmediatePropagation?.();
-                  L.DomEvent.stopPropagation(evt.originalEvent);
-                  L.DomEvent.preventDefault(evt.originalEvent);
-                }
-              } catch (_e) { void _e; }
-              const stationLabel = String(lbl._mvtStationLabel || '').trim();
-              // Directly lookup from CSV ref to get fresh data
-              const csv = mvtTestCsvByFromRef.current || {};
-              const normSt = normalizeId(stationLabel);
-              // Generate candidate keys (ss05 -> sub05, sub05 -> ss05)
-              const candKeys = [normSt];
-              const pad2 = (n) => String(n).padStart(2, '0');
-              const mSs = normSt.match(/^ss(\d{1,2})$/i);
-              const mSub = normSt.match(/^sub(\d{1,2})$/i);
-              if (mSs) {
-                const nn = pad2(mSs[1]);
-                candKeys.push(`ss${nn}`);
-                candKeys.push(`sub${nn}`);
-              }
-              if (mSub) {
-                const nn = pad2(mSub[1]);
-                candKeys.push(`sub${nn}`);
-                candKeys.push(`ss${nn}`);
-              }
-              let fromKey = '';
-              let row = null;
-              for (const k of candKeys) {
-                if (csv[k]) { fromKey = k; row = csv[k]; break; }
-              }
-              const phases = row ? {
-                L1: row.L1 || { value: '', status: 'N/A' },
-                L2: row.L2 || { value: '', status: 'N/A' },
-                L3: row.L3 || { value: '', status: 'N/A' },
-              } : { L1: { value: '', status: 'N/A' }, L2: { value: '', status: 'N/A' }, L3: { value: '', status: 'N/A' } };
-              // Debug log
-              // eslint-disable-next-line no-console
-              console.log('[TESTED click]', { stationLabel, normSt, candKeys, fromKey, row, phases, csvKeys: Object.keys(csv) });
-              const oe = evt?.originalEvent;
-              const x = oe?.clientX ?? 0;
-              const y = oe?.clientY ?? 0;
-              setMvtTestPopup({ stationLabel, fromKey, phases, x, y });
-            });
-            lbl.on('mouseover', () => {
-              try { map.getContainer().style.cursor = 'pointer'; } catch (_e) { void _e; }
-            });
-            lbl.on('mouseout', () => {
-              try { map.getContainer().style.cursor = ''; } catch (_e) { void _e; }
-            });
-            testedPool[testedCount] = lbl;
-          }
-
-          // Update mutable per-station fields for click
-          lbl._mvtStationLabel = rawStation;
-          lbl._mvtFromKey = st.fromKey;
-          lbl._mvtPhases = st.phases;
-
-          // Update position + style
-          lbl.setLatLng(ll);
-          let redraw = false;
-          if (lbl.options.text !== testedText) { lbl.options.text = testedText; redraw = true; }
-          if (lbl.options.rotation !== (pt.angle || 0)) { lbl.options.rotation = pt.angle || 0; redraw = true; }
-          if (lbl.options.textColor !== testedColor) { lbl.options.textColor = testedColor; redraw = true; }
-          if (lbl.options.underlineColor !== testedColor) { lbl.options.underlineColor = testedColor; redraw = true; }
-          if (lbl.options.radius !== 18) { lbl.options.radius = 18; redraw = true; }
-          if (lbl.options.textBaseSize !== mvtBaseSizeLocal) { lbl.options.textBaseSize = mvtBaseSizeLocal; redraw = true; }
-          if (lbl.options.bgColor !== 'rgba(10,15,25,0.75)') { lbl.options.bgColor = 'rgba(10,15,25,0.75)'; redraw = true; }
-          if (lbl.options.bgPaddingX !== 4) { lbl.options.bgPaddingX = 4; redraw = true; }
-          if (lbl.options.bgPaddingY !== 2) { lbl.options.bgPaddingY = 2; redraw = true; }
-          if (lbl.options.bgCornerRadius !== 3) { lbl.options.bgCornerRadius = 3; redraw = true; }
-          if (!testedLayer.hasLayer(lbl)) testedLayer.addLayer(lbl);
-          if (redraw) lbl.redraw?.();
-
-          testedCount++;
-        }
-
-        const prevActive = mvtTestedLabelActiveCountRef.current;
-        for (let i = testedCount; i < prevActive; i++) {
-          const old = testedPool[i];
-          if (old && testedLayer.hasLayer(old)) testedLayer.removeLayer(old);
-        }
-        mvtTestedLabelActiveCountRef.current = testedCount;
-      } else {
-        clearMvtTestedLabelsNow();
-      }
+      // MVT: MV_TESTING uses the existing substation labels directly; no extra TEST_RESULTS label.
 
       // Remove unused pooled labels from the layer (but keep them for reuse)
       const prevActive = stringTextLabelActiveCountRef.current;
@@ -3796,7 +3931,7 @@ export default function BaseModule({
     scheduleStringTextLabelUpdate();
   }, [isMVT, mvtTerminationByStation, scheduleStringTextLabelUpdate]);
 
-  // MVT: when CSV loads/changes, force label recompute so TESTED uses latest L1/L2/L3 values.
+  // MVT: when CSV loads/changes, force label recompute so SS/SUB colors use latest L1/L2/L3 values.
   useEffect(() => {
     if (!isMVT) return;
     // Wait until map + string layer exist
@@ -3804,6 +3939,28 @@ export default function BaseModule({
     lastStringLabelKeyRef.current = '';
     scheduleStringTextLabelUpdate();
   }, [isMVT, mvtCsvVersion, scheduleStringTextLabelUpdate]);
+
+  const clearMvtCounterLabelsNow = useCallback(() => {
+    const layer = mvtCounterLayerRef.current;
+    if (!layer) return;
+    const pool = mvtCounterLabelPoolRef.current;
+    const prevActive = mvtCounterLabelActiveCountRef.current;
+    for (let i = 0; i < prevActive; i++) {
+      const lbl = pool[i];
+      if (lbl && layer.hasLayer(lbl)) layer.removeLayer(lbl);
+    }
+    mvtCounterLabelActiveCountRef.current = 0;
+  }, []);
+
+  // MVT: switching sub-modes changes which auxiliary labels are shown (termination counters only).
+  useEffect(() => {
+    if (!isMVT) return;
+    setMvtTermPopup(null);
+    setMvtTestPopup(null);
+    if (String(mvtSubMode || 'termination') === 'testing') clearMvtCounterLabelsNow();
+    lastStringLabelKeyRef.current = '';
+    scheduleStringTextLabelUpdate();
+  }, [isMVT, mvtSubMode, scheduleStringTextLabelUpdate, clearMvtCounterLabelsNow]);
 
   // DCCT: refresh labels when filter or test data changes
   useEffect(() => {
@@ -3841,30 +3998,6 @@ export default function BaseModule({
     lastStringLabelKeyRef.current = '';
   }, []);
 
-  const clearMvtTestedLabelsNow = useCallback(() => {
-    const layer = mvtTestedLayerRef.current;
-    if (!layer) return;
-    const pool = mvtTestedLabelPoolRef.current;
-    const prevActive = mvtTestedLabelActiveCountRef.current;
-    for (let i = 0; i < prevActive; i++) {
-      const lbl = pool[i];
-      if (lbl && layer.hasLayer(lbl)) layer.removeLayer(lbl);
-    }
-    mvtTestedLabelActiveCountRef.current = 0;
-  }, []);
-
-  const clearMvtCounterLabelsNow = useCallback(() => {
-    const layer = mvtCounterLayerRef.current;
-    if (!layer) return;
-    const pool = mvtCounterLabelPoolRef.current;
-    const prevActive = mvtCounterLabelActiveCountRef.current;
-    for (let i = 0; i < prevActive; i++) {
-      const lbl = pool[i];
-      if (lbl && layer.hasLayer(lbl)) layer.removeLayer(lbl);
-    }
-    mvtCounterLabelActiveCountRef.current = 0;
-  }, []);
-
   const clearLvttTermCounterLabelsNow = useCallback(() => {
     const layer = lvttTermCounterLayerRef.current;
     if (!layer) return;
@@ -3891,7 +4024,17 @@ export default function BaseModule({
     try {
       const raw = localStorage.getItem('cew:mvt:termination_counts');
       const obj = raw ? JSON.parse(raw) : {};
-      if (obj && typeof obj === 'object') setMvtTerminationByStation(obj);
+      if (obj && typeof obj === 'object') {
+        const cleaned = {};
+        for (const [k, v] of Object.entries(obj || {})) {
+          const kk = mvtCanonicalTerminationStationNorm(k);
+          if (!isMvtTerminationStationNorm(kk)) continue;
+          const vv = clampMvtTerminationCount(kk, v);
+          // If both padded/unpadded existed, keep the larger progress.
+          cleaned[kk] = Math.max(Number(cleaned[kk] || 0), vv);
+        }
+        setMvtTerminationByStation(cleaned);
+      }
       else setMvtTerminationByStation({});
     } catch (_e) {
       void _e;
@@ -3938,10 +4081,12 @@ export default function BaseModule({
   useEffect(() => {
     if (!isMVT) {
       mvtTestCsvByFromRef.current = {};
+      mvtTestToByFromRef.current = {};
+      mvtTestResultsSubmittedRef.current = null;
+      setMvtTestResultsDirty(false);
       setMvtTestPanel(null);
       setMvtTestPopup(null);
       setMvtCsvTotals({ total: 0, fromRows: 0, toRows: 0 });
-      clearMvtTestedLabelsNow();
       return;
     }
 
@@ -3956,7 +4101,7 @@ export default function BaseModule({
       const rawText = String(text || '');
       const rawLinesArr = rawText.split(/\r?\n/);
       const lines = rawLinesArr.map((l) => l.trim()).filter(Boolean);
-      if (lines.length <= 1) return { byFrom: {}, fromRows: 0, toRows: 0 };
+      if (lines.length <= 1) return { byFrom: {}, toByFrom: {}, fromRows: 0, toRows: 0 };
       const first = String(lines[0] || '');
       const sep = (first.includes(';') && first.split(';').length > first.split(',').length) ? ';' : ',';
       const headerRaw = first
@@ -3972,6 +4117,7 @@ export default function BaseModule({
       const toIdx = header.findIndex((h) => h === 'to');
 
       const out = {};
+      const toByFrom = {};
       let fromRows = 0;
       let toRows = 0;
       // Case A: row-per-phase format (has "phase" column)
@@ -4001,6 +4147,7 @@ export default function BaseModule({
           if (phaseKey !== 'L1' && phaseKey !== 'L2' && phaseKey !== 'L3') continue;
           fromRows += 1;
           if (toKey) toRows += 1;
+          if (rawTo && !toByFrom[fromKey]) toByFrom[fromKey] = String(rawTo || '').trim();
           if (!out[fromKey]) out[fromKey] = {};
           out[fromKey][phaseKey] = {
             // Show only the numeric test value (no unit like GΩ / G?)
@@ -4008,7 +4155,7 @@ export default function BaseModule({
             status,
           };
         }
-        return { byFrom: out, fromRows, toRows };
+        return { byFrom: out, toByFrom, fromRows, toRows };
       }
 
       // Case B: wide format: from, L1, L2, L3 values on the same row
@@ -4071,6 +4218,7 @@ export default function BaseModule({
         if (!fromKey) continue;
         fromRows += 1;
         if (toKey) toRows += 1;
+        if (rawTo && !toByFrom[fromKey]) toByFrom[fromKey] = String(rawTo || '').trim();
         if (!out[fromKey]) out[fromKey] = {};
         const overallRaw = remarksIdx >= 0 ? parts[remarksIdx] : '';
         const fromRemarks = extractStatusesFromRemarks(overallRaw);
@@ -4088,8 +4236,29 @@ export default function BaseModule({
         out[fromKey].L2 = { value: mkVal(l2Idx), status: s2 };
         out[fromKey].L3 = { value: mkVal(l3Idx), status: s3 };
       }
-      return { byFrom: out, fromRows, toRows, _meta: { textLen: rawText.length, rawLines: rawLinesArr.length, filteredLines: lines.length, keys: Object.keys(out).length } };
+      return { byFrom: out, toByFrom, fromRows, toRows, _meta: { textLen: rawText.length, rawLines: rawLinesArr.length, filteredLines: lines.length, keys: Object.keys(out).length } };
     };
+
+    // Prefer user's last submitted MV_TESTING data (if any)
+    // This makes the app behave as-if the directory CSV contained those values.
+    try {
+      const saved = localStorage.getItem('cew:mvt:test_results_submitted');
+      if (saved) {
+        const obj = JSON.parse(saved);
+        if (obj && typeof obj === 'object' && obj.byFrom && typeof obj.byFrom === 'object') {
+          mvtTestCsvByFromRef.current = obj.byFrom || {};
+          mvtTestToByFromRef.current = (obj.toByFrom && typeof obj.toByFrom === 'object') ? obj.toByFrom : {};
+          mvtTestResultsSubmittedRef.current = obj;
+          setMvtTestResultsDirty(false);
+          setMvtCsvVersion((v) => v + 1);
+          lastStringLabelKeyRef.current = '';
+          scheduleStringTextLabelUpdate();
+          return () => { cancelled = true; };
+        }
+      }
+    } catch (_e) {
+      void _e;
+    }
 
     (async () => {
       let text = '';
@@ -4111,6 +4280,14 @@ export default function BaseModule({
       if (cancelled) return;
       const parsed = parse(text);
       mvtTestCsvByFromRef.current = parsed.byFrom || {};
+      mvtTestToByFromRef.current = parsed.toByFrom || {};
+      mvtTestResultsSubmittedRef.current = {
+        byFrom: parsed.byFrom || {},
+        toByFrom: parsed.toByFrom || {},
+        updatedAt: new Date().toISOString(),
+        source: 'default',
+      };
+      setMvtTestResultsDirty(false);
       try {
         const m = parsed?._meta || {};
         setMvtCsvDebug({
@@ -4134,7 +4311,7 @@ export default function BaseModule({
       } catch (_e) {
         void _e;
       }
-      // Force a redraw so TESTED colors reflect the loaded CSV immediately.
+      // Force a redraw so SS/SUB colors reflect the loaded CSV immediately.
       lastStringLabelKeyRef.current = '';
       scheduleStringTextLabelUpdate();
     })();
@@ -4142,7 +4319,533 @@ export default function BaseModule({
     return () => {
       cancelled = true;
     };
-  }, [isMVT, scheduleStringTextLabelUpdate, clearMvtTestedLabelsNow]);
+  }, [isMVT, scheduleStringTextLabelUpdate]);
+
+  const mvtUpdateTestPhase = useCallback((fromKeyRaw, phaseRaw, patch) => {
+    const fromKey = normalizeId(fromKeyRaw);
+    const phase = String(phaseRaw || '').trim().toUpperCase();
+    if (!fromKey) return;
+    if (phase !== 'L1' && phase !== 'L2' && phase !== 'L3') return;
+    const byFrom = mvtTestCsvByFromRef.current || {};
+    if (!byFrom[fromKey] || typeof byFrom[fromKey] !== 'object') byFrom[fromKey] = {};
+    const prev = (byFrom[fromKey][phase] && typeof byFrom[fromKey][phase] === 'object')
+      ? byFrom[fromKey][phase]
+      : { value: '', status: 'N/A' };
+    const next = {
+      value: prev?.value != null ? String(prev.value) : '',
+      status: prev?.status != null ? String(prev.status) : 'N/A',
+      ...(patch && typeof patch === 'object' ? patch : {}),
+    };
+    const su = String(next.status || '').trim().toUpperCase();
+    if (!su || su === 'N/A' || su === 'NA') next.status = 'N/A';
+    else if (su === 'PASS') next.status = 'PASS';
+    else next.status = 'failed';
+    byFrom[fromKey][phase] = next;
+    mvtTestCsvByFromRef.current = byFrom;
+    setMvtTestResultsDirty(true);
+    setMvtCsvVersion((v) => v + 1);
+    lastStringLabelKeyRef.current = '';
+    scheduleStringTextLabelUpdate();
+  }, [scheduleStringTextLabelUpdate]);
+
+  const mvtImportTestResultsFromText = useCallback((csvText) => {
+    const rawText = String(csvText || '');
+    const rawLinesArr = rawText.split(/\r?\n/);
+    const lines = rawLinesArr.map((l) => l.trim()).filter(Boolean);
+    if (lines.length <= 1) {
+      alert('CSV looks empty or invalid.');
+      return;
+    }
+    const first = String(lines[0] || '');
+    const sep = (first.includes(';') && first.split(';').length > first.split(',').length) ? ';' : ',';
+    const headerRaw = first.split(sep).map((h) => h.replace(/^\uFEFF/, '').trim());
+    const header = headerRaw.map((h) => h.toLowerCase());
+    const fromIdx = header.findIndex((h) => h === 'from');
+    const phaseIdx = header.findIndex((h) => h === 'phase');
+    const remarksIdx = header.findIndex((h) => h === 'remarks' || h === 'result' || h === 'status');
+    const valueIdx = header.findIndex((h) => h.includes('gω') || h.includes('gohm') || h.includes('value') || h === 'l1' || h === 'l2' || h === 'l3');
+    const toIdx = header.findIndex((h) => h === 'to');
+
+    const out = {};
+    const toByFrom = {};
+    let fromRows = 0;
+    let toRows = 0;
+
+    const normStatus = (s) => {
+      const raw = String(s || '').trim();
+      const u = raw.toUpperCase();
+      if (!u || u === 'N/A' || u === 'NA') return 'N/A';
+      if (u === 'PASS') return 'PASS';
+      if (u.startsWith('FAIL')) return 'failed';
+      return 'failed';
+    };
+
+    if (phaseIdx >= 0) {
+      for (let i = 1; i < lines.length; i++) {
+        const parts = lines[i].split(sep).map((p) => p.trim());
+        const rawFrom = fromIdx >= 0 ? parts[fromIdx] : parts[0];
+        const rawTo = toIdx >= 0 ? parts[toIdx] : parts[1];
+        const rawPhase = phaseIdx >= 0 ? parts[phaseIdx] : parts[2];
+        const rawRemarks = remarksIdx >= 0 ? parts[remarksIdx] : (parts.length ? parts[parts.length - 1] : '');
+        const rawVal = valueIdx >= 0 ? parts[valueIdx] : '';
+        const fromKey = normalizeId(rawFrom);
+        const toKey = normalizeId(rawTo);
+        const phaseKey = String(rawPhase || '').trim().toUpperCase();
+        if (!fromKey) continue;
+        if (phaseKey !== 'L1' && phaseKey !== 'L2' && phaseKey !== 'L3') continue;
+        fromRows += 1;
+        if (toKey) toRows += 1;
+        if (rawTo && !toByFrom[fromKey]) toByFrom[fromKey] = String(rawTo || '').trim();
+        if (!out[fromKey]) out[fromKey] = {};
+        out[fromKey][phaseKey] = { value: rawVal ? `${rawVal}` : '', status: normStatus(rawRemarks) };
+      }
+    } else {
+      const l1Idx = header.findIndex((h) => h === 'l1' || h.startsWith('l1'));
+      const l2Idx = header.findIndex((h) => h === 'l2' || h.startsWith('l2'));
+      const l3Idx = header.findIndex((h) => h === 'l3' || h.startsWith('l3'));
+      const findPhaseStatusIdx = (phase) => {
+        const p = phase.toLowerCase();
+        return header.findIndex((h) => (h.startsWith(p) && (h.includes('remark') || h.includes('status') || h.includes('result'))));
+      };
+      const l1StatusIdx = findPhaseStatusIdx('L1');
+      const l2StatusIdx = findPhaseStatusIdx('L2');
+      const l3StatusIdx = findPhaseStatusIdx('L3');
+      const mkVal = (parts, idx) => {
+        const v = idx >= 0 ? parts[idx] : '';
+        const s = String(v || '').trim();
+        return s ? `${s}` : '';
+      };
+      for (let i = 1; i < lines.length; i++) {
+        const parts = lines[i].split(sep).map((p) => p.trim());
+        const rawFrom = fromIdx >= 0 ? parts[fromIdx] : parts[0];
+        const rawTo = toIdx >= 0 ? parts[toIdx] : parts[1];
+        const fromKey = normalizeId(rawFrom);
+        const toKey = normalizeId(rawTo);
+        if (!fromKey) continue;
+        fromRows += 1;
+        if (toKey) toRows += 1;
+        if (rawTo && !toByFrom[fromKey]) toByFrom[fromKey] = String(rawTo || '').trim();
+        if (!out[fromKey]) out[fromKey] = {};
+        const s1 = l1StatusIdx >= 0 ? normStatus(parts[l1StatusIdx]) : 'N/A';
+        const s2 = l2StatusIdx >= 0 ? normStatus(parts[l2StatusIdx]) : 'N/A';
+        const s3 = l3StatusIdx >= 0 ? normStatus(parts[l3StatusIdx]) : 'N/A';
+        out[fromKey].L1 = { value: mkVal(parts, l1Idx), status: s1 };
+        out[fromKey].L2 = { value: mkVal(parts, l2Idx), status: s2 };
+        out[fromKey].L3 = { value: mkVal(parts, l3Idx), status: s3 };
+      }
+    }
+
+    mvtTestCsvByFromRef.current = out;
+    mvtTestToByFromRef.current = toByFrom;
+    setMvtTestResultsDirty(true);
+    setMvtTestPopup(null);
+    setMvtCsvTotals({ total: (fromRows + toRows) * 3, fromRows, toRows });
+    setMvtCsvVersion((v) => v + 1);
+    lastStringLabelKeyRef.current = '';
+    scheduleStringTextLabelUpdate();
+  }, [scheduleStringTextLabelUpdate]);
+
+  const mvtSubmitTestResults = useCallback(() => {
+    const byFrom = mvtTestCsvByFromRef.current || {};
+    const toByFrom = mvtTestToByFromRef.current || {};
+    const payload = {
+      byFrom,
+      toByFrom,
+      updatedAt: new Date().toISOString(),
+      source: 'user',
+    };
+    try {
+      localStorage.setItem('cew:mvt:test_results_submitted', JSON.stringify(payload));
+    } catch (_e) {
+      void _e;
+    }
+    mvtTestResultsSubmittedRef.current = payload;
+    setMvtTestResultsDirty(false);
+    setMvtTestFilter(null);
+    setMvtCsvVersion((v) => v + 1);
+    lastStringLabelKeyRef.current = '';
+    scheduleStringTextLabelUpdate();
+    alert('Test results submitted successfully!');
+  }, [scheduleStringTextLabelUpdate]);
+
+  const mvtExportTestResultsCsv = useCallback(() => {
+    if (mvtTestResultsDirty) {
+      alert('Please submit test results before exporting.');
+      return;
+    }
+    const payload = mvtTestResultsSubmittedRef.current;
+    if (!payload || !payload.byFrom) {
+      alert('No submitted test results to export.');
+      return;
+    }
+    const byFrom = payload.byFrom || {};
+    const toByFrom = payload.toByFrom || {};
+    const rows = ['from,to,phase,L1 (GΩ),remarks'];
+    const keys = Object.keys(byFrom).sort();
+    const displayFrom = (k) => {
+      const norm = normalizeId(k);
+      if (norm === 'css') return 'CSS';
+      const m = norm.match(/^(ss|sub)(\d{1,2})$/i);
+      if (m) {
+        const nn = String(parseInt(m[2], 10)).padStart(2, '0');
+        return `SUB${nn}`;
+      }
+      return String(k || '').toUpperCase();
+    };
+    keys.forEach((fromKey) => {
+      const row = byFrom[fromKey] || {};
+      const toRaw = String(toByFrom[fromKey] || '').trim();
+      (['L1', 'L2', 'L3']).forEach((ph) => {
+        const obj = row?.[ph] || { value: '', status: 'N/A' };
+        const val = String(obj?.value || '').trim();
+        const status = String(obj?.status || 'N/A').trim();
+        rows.push(`${displayFrom(fromKey)},${toRaw},${ph},${val},${status}`);
+      });
+    });
+    const csvContent = rows.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `mv_circuits_test_export_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [mvtTestResultsDirty]);
+
+  const mvtExportFilteredTestResultsCsv = useCallback(() => {
+    try {
+      if (mvtTestResultsDirty) return;
+      const activeFilter = mvtTestFilterRef.current;
+      if (!activeFilter) return;
+
+      let submitted = mvtTestResultsSubmittedRef.current;
+      if (!submitted) {
+        try {
+          const raw = localStorage.getItem('cew:mvt:test_results_submitted');
+          if (raw) submitted = JSON.parse(raw);
+        } catch (_e) {
+          void _e;
+        }
+      }
+      const byFrom = (submitted && typeof submitted === 'object') ? (submitted.byFrom || {}) : {};
+      const toByFrom = (submitted && typeof submitted === 'object') ? (submitted.toByFrom || {}) : {};
+
+      const classify = (stRaw) => {
+        const u = String(stRaw || '').trim().toUpperCase();
+        if (u === 'PASS') return 'passed';
+        if (u === 'FAIL' || u === 'FAILED' || u.startsWith('FAIL')) return 'failed';
+        return 'not_tested';
+      };
+
+      // For NOT TESTED, include stations present on the map even if missing in CSV (exclude CSS)
+      const mapStations = new Set();
+      if (activeFilter === 'not_tested') {
+        const pts = mvtStationPointsRef.current || [];
+        pts.forEach((pt) => {
+          const raw = String(pt?.stationLabel || pt?.label || pt?.text || '').trim();
+          const stationNorm = mvtCanonicalTerminationStationNorm(raw);
+          if (!stationNorm) return;
+          if (!isMvtTerminationStationNorm(stationNorm)) return;
+          if (stationNorm === 'css') return;
+          mapStations.add(stationNorm);
+        });
+      }
+
+      const keys = activeFilter === 'not_tested'
+        ? Array.from(new Set([...Object.keys(byFrom || {}), ...Array.from(mapStations)])).sort()
+        : Object.keys(byFrom || {}).sort();
+
+      const displayFrom = (k) => {
+        const norm = normalizeId(k);
+        const m = norm.match(/^(ss|sub)(\d{1,2})$/i);
+        if (m) {
+          const nn = String(parseInt(m[2], 10)).padStart(2, '0');
+          return `SUB${nn}`;
+        }
+        return String(k || '').toUpperCase();
+      };
+
+      const rows = ['from,to,phase,L1 (GΩ),remarks'];
+      keys.forEach((fromKey) => {
+        const row = byFrom?.[fromKey] || {};
+        const toRaw = String(toByFrom?.[fromKey] || '').trim();
+        (['L1', 'L2', 'L3']).forEach((ph) => {
+          const obj = row?.[ph] || { value: '', status: 'N/A' };
+          const val = String(obj?.value || '').trim();
+          const st = String(obj?.status || 'N/A').trim();
+          const bucket = classify(st);
+          if (activeFilter === 'passed' && bucket !== 'passed') return;
+          if (activeFilter === 'failed' && bucket !== 'failed') return;
+          if (activeFilter === 'not_tested' && bucket !== 'not_tested') return;
+          rows.push(`${displayFrom(fromKey)},${toRaw},${ph},${val},${st}`);
+        });
+      });
+
+      const csvContent = rows.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const tag = String(activeFilter).toLowerCase();
+      link.download = `mv_circuits_test_${tag}_export_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error exporting filtered MVT CSV:', err);
+    }
+  }, [mvtTestResultsDirty]);
+
+  const lvttComputeTestTotals = useCallback((byInv) => {
+    const rows = byInv && typeof byInv === 'object' ? byInv : {};
+    let total = 0;
+    let passed = 0;
+    let failed = 0;
+    Object.keys(rows).forEach((invKey) => {
+      const obj = rows?.[invKey] || {};
+      (['L1', 'L2', 'L3']).forEach((ph) => {
+        if (!obj || !Object.prototype.hasOwnProperty.call(obj, ph)) return;
+        total += 1;
+        const st = String(obj?.[ph]?.status || 'N/A').trim().toUpperCase();
+        if (st === 'PASS') passed += 1;
+        else if (st === 'FAILED' || st === 'FAIL') failed += 1;
+      });
+    });
+    return { total, passed, failed };
+  }, []);
+
+  const lvttImportTestResultsFromText = useCallback((csvText) => {
+    const rawText = String(csvText || '');
+    const rawLinesArr = rawText.split(/\r?\n/);
+    const lines = rawLinesArr.map((l) => l.trim()).filter(Boolean);
+    if (lines.length <= 1) {
+      lvttTestCsvByInvRef.current = {};
+      setLvttCsvTotals({ total: 0, passed: 0, failed: 0 });
+      setLvttTestResultsDirty(true);
+      setLvttPopup(null);
+      setLvttCsvVersion((v) => v + 1);
+      return;
+    }
+
+    const first = String(lines[0] || '');
+    const sep = (first.includes(';') && first.split(';').length > first.split(',').length) ? ';' : ',';
+    const headerRaw = first
+      .split(sep)
+      .map((h) => h.replace(/^\uFEFF/, '').trim());
+    const header = headerRaw.map((h) => h.toLowerCase());
+
+    const invIdIdx = header.findIndex((h) => h === 'ind_id' || h === 'inv_id' || h === 'id');
+    const phaseIdx = header.findIndex((h) => h === 'phase');
+    const valueIdx = header.findIndex((h) => h === 'value' || h.includes('gω') || h.includes('gohm'));
+    const remarksIdx = header.findIndex((h) => h === 'remarks' || h === 'result' || h === 'status');
+
+    const normStatus = (s) => {
+      const raw = String(s || '').trim();
+      const u = raw.toUpperCase();
+      if (!u) return 'N/A';
+      if (u === 'N/A' || u === 'NA') return 'N/A';
+      if (u === 'PASS') return 'PASS';
+      if (u.startsWith('FAIL')) return 'FAILED';
+      return 'FAILED';
+    };
+
+    const out = {};
+    for (let i = 1; i < lines.length; i++) {
+      const parts = lines[i].split(sep).map((p) => p.trim());
+      const rawInvId = invIdIdx >= 0 ? parts[invIdIdx] : parts[0];
+      const rawPhase = phaseIdx >= 0 ? parts[phaseIdx] : parts[1];
+      const rawValue = valueIdx >= 0 ? parts[valueIdx] : parts[2];
+      const rawRemarks = remarksIdx >= 0 ? parts[remarksIdx] : (parts.length > 5 ? parts[5] : '');
+
+      const invKey = normalizeId(rawInvId);
+      const phaseKey = String(rawPhase || '').trim().toUpperCase();
+      if (!invKey) continue;
+      if (phaseKey !== 'L1' && phaseKey !== 'L2' && phaseKey !== 'L3') continue;
+
+      if (!out[invKey]) out[invKey] = {};
+      out[invKey][phaseKey] = {
+        value: rawValue || '',
+        status: normStatus(rawRemarks),
+      };
+    }
+
+    lvttTestCsvByInvRef.current = out;
+    lvttTestResultsSubmittedRef.current = null;
+    setLvttTestResultsDirty(true);
+    setLvttPopup(null);
+    setLvttCsvTotals(lvttComputeTestTotals(out));
+    setLvttCsvVersion((v) => v + 1);
+  }, [lvttComputeTestTotals]);
+
+  const lvttUpdateTestPhase = useCallback((invNorm, phase, patch) => {
+    const invKey = normalizeId(invNorm);
+    const ph = String(phase || '').trim().toUpperCase();
+    if (!invKey) return;
+    if (ph !== 'L1' && ph !== 'L2' && ph !== 'L3') return;
+
+    const byInv = lvttTestCsvByInvRef.current || {};
+    if (!byInv[invKey]) byInv[invKey] = {};
+    const prev = byInv[invKey]?.[ph] && typeof byInv[invKey][ph] === 'object' ? byInv[invKey][ph] : { value: '', status: 'N/A' };
+    const next = { ...prev, ...(patch || {}) };
+    const statusU = String(next.status || 'N/A').trim().toUpperCase();
+    if (statusU === 'PASS') next.status = 'PASS';
+    else if (statusU === 'FAIL' || statusU === 'FAILED') next.status = 'FAILED';
+    else next.status = 'N/A';
+
+    byInv[invKey][ph] = next;
+    lvttTestCsvByInvRef.current = byInv;
+    lvttTestResultsSubmittedRef.current = null;
+    setLvttTestResultsDirty(true);
+    setLvttCsvTotals(lvttComputeTestTotals(byInv));
+    setLvttCsvVersion((v) => v + 1);
+  }, [lvttComputeTestTotals]);
+
+  const lvttSubmitTestResults = useCallback(() => {
+    const byInv = lvttTestCsvByInvRef.current || {};
+    const payload = {
+      byInv,
+      updatedAt: new Date().toISOString(),
+      source: 'user',
+    };
+    try {
+      localStorage.setItem('cew:lvtt:test_results_submitted', JSON.stringify(payload));
+    } catch (_e) {
+      void _e;
+    }
+    lvttTestResultsSubmittedRef.current = payload;
+    setLvttTestResultsDirty(false);
+    setLvttTestFilter(null);
+    setLvttCsvTotals(lvttComputeTestTotals(byInv));
+    setLvttCsvVersion((v) => v + 1);
+    alert('Test results submitted successfully!');
+  }, [lvttComputeTestTotals]);
+
+  const lvttExportTestResultsCsv = useCallback(() => {
+    if (lvttTestResultsDirty) {
+      alert('Please submit test results before exporting.');
+      return;
+    }
+
+    // Prefer submitted snapshot (user edits), but if there is none and we have a default
+    // CSV loaded from disk, export that as well.
+    const payload = lvttTestResultsSubmittedRef.current;
+    const byInv = (payload && payload.byInv && typeof payload.byInv === 'object')
+      ? (payload.byInv || {})
+      : (lvttTestCsvByInvRef.current || {});
+
+    if (!byInv || Object.keys(byInv).length === 0) {
+      alert('No test results to export.');
+      return;
+    }
+
+    const rows = ['ind_id,phase,value,remarks'];
+    const keys = Object.keys(byInv).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' }));
+    const displayInv = (invNorm) => {
+      const meta = lvttInvMetaByNormRef.current?.[normalizeId(invNorm)] || null;
+      const display = String(meta?.displayId || '').trim();
+      if (display) return display;
+      return String(invNorm || '').toUpperCase();
+    };
+    keys.forEach((invKey) => {
+      const row = byInv[invKey] || {};
+      (['L1', 'L2', 'L3']).forEach((ph) => {
+        const obj = row?.[ph] || { value: '', status: 'N/A' };
+        const val = String(obj?.value || '').trim();
+        const status = String(obj?.status || 'N/A').trim();
+        rows.push(`${displayInv(invKey)},${ph},${val},${status}`);
+      });
+    });
+    const csvContent = rows.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `lv_testing_export_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [lvttTestResultsDirty]);
+
+  const lvttExportFilteredTestResultsCsv = useCallback(() => {
+    try {
+      if (lvttTestResultsDirty) return;
+      const activeFilter = lvttTestFilterRef.current;
+      if (!activeFilter) return;
+
+      let submitted = lvttTestResultsSubmittedRef.current;
+      if (!submitted) {
+        try {
+          const raw = localStorage.getItem('cew:lvtt:test_results_submitted');
+          if (raw) submitted = JSON.parse(raw);
+        } catch (_e) {
+          void _e;
+        }
+      }
+
+      // Prefer submitted snapshot; fall back to the currently loaded CSV.
+      const byInv = (submitted && typeof submitted === 'object' && submitted.byInv && typeof submitted.byInv === 'object')
+        ? (submitted.byInv || {})
+        : (lvttTestCsvByInvRef.current || {});
+      const metaKeys = Object.keys(lvttInvMetaByNormRef.current || {});
+
+      const classify = (stRaw) => {
+        const u = String(stRaw || '').trim().toUpperCase();
+        if (u === 'PASS') return 'passed';
+        if (u === 'FAIL' || u === 'FAILED' || u.startsWith('FAIL')) return 'failed';
+        return 'not_tested';
+      };
+
+      const keys = activeFilter === 'not_tested'
+        ? Array.from(new Set([...Object.keys(byInv || {}), ...metaKeys]))
+          .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' }))
+        : Object.keys(byInv || {}).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' }));
+
+      const displayInv = (invNorm) => {
+        const meta = lvttInvMetaByNormRef.current?.[normalizeId(invNorm)] || null;
+        const display = String(meta?.displayId || '').trim();
+        if (display) return display;
+        return String(invNorm || '').toUpperCase();
+      };
+
+      const rows = ['ind_id,phase,value,remarks'];
+      keys.forEach((invKey) => {
+        const row = byInv?.[invKey] || {};
+        (['L1', 'L2', 'L3']).forEach((ph) => {
+          const obj = row?.[ph] || { value: '', status: 'N/A' };
+          const val = String(obj?.value || '').trim();
+          const st = String(obj?.status || 'N/A').trim();
+          const bucket = classify(st);
+          if (activeFilter === 'passed' && bucket !== 'passed') return;
+          if (activeFilter === 'failed' && bucket !== 'failed') return;
+          if (activeFilter === 'not_tested' && bucket !== 'not_tested') return;
+          rows.push(`${displayInv(invKey)},${ph},${val},${st}`);
+        });
+      });
+
+      if (rows.length <= 1) {
+        alert('No matching test results to export for the selected filter.');
+        return;
+      }
+
+      const csvContent = rows.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const tag = String(activeFilter).toLowerCase();
+      link.download = `lv_testing_${tag}_export_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error exporting filtered LVTT CSV:', err);
+    }
+  }, [lvttTestResultsDirty]);
 
   // LVTT: load inverter test status CSV (grouped by `ind_id`, phase L1/L2/L3 rows per inverter).
   useEffect(() => {
@@ -4151,8 +4854,28 @@ export default function BaseModule({
       lvttInvMetaByNormRef.current = {};
       setLvttPopup(null);
       setLvttCsvTotals({ total: 0, passed: 0, failed: 0 });
+      setLvttTestResultsDirty(false);
+      lvttTestResultsSubmittedRef.current = null;
+      setLvttCsvVersion((v) => v + 1);
       clearLvttTermCounterLabelsNow();
       return;
+    }
+
+    // Prefer the last submitted snapshot (if any)
+    try {
+      const raw = localStorage.getItem('cew:lvtt:test_results_submitted');
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && parsed.byInv && typeof parsed.byInv === 'object') {
+        lvttTestCsvByInvRef.current = parsed.byInv;
+        lvttTestResultsSubmittedRef.current = parsed;
+        setLvttTestResultsDirty(false);
+        setLvttPopup(null);
+        setLvttCsvTotals(lvttComputeTestTotals(parsed.byInv));
+        setLvttCsvVersion((v) => v + 1);
+        return;
+      }
+    } catch (_e) {
+      void _e;
     }
 
     let cancelled = false;
@@ -4238,6 +4961,9 @@ export default function BaseModule({
       const parsed = parse(text);
       lvttTestCsvByInvRef.current = parsed.byInv || {};
       setLvttCsvTotals({ total: parsed.total || 0, passed: parsed.passed || 0, failed: parsed.failed || 0 });
+      setLvttTestResultsDirty(false);
+      lvttTestResultsSubmittedRef.current = null;
+      setLvttCsvVersion((v) => v + 1);
       // eslint-disable-next-line no-console
       console.log('[LVTT CSV] loaded', { inverters: Object.keys(lvttTestCsvByInvRef.current).length, passed: parsed.passed, failed: parsed.failed });
     })();
@@ -4245,7 +4971,7 @@ export default function BaseModule({
     return () => {
       cancelled = true;
     };
-  }, [isLVTT]);
+  }, [isLVTT, clearLvttTermCounterLabelsNow, lvttComputeTestTotals]);
 
   // LVTT: refresh inv_id label colors when sub-mode, CSV, or manual counts change.
   useEffect(() => {
@@ -4264,20 +4990,37 @@ export default function BaseModule({
       const nextText = displayId;
       let nextColor = 'rgba(255,255,255,0.98)';
 
+      const activeFilter = lvttTestFilterRef.current;
+
       if (mode === 'termination') {
         const terminated = Math.max(0, Math.min(3, Number(lvttTerminationByInvRef.current?.[invNorm] ?? 0)));
         const locked = terminated === 3;
         nextColor = locked ? 'rgba(34,197,94,0.98)' : 'rgba(239,68,68,0.98)';
       } else {
         const testData = lvttTestCsvByInvRef.current?.[invNorm];
-        if (testData) {
-          const l1 = testData.L1?.status || 'N/A';
-          const l2 = testData.L2?.status || 'N/A';
-          const l3 = testData.L3?.status || 'N/A';
-          const anyFail = l1 === 'FAILED' || l2 === 'FAILED' || l3 === 'FAILED';
-          const allPass = l1 === 'PASS' && l2 === 'PASS' && l3 === 'PASS';
-          if (anyFail) nextColor = 'rgba(239,68,68,0.98)';
-          else if (allPass) nextColor = 'rgba(34,197,94,0.98)';
+        const l1 = String(testData?.L1?.status || 'N/A').trim().toUpperCase();
+        const l2 = String(testData?.L2?.status || 'N/A').trim().toUpperCase();
+        const l3 = String(testData?.L3?.status || 'N/A').trim().toUpperCase();
+        const anyFail = l1 === 'FAILED' || l2 === 'FAILED' || l3 === 'FAILED' || l1 === 'FAIL' || l2 === 'FAIL' || l3 === 'FAIL';
+        const allPass = l1 === 'PASS' && l2 === 'PASS' && l3 === 'PASS';
+        if (anyFail) nextColor = 'rgba(239,68,68,0.98)';
+        else if (allPass) nextColor = 'rgba(34,197,94,0.98)';
+
+        // Filter highlighting (DCCT-style): recolor matches and dim non-matches
+        if (activeFilter) {
+          const hasPass = l1 === 'PASS' || l2 === 'PASS' || l3 === 'PASS';
+          const hasFail = anyFail;
+          const hasNA = (l1 === 'N/A') || (l2 === 'N/A') || (l3 === 'N/A');
+          const matches = activeFilter === 'passed' ? hasPass : activeFilter === 'failed' ? hasFail : hasNA;
+          if (matches) {
+            nextColor = activeFilter === 'passed'
+              ? 'rgba(34,197,94,0.98)'
+              : activeFilter === 'failed'
+              ? 'rgba(239,68,68,0.98)'
+              : 'rgba(148,163,184,0.98)';
+          } else {
+            nextColor = 'rgba(148,163,184,0.18)';
+          }
         }
       }
 
@@ -4289,7 +5032,15 @@ export default function BaseModule({
     };
 
     Object.keys(labels).forEach((k) => updateOne(k, labels[k]));
-  }, [isLVTT, lvttSubMode, lvttTerminationByInv, lvttCsvTotals]);
+  }, [isLVTT, lvttSubMode, lvttTerminationByInv, lvttCsvTotals, lvttTestFilter]);
+
+  // MVT: repaint SS/SUB labels when filter toggles (testing mode)
+  useEffect(() => {
+    if (!isMVT) return;
+    if (String(mvtSubModeRef.current || 'termination') !== 'testing') return;
+    lastStringLabelKeyRef.current = '';
+    scheduleStringTextLabelUpdate();
+  }, [isMVT, mvtTestFilter, scheduleStringTextLabelUpdate]);
 
   // LVTT: draw clickable termination counters (0/3..3/3) under each inv_id, MV-termination-style.
   useEffect(() => {
@@ -4749,6 +5500,28 @@ export default function BaseModule({
       });
 
       prevHistoryInvHighlightRef.current = idsToHighlight;
+      return;
+    }
+
+    // MVT (MV_TERMINATION): persistently highlight station labels/counters (orange)
+    // IMPORTANT: This must be driven by render-time logic, otherwise any label refresh will reset styles.
+    if (isMVT) {
+      const shouldHighlight =
+        Boolean(historyOpenRef.current) &&
+        Boolean(historySelectedRecordId) &&
+        String(mvtSubMode || 'termination') === 'termination';
+
+      const idsToHighlight = shouldHighlight
+        ? new Set(editingPolygonIds.map((x) => mvtCanonicalTerminationStationNorm(x)).filter(Boolean))
+        : new Set();
+
+      mvtHistoryHighlightStationSetRef.current = idsToHighlight;
+
+      // Force a redraw so labels/counters apply the highlight immediately.
+      try {
+        lastStringLabelKeyRef.current = '';
+        scheduleStringTextLabelUpdate();
+      } catch (_e) { void _e; }
       return;
     }
 
@@ -5552,10 +6325,78 @@ export default function BaseModule({
           // Columns: ID, Insulation Resistance (-), Insulation Resistance (+), remark
           // remark can be PASSED or FAILED
           const lines = text.split(/\r?\n/).filter((l) => l && l.trim());
+          // Prefer submitted snapshot when available (submit-gated export behavior).
+          try {
+            const rawSubmitted = localStorage.getItem('cew:dcct:test_results_submitted');
+            if (rawSubmitted) {
+              const parsed = JSON.parse(rawSubmitted);
+              const rawRiso = parsed?.risoById && typeof parsed.risoById === 'object' ? parsed.risoById : {};
+              const normalizedRisoById = {};
+              Object.keys(rawRiso || {}).forEach((k) => {
+                const rec = rawRiso[k] || {};
+                const idNorm = dcctNormalizeId(rec?.originalId || k);
+                if (!idNorm) return;
+                normalizedRisoById[idNorm] = {
+                  ...rec,
+                  originalId: rec?.originalId != null ? rec.originalId : String(k || '').trim(),
+                };
+              });
+
+              const rawRows = Array.isArray(parsed?.rows) ? parsed.rows : [];
+              const normalizedRows = rawRows
+                .map((r) => {
+                  const originalId = String(r?.originalId || '').trim();
+                  const idNorm = dcctNormalizeId(originalId || r?.idNorm);
+                  return idNorm ? { originalId, idNorm } : null;
+                })
+                .filter(Boolean);
+              dcctRowsRef.current = normalizedRows;
+
+              const testResults = {};
+              let passedCount = 0;
+              let failedCount = 0;
+              Object.keys(normalizedRisoById || {}).forEach((id) => {
+                const st = dcctNormalizeStatus(normalizedRisoById[id]?.status || normalizedRisoById[id]?.remarkRaw);
+                if (st === 'passed') { testResults[id] = 'passed'; passedCount++; }
+                else if (st === 'failed') { testResults[id] = 'failed'; failedCount++; }
+              });
+              dcctRisoByIdRef.current = normalizedRisoById;
+              setDcctTestData(testResults);
+              setDcctCsvTotals({ total: Object.keys(normalizedRisoById || {}).length, passed: passedCount, failed: failedCount });
+              const normalizedPayload = {
+                ...(parsed && typeof parsed === 'object' ? parsed : {}),
+                risoById: normalizedRisoById,
+                rows: normalizedRows,
+              };
+              dcctTestResultsSubmittedRef.current = normalizedPayload;
+              try {
+                localStorage.setItem('cew:dcct:test_results_submitted', JSON.stringify(normalizedPayload));
+              } catch (_e) {
+                void _e;
+              }
+              setDcctTestResultsDirty(false);
+              setStringMatchVersion((v) => v + 1);
+              // DCCT doesn't use lengthData
+              setLengthData({});
+              setTotalPlus(0);
+              setTotalMinus(0);
+              setMvfSegments([]);
+              mvfSegmentLenByKeyRef.current = {};
+              setSelectedPolygons(new Set(committedPolygonsRef.current || []));
+              setCompletedPlus(0);
+              setCompletedMinus(0);
+              return;
+            }
+          } catch (_e) {
+            void _e;
+          }
           if (lines.length <= 1) {
             setDcctTestData({});
             setDcctCsvTotals({ total: 0, passed: 0, failed: 0 });
             dcctRisoByIdRef.current = {};
+            dcctRowsRef.current = [];
+            setDcctTestResultsDirty(false);
+            dcctTestResultsSubmittedRef.current = null;
             return;
           }
 
@@ -5565,11 +6406,8 @@ export default function BaseModule({
           const minusIdx = header.findIndex((h) => h.includes('insulation') && h.includes('(-'));
           const plusIdx = header.findIndex((h) => h.includes('insulation') && h.includes('(+)'));
 
-          const testResults = {}; // normalizedId -> 'passed' | 'failed'
           const risoById = {}; // normalizedId -> { plus, minus, status, remarkRaw, originalId }
-          let passedCount = 0;
-          let failedCount = 0;
-          const uniqueIds = new Set();
+          const dcctRows = []; // preserve duplicates + original order
 
           for (let i = 1; i < lines.length; i++) {
             const line = lines[i];
@@ -5580,45 +6418,67 @@ export default function BaseModule({
             const rawMinus = minusIdx >= 0 ? parts[minusIdx] : (parts.length >= 2 ? parts[1] : '');
             const rawPlus = plusIdx >= 0 ? parts[plusIdx] : (parts.length >= 3 ? parts[2] : '');
 
-            const id = normalizeId(rawId);
+            const id = dcctNormalizeId(rawId);
             const originalId = String(rawId || '').trim(); // Preserve original format
             const remarkRaw = String(rawRemark || '').trim();
-            const remark = remarkRaw.toLowerCase();
 
             if (!id) continue;
 
-            // Only count unique IDs for totals
-            if (!uniqueIds.has(id)) {
-              uniqueIds.add(id);
-              // Determine test result (use first occurrence if duplicate rows exist)
-              let status = null;
-              if (remark === 'passed' || remark === 'pass') {
-                status = 'passed';
-                testResults[id] = 'passed';
-                passedCount++;
-              } else if (remark === 'failed' || remark === 'fail') {
-                status = 'failed';
-                testResults[id] = 'failed';
-                failedCount++;
-              }
+            dcctRows.push({ originalId, idNorm: id });
 
+            const nextPlus = String(rawPlus ?? '').trim();
+            const nextMinus = String(rawMinus ?? '').trim();
+            const nextStatus = dcctNormalizeStatus(remarkRaw);
+
+            const prev = risoById[id];
+            if (!prev) {
               risoById[id] = {
-                plus: String(rawPlus ?? '').trim(),
-                minus: String(rawMinus ?? '').trim(),
-                status,
+                plus: nextPlus,
+                minus: nextMinus,
+                status: nextStatus,
                 remarkRaw,
                 originalId,
+              };
+            } else {
+              risoById[id] = {
+                ...prev,
+                plus: prev.plus && String(prev.plus).trim() !== '' ? prev.plus : nextPlus,
+                minus: prev.minus && String(prev.minus).trim() !== '' ? prev.minus : nextMinus,
+                status: prev.status != null ? prev.status : nextStatus,
+                remarkRaw: prev.remarkRaw && String(prev.remarkRaw).trim() !== '' ? prev.remarkRaw : remarkRaw,
               };
             }
           }
 
+          const testResults = {}; // normalizedId -> 'passed' | 'failed'
+          let passedCount = 0;
+          let failedCount = 0;
+          Object.keys(risoById || {}).forEach((id) => {
+            const st = dcctNormalizeStatus(risoById[id]?.status || risoById[id]?.remarkRaw);
+            if (st === 'passed') { testResults[id] = 'passed'; passedCount++; }
+            else if (st === 'failed') { testResults[id] = 'failed'; failedCount++; }
+          });
+
           setDcctTestData(testResults);
           dcctRisoByIdRef.current = risoById;
-          setDcctCsvTotals({
-            total: uniqueIds.size,
-            passed: passedCount,
-            failed: failedCount,
-          });
+          dcctRowsRef.current = dcctRows;
+          setDcctCsvTotals({ total: Object.keys(risoById || {}).length, passed: passedCount, failed: failedCount });
+          setDcctTestResultsDirty(false);
+
+          // Seed a baseline submitted snapshot from the shipped dc_riso.csv so Export
+          // returns the default file output when the user hasn't submitted anything yet.
+          const payload = {
+            risoById: { ...(risoById || {}) },
+            rows: Array.isArray(dcctRows) ? dcctRows : [],
+            updatedAt: Date.now(),
+            source: 'default',
+          };
+          dcctTestResultsSubmittedRef.current = payload;
+          try {
+            localStorage.setItem('cew:dcct:test_results_submitted', JSON.stringify(payload));
+          } catch (_e) {
+            void _e;
+          }
 
           // DCCT doesn't use lengthData
           setLengthData({});
@@ -5781,16 +6641,9 @@ export default function BaseModule({
     const panels = polygonById.current || {};
 
     // DCCT stroke tuning: keep outlines readable but not overly thick.
-    const DCCT_STROKE = {
-      baseWeight: 0.75,
-      statusWeight: 1.25,
-      highlightWeight: 1.85,
-      dimWeight: 0.5,
-    };
-
     const defaultStyle = {
-      color: 'rgba(255,255,255,0.35)',
-      weight: DCCT_STROKE.baseWeight,
+      color: FULL_GEOJSON_BASE_COLOR,
+      weight: FULL_GEOJSON_BASE_WEIGHT,
       fill: false,
       fillOpacity: 0,
     };
@@ -5813,10 +6666,10 @@ export default function BaseModule({
         let weight = defaultStyle.weight;
         if (status === 'passed') {
           color = 'rgba(5,150,105,0.96)';
-          weight = DCCT_STROKE.statusWeight;
+          weight = FULL_GEOJSON_BASE_WEIGHT;
         } else if (status === 'failed') {
           color = 'rgba(239,68,68,0.98)';
-          weight = DCCT_STROKE.statusWeight;
+          weight = FULL_GEOJSON_BASE_WEIGHT;
         }
 
         // Apply filter highlight/dim
@@ -5825,12 +6678,12 @@ export default function BaseModule({
           const matches = activeFilter === status;
           if (matches) {
             // Highlight matching tables
-            weight = DCCT_STROKE.highlightWeight;
+            weight = 1.85;
             opacity = 1.0;
           } else {
             // Dim non-matching tables
             opacity = 0.12;
-            weight = DCCT_STROKE.dimWeight;
+            weight = 0.5;
           }
         }
 
@@ -5855,6 +6708,7 @@ export default function BaseModule({
     polygonById.current = {};
     polygonIdCounter.current = 0;
     stringTextPointsRef.current = [];
+    mvtStationPointsRef.current = [];
     stringTextGridRef.current = null;
     stringTextLabelPoolRef.current = [];
     stringTextLabelActiveCountRef.current = 0;
@@ -5864,16 +6718,10 @@ export default function BaseModule({
       try { stringTextLayerRef.current.remove(); } catch (_e) { void _e; }
       stringTextLayerRef.current = null;
     }
-    if (mvtTestedLayerRef.current) {
-      try { mvtTestedLayerRef.current.remove(); } catch (_e) { void _e; }
-      mvtTestedLayerRef.current = null;
-    }
     if (mvtCounterLayerRef.current) {
       try { mvtCounterLayerRef.current.remove(); } catch (_e) { void _e; }
       mvtCounterLayerRef.current = null;
     }
-    mvtTestedLabelPoolRef.current = [];
-    mvtTestedLabelActiveCountRef.current = 0;
     mvtCounterLabelPoolRef.current = [];
     mvtCounterLabelActiveCountRef.current = 0;
 
@@ -6019,7 +6867,7 @@ export default function BaseModule({
               
               const lat = coords[1];
               const lng = coords[0];
-              const stringId = normalizeId(feature.properties.text);
+              const stringId = isDCCT ? dcctNormalizeId(feature.properties.text) : normalizeId(feature.properties.text);
               
               // Save point info
               collectedPoints.push({ id: stringId, lat, lng });
@@ -6050,19 +6898,33 @@ export default function BaseModule({
           stringLayer.addTo(mapRef.current);
           layersRef.current.push(stringLayer);
 
-          // MVT: create a separate interactive layer for "TESTED" labels (clickable).
+          // MVT: build a small cached list of station labels for click hit-testing in MV_TESTING.
           if (isMVT) {
-            const testedLayer = L.layerGroup();
-            mvtTestedLayerRef.current = testedLayer;
-            testedLayer.addTo(mapRef.current);
-            layersRef.current.push(testedLayer);
+            try {
+              const stations = [];
+              const pts = stringTextPointsRef.current || [];
+              for (let i = 0; i < pts.length; i++) {
+                const p = pts[i];
+                const raw = String(p?.text || '').trim();
+                if (!raw) continue;
+                const stationKey = mvtCanonicalTerminationStationNorm(raw);
+                if (!stationKey || !isMvtTerminationStationNorm(stationKey)) continue;
+                stations.push({ lat: p.lat, lng: p.lng, stationKey, stationLabel: raw });
+              }
+              mvtStationPointsRef.current = stations;
+            } catch (_e) {
+              void _e;
+              mvtStationPointsRef.current = [];
+            }
+          }
 
+          // MVT: create a separate interactive layer for clickable termination counters.
+          if (isMVT) {
             const counterLayer = L.layerGroup();
             mvtCounterLayerRef.current = counterLayer;
             counterLayer.addTo(mapRef.current);
             layersRef.current.push(counterLayer);
           } else {
-            mvtTestedLayerRef.current = null;
             mvtCounterLayerRef.current = null;
           }
 
@@ -6760,6 +7622,26 @@ export default function BaseModule({
             continue;
           }
 
+          // MVT: tables (full.geojson) must NOT be selectable; MV Termination/Testing is label-driven.
+          if (isMVT) {
+            const fullLayer = L.geoJSON(data, {
+              renderer: canvasRenderer,
+              interactive: false,
+              style: () => ({
+                color: FULL_GEOJSON_BASE_COLOR,
+                weight: FULL_GEOJSON_BASE_WEIGHT,
+                fill: false,
+                fillOpacity: 0,
+              }),
+            });
+            fullLayer.addTo(mapRef.current);
+            layersRef.current.push(fullLayer);
+            if (fullLayer.getBounds().isValid()) {
+              allBounds.extend(fullLayer.getBounds());
+            }
+            continue;
+          }
+
           // TIP: Track feature index for panel pairing
           let tipFeatureIndex = 0;
           const tipFeatureToPolygonId = new Map(); // featureIndex -> polygonId
@@ -7011,16 +7893,29 @@ export default function BaseModule({
                   const sidRaw = polygonInfo?.stringId || '';
                   const sid = normalizeId(sidRaw);
                   if (!sid) return;
-                  let center = null;
-                  try {
-                    if (typeof featureLayer.getBounds === 'function') center = featureLayer.getBounds().getCenter();
-                  } catch (_e) {
-                    void _e;
-                    center = null;
-                  }
-                  const pos = center || e?.latlng;
-                  if (!pos) return;
-                  dcctToggleTestOverlay(sid, pos);
+                  const oe = e?.originalEvent;
+                  const x = oe?.clientX ?? 0;
+                  const y = oe?.clientY ?? 0;
+                  const rec = dcctRisoByIdRef.current?.[sid] || null;
+                  const isInCsv = rec !== null;
+                  const plus = rec?.plus != null ? String(rec.plus).trim() : '';
+                  const minus = rec?.minus != null ? String(rec.minus).trim() : '';
+                  const plusVal = plus || (isInCsv ? '999' : '0');
+                  const minusVal = minus || (isInCsv ? '999' : '0');
+                  const st = dcctNormalizeStatus(rec?.status || rec?.remarkRaw) || null;
+                  const displayId = dcctFormatDisplayId(sid, rec?.originalId);
+                  setDcctPopup((prev) => {
+                    if (prev && prev.idNorm === sid) return null;
+                    return {
+                      idNorm: sid,
+                      displayId,
+                      draftPlus: plusVal,
+                      draftMinus: minusVal,
+                      draftStatus: st,
+                      x,
+                      y,
+                    };
+                  });
                 });
                 return;
               }
@@ -7893,12 +8788,10 @@ export default function BaseModule({
                     const oe = e?.originalEvent;
                     const x = oe?.clientX ?? 0;
                     const y = oe?.clientY ?? 0;
-                    const testData = lvttTestCsvByInvRef.current?.[invIdNorm] || null;
                     setLvttPopup({
                       mode: 'testing',
                       invId: displayId,
                       invIdNorm,
-                      testData,
                       x,
                       y,
                     });
@@ -10566,56 +11459,106 @@ export default function BaseModule({
             }
           };
 
-          const hitRadius = 22; // px
+          // MV_TESTING: make substation label clicks reliable even if canvas-label click events don't fire.
+          const hitRadius = 120; // px
 
-          // 1) TESTED click (always clickable)
+          // 0) Prefer cached station point hit-test (tiny list, very reliable)
           try {
-            const pool = mvtTestedLabelPoolRef.current || [];
-            const active = mvtTestedLabelActiveCountRef.current || 0;
-            let best = null;
-            let bestD = Infinity;
-            for (let i = 0; i < active; i++) {
-              const lbl = pool[i];
-              const d = distToLabelPx(lbl);
-              if (d < hitRadius && d < bestD) { bestD = d; best = lbl; }
+            if (String(mvtSubModeRef.current || 'termination') === 'testing') {
+              const stations = mvtStationPointsRef.current || [];
+              let bestStation = null;
+              let bestD = Infinity;
+              for (let i = 0; i < stations.length; i++) {
+                const s = stations[i];
+                if (!s) continue;
+                const pt = map.latLngToLayerPoint([s.lat, s.lng]);
+                const d = Math.sqrt((pt.x - clickPoint.x) ** 2 + (pt.y - clickPoint.y) ** 2);
+                if (d < hitRadius && d < bestD) { bestD = d; bestStation = s; }
+              }
+              if (bestStation) {
+                const stationLabel = String(bestStation.stationLabel || '').trim();
+                const csv = mvtTestCsvByFromRef.current || {};
+                const normSt = normalizeId(stationLabel);
+                const candKeys = [normSt];
+                const pad2 = (n) => String(n).padStart(2, '0');
+                const mSs = normSt.match(/^ss(\d{1,2})$/i);
+                const mSub = normSt.match(/^sub(\d{1,2})$/i);
+                if (mSs) {
+                  const nn = pad2(mSs[1]);
+                  candKeys.push(`ss${nn}`);
+                  candKeys.push(`sub${nn}`);
+                }
+                if (mSub) {
+                  const nn = pad2(mSub[1]);
+                  candKeys.push(`sub${nn}`);
+                  candKeys.push(`ss${nn}`);
+                }
+                let fromKey = '';
+                for (const k of candKeys) {
+                  if (csv[k]) { fromKey = k; break; }
+                }
+                if (!fromKey) {
+                  const preferred = candKeys.find((k) => /^sub\d{2}$/i.test(k)) || candKeys[0] || '';
+                  fromKey = preferred;
+                }
+                const x = e?.clientX ?? 0;
+                const y = e?.clientY ?? 0;
+                setMvtTestPanel(null);
+                setMvtTestPopup({ stationLabel, fromKey, x, y });
+                draggingRef.current = null;
+                return;
+              }
             }
-            if (best) {
-              const stationLabel = String(best._mvtStationLabel || '').trim();
-              // IMPORTANT: read directly from latest CSV ref to avoid stale pooled label fields
-              const csv = mvtTestCsvByFromRef.current || {};
-              const normSt = normalizeId(stationLabel);
-              const candKeys = [normSt];
-              const pad2 = (n) => String(n).padStart(2, '0');
-              const mSs = normSt.match(/^ss(\d{1,2})$/i);
-              const mSub = normSt.match(/^sub(\d{1,2})$/i);
-              if (mSs) {
-                const nn = pad2(mSs[1]);
-                candKeys.push(`ss${nn}`);
-                candKeys.push(`sub${nn}`);
+          } catch (_e) {
+            void _e;
+          }
+
+          // 1) Substation label click (MV_TESTING)
+          try {
+            if (String(mvtSubModeRef.current || 'termination') === 'testing') {
+              const pool = stringTextLabelPoolRef.current || [];
+              const active = stringTextLabelActiveCountRef.current || 0;
+              let best = null;
+              let bestD = Infinity;
+              for (let i = 0; i < active; i++) {
+                const lbl = pool[i];
+                if (!lbl || !lbl._mvtStationNorm) continue;
+                const d = distToLabelPx(lbl);
+                if (d < hitRadius && d < bestD) { bestD = d; best = lbl; }
               }
-              if (mSub) {
-                const nn = pad2(mSub[1]);
-                candKeys.push(`sub${nn}`);
-                candKeys.push(`ss${nn}`);
+              if (best) {
+                const stationLabel = String(best._mvtStationLabel || '').trim();
+                const csv = mvtTestCsvByFromRef.current || {};
+                const normSt = normalizeId(stationLabel);
+                const candKeys = [normSt];
+                const pad2 = (n) => String(n).padStart(2, '0');
+                const mSs = normSt.match(/^ss(\d{1,2})$/i);
+                const mSub = normSt.match(/^sub(\d{1,2})$/i);
+                if (mSs) {
+                  const nn = pad2(mSs[1]);
+                  candKeys.push(`ss${nn}`);
+                  candKeys.push(`sub${nn}`);
+                }
+                if (mSub) {
+                  const nn = pad2(mSub[1]);
+                  candKeys.push(`sub${nn}`);
+                  candKeys.push(`ss${nn}`);
+                }
+                let fromKey = '';
+                for (const k of candKeys) {
+                  if (csv[k]) { fromKey = k; break; }
+                }
+                if (!fromKey) {
+                  const preferred = candKeys.find((k) => /^sub\d{2}$/i.test(k)) || candKeys[0] || '';
+                  fromKey = preferred;
+                }
+                const x = e?.clientX ?? 0;
+                const y = e?.clientY ?? 0;
+                setMvtTestPanel(null);
+                setMvtTestPopup({ stationLabel, fromKey, x, y });
+                draggingRef.current = null;
+                return;
               }
-              let fromKey = '';
-              let row = null;
-              for (const k of candKeys) {
-                if (csv[k]) { fromKey = k; row = csv[k]; break; }
-              }
-              const phases = row ? {
-                L1: row.L1 || { value: '', status: 'N/A' },
-                L2: row.L2 || { value: '', status: 'N/A' },
-                L3: row.L3 || { value: '', status: 'N/A' },
-              } : { L1: { value: '', status: 'N/A' }, L2: { value: '', status: 'N/A' }, L3: { value: '', status: 'N/A' } };
-              const x = draggingRef.current?.startPoint?.x ?? 0;
-              const y = draggingRef.current?.startPoint?.y ?? 0;
-              // Prefer the click-location popup (panel may stay unused in MVT)
-              setMvtTestPanel(null);
-              setMvtTestPopup({ stationLabel, fromKey, phases, x, y });
-              // Don't allow this click to act as selection elsewhere
-              draggingRef.current = null;
-              return;
             }
           } catch (_e) {
             void _e;
@@ -10636,8 +11579,9 @@ export default function BaseModule({
               const stationNorm = String(best._mvtStationNorm || '');
               const lockedNow = Boolean(best._mvtLocked);
               if (stationNorm && !lockedNow) {
-                const prevVal = Math.max(0, Math.min(3, Number(mvtTerminationByStationRef.current?.[stationNorm] ?? 0)));
-                const nextVal = Math.min(3, prevVal + 1);
+                const max = mvtTerminationMaxForNorm(stationNorm);
+                const prevVal = clampMvtTerminationCount(stationNorm, mvtTerminationByStationRef.current?.[stationNorm] ?? 0);
+                const nextVal = max ? Math.min(max, prevVal + 1) : prevVal;
                 if (nextVal !== prevVal) {
                   mvtTermPushHistory(stationNorm, prevVal, nextVal);
                   setMvtTerminationByStation((prev) => {
@@ -11022,6 +11966,7 @@ export default function BaseModule({
             // DCCT: Clicking on empty area clears filter + all test overlays
             setDcctFilter(null);
             dcctClearTestOverlays();
+            setDcctPopup(null);
           }
         }
       }
@@ -11245,12 +12190,92 @@ export default function BaseModule({
 
     fetchAllGeoJson();
 
-    // DCCT: Clear test overlays immediately when clicking empty map.
-    // Table clicks stop propagation/prevent default, so this typically only triggers for empty clicks.
-    const onMapClick = () => {
-      if (!isDCCTRef.current) return;
-      setDcctFilter(null);
-      dcctClearTestOverlays();
+    // Global map click handler:
+    // - DCCT: Clear test overlays when clicking empty map.
+    // - MVT (testing): SS/SUB labels live in a pointerEvents:none pane, so their own click events won't fire.
+    //   We open the MV testing popup via hit-testing here (only in MV testing mode), without changing panes.
+    const onMapClick = (e) => {
+      // DCCT behavior (unchanged)
+      if (isDCCTRef.current) {
+        setDcctFilter(null);
+        dcctClearTestOverlays();
+      }
+
+      // MVT testing: station click -> popup
+      if (!isMVTRef.current) return;
+      if (String(mvtSubModeRef.current || 'termination') !== 'testing') return;
+      const map = mapRef.current;
+      if (!map) return;
+
+      const stations = mvtStationPointsRef.current || [];
+      if (!stations.length) return;
+
+      const oe = e?.originalEvent;
+      const x = oe?.clientX ?? 0;
+      const y = oe?.clientY ?? 0;
+
+      let clickPt = e?.containerPoint;
+      if (!clickPt && oe && typeof map.mouseEventToContainerPoint === 'function') {
+        try {
+          clickPt = map.mouseEventToContainerPoint(oe);
+        } catch (_e) {
+          void _e;
+          clickPt = null;
+        }
+      }
+      if (!clickPt) return;
+
+      let best = null;
+      let bestD2 = Infinity;
+      for (let i = 0; i < stations.length; i++) {
+        const st = stations[i];
+        if (!st) continue;
+        const sp = map.latLngToContainerPoint([st.lat, st.lng]);
+        const dx = sp.x - clickPt.x;
+        const dy = sp.y - clickPt.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestD2) {
+          bestD2 = d2;
+          best = st;
+        }
+      }
+
+      const HIT_PX = 60; // generous hit radius; SS/SUB text anchor can be offset from the latlng
+      if (!best || bestD2 > HIT_PX * HIT_PX) return;
+
+      const stationLabel = String(best.stationLabel || '').trim() || String(best.stationKey || '').trim();
+      const stationNorm = mvtCanonicalTerminationStationNorm(stationLabel);
+      if (!stationNorm) return;
+      if (stationNorm === 'css') return;
+
+      // Resolve fromKey with SSxx/SUBxx alias support (same as label click handler).
+      const csv = mvtTestCsvByFromRef.current || {};
+      const normSt = normalizeId(stationLabel || stationNorm);
+      const candKeys = [normSt];
+      const pad2 = (n) => String(n).padStart(2, '0');
+      const mSs = normSt.match(/^ss(\d{1,2})$/i);
+      const mSub = normSt.match(/^sub(\d{1,2})$/i);
+      if (mSs) {
+        const nn = pad2(mSs[1]);
+        candKeys.push(`ss${nn}`);
+        candKeys.push(`sub${nn}`);
+      }
+      if (mSub) {
+        const nn = pad2(mSub[1]);
+        candKeys.push(`sub${nn}`);
+        candKeys.push(`ss${nn}`);
+      }
+      let fromKey = '';
+      for (const k of candKeys) {
+        if (csv[k]) { fromKey = k; break; }
+      }
+      if (!fromKey) {
+        const preferred = candKeys.find((k) => /^sub\d{2}$/i.test(k)) || candKeys[0] || '';
+        fromKey = preferred;
+      }
+
+      setMvtTestPanel(null);
+      setMvtTestPopup({ stationLabel: stationLabel || stationNorm, fromKey, x, y });
     };
     try {
       mapRef.current.on('click', onMapClick);
@@ -11445,6 +12470,10 @@ export default function BaseModule({
   const BTN_PRIMARY = `${BTN_BASE} bg-amber-500 border-amber-300 text-black hover:bg-amber-400`;
   const BTN_DANGER = `${BTN_BASE} bg-red-600 border-red-300 text-white hover:bg-red-500`;
   const BTN_SMALL_NEUTRAL = `${BTN_SMALL_BASE} bg-slate-800 border-slate-500 hover:bg-slate-700 hover:border-slate-400`;
+  // Compact neutral button (for header inline actions like Export Selected)
+  // Important: don't inherit BTN_BASE fixed h-12 w-12.
+  const BTN_COMPACT_NEUTRAL =
+    'relative inline-flex items-center justify-center rounded-none border-2 bg-slate-800 border-slate-500 text-slate-100 shadow-[0_4px_0_rgba(0,0,0,0.50)] transition-transform active:translate-y-[2px] active:shadow-[0_2px_0_rgba(0,0,0,0.50)] hover:bg-slate-700 hover:border-slate-400 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400 disabled:opacity-50 disabled:cursor-not-allowed';
   const ICON = 'h-6 w-6';
   const ICON_SMALL = 'h-5 w-5';
 
@@ -11609,7 +12638,10 @@ export default function BaseModule({
               })()
             : selectedPolygons.size))));
   const mvtCompletedForSubmit = isMVT
-    ? Math.max(0, Object.values(mvtTerminationByStation || {}).reduce((s, v) => s + Math.max(0, Math.min(3, Number(v) || 0)), 0))
+    ? Math.max(
+      0,
+      Object.entries(mvtTerminationByStation || {}).reduce((s, [k, v]) => s + clampMvtTerminationCount(k, v), 0)
+    )
     : 0;
   const lvttCompletedForSubmit = (isLVTT && String(lvttSubMode || 'termination') === 'termination')
     ? Math.max(
@@ -11754,7 +12786,7 @@ export default function BaseModule({
                   >
                     {isMc4Mode && <span className="text-xs font-bold">✓</span>}
                   </button>
-                  <div className={`text-sm font-bold ${isMc4Mode ? 'text-blue-300' : 'text-blue-400/60'}`}>MC4 Install:</div>
+                  <div className={`text-xs font-bold ${isMc4Mode ? 'text-blue-300' : 'text-blue-400/60'}`}>MC4 Install:</div>
                   <div className={COUNTER_BOX}>
                     <div className={COUNTER_GRID}>
                       <span className={COUNTER_LABEL}>Total</span>
@@ -11809,7 +12841,7 @@ export default function BaseModule({
                   >
                     {isTermMode && <span className="text-xs font-bold">✓</span>}
                   </button>
-                  <div className={`text-sm font-bold ${isTermMode ? 'text-emerald-300' : 'text-emerald-400/60'}`}>Cable Termination:</div>
+                  <div className={`text-xs font-bold ${isTermMode ? 'text-emerald-300' : 'text-emerald-400/60'}`}>Cable Termination:</div>
                   <div className={COUNTER_BOX}>
                     <div className={COUNTER_GRID}>
                       <span className={COUNTER_LABEL}>Total</span>
@@ -11838,33 +12870,218 @@ export default function BaseModule({
     (isMVT ? (
       <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start">
         {(() => {
-          const total = Number(mvtCsvTotals?.total) || 0;
-          const completed = Math.max(
+          // MV_TESTING spec: 6 substations * 3 circuits each
+          const testTotal = 18;
+          const termTotal = 36; // 9 (SUB1-3) + 18 (SUB4-6) + 9 (CSS)
+          const mode = String(mvtSubMode || 'termination');
+          const isTermMode = mode === 'termination';
+          const isTestMode = mode === 'testing';
+
+          const termDone = Math.max(
             0,
-            Object.values(mvtTerminationByStation || {}).reduce((s, v) => s + Math.max(0, Math.min(3, Number(v) || 0)), 0)
+            Object.entries(mvtTerminationByStation || {}).reduce((s, [k, v]) => s + clampMvtTerminationCount(k, v), 0)
           );
-          const remaining = Math.max(0, total - completed);
+          const termRem = Math.max(0, termTotal - termDone);
+          const termPct = termTotal > 0 ? ((termDone / termTotal) * 100).toFixed(1) : '0.0';
+
+          // MV TESTING: derive passed/failed counts from loaded CSV statuses
+          let passed = 0;
+          let failed = 0;
+          try {
+            const csv = mvtTestCsvByFromRef.current || {};
+            for (const row of Object.values(csv)) {
+              ['L1', 'L2', 'L3'].forEach((ph) => {
+                const st = String(row?.[ph]?.status || row?.[ph] || '').trim().toUpperCase();
+                if (!st || st === 'N/A') return;
+                if (st === 'PASS') passed += 1;
+                else failed += 1;
+              });
+            }
+          } catch (_e) {
+            void _e;
+          }
+          const notTested = Math.max(0, testTotal - passed - failed);
+          const passPct = testTotal > 0 ? ((passed / testTotal) * 100).toFixed(1) : '0.0';
+
+          const activeFilter = isTestMode ? mvtTestFilter : null;
+          const filterActiveRing = 'ring-2 ring-offset-1 ring-offset-slate-900';
+
+          const termDoneLabelCls = isTermMode ? COUNTER_DONE_LABEL : 'text-xs font-bold text-slate-500';
+          const termDoneValueCls = isTermMode ? COUNTER_DONE_VALUE : 'text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap';
+          const passLabelCls = isTestMode ? 'text-xs font-bold text-emerald-400' : 'text-xs font-bold text-slate-500';
+          const passValueCls = isTestMode ? 'text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap' : 'text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap';
+          const failLabelCls = isTestMode ? 'text-xs font-bold text-red-400' : 'text-xs font-bold text-slate-500';
+          const failValueCls = isTestMode ? 'text-xs font-bold text-red-400 tabular-nums whitespace-nowrap' : 'text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap';
+
           return (
-            <>
-              <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                  <span className="text-xs font-bold text-slate-200">MV termination TOTAL</span>
-                  <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{total}</span>
+            <div className="min-w-[820px] border-2 border-slate-700 bg-slate-900/40 py-3 px-3">
+              <div className="flex flex-col gap-2">
+                {/* MV TERMINATION row */}
+                <div
+                  className="grid grid-cols-[24px_170px_repeat(3,max-content)] items-center gap-x-3 gap-y-2 cursor-pointer"
+                  onClick={() => {
+                    if (!isTermMode) setMvtSubMode('termination');
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isTermMode) setMvtSubMode('termination');
+                    }}
+                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
+                      isTermMode
+                        ? 'border-emerald-500 bg-emerald-500 text-white'
+                        : 'border-slate-500 bg-slate-800 hover:border-emerald-400'
+                    }`}
+                    title="Select MV_TERMINATION"
+                    aria-pressed={isTermMode}
+                  >
+                    {isTermMode && <span className="text-xs font-bold">✓</span>}
+                  </button>
+                  <div className={`text-xs font-bold ${isTermMode ? 'text-emerald-300' : 'text-emerald-400/60'}`}>MV_TERMINATION:</div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_LABEL}>Total</span>
+                      <span className={COUNTER_VALUE}>{termTotal}</span>
+                    </div>
+                  </div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={termDoneLabelCls}>Done</span>
+                      <span className={termDoneValueCls}>{termDone} ({termPct}%)</span>
+                    </div>
+                  </div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_LABEL}>Remaining</span>
+                      <span className={COUNTER_VALUE}>{termRem}</span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                  <span className="text-xs font-bold text-emerald-400">MV termination COMPLETED</span>
-                  <span className="text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap">{completed}</span>
+
+                {/* MV TESTING row */}
+                <div
+                  className="grid grid-cols-[24px_170px_repeat(4,max-content)] items-center gap-x-3 gap-y-2 cursor-pointer"
+                  onClick={() => {
+                    if (!isTestMode) setMvtSubMode('testing');
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isTestMode) setMvtSubMode('testing');
+                    }}
+                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
+                      isTestMode
+                        ? 'border-sky-500 bg-sky-500 text-white'
+                        : 'border-slate-500 bg-slate-800 hover:border-sky-400'
+                    }`}
+                    title="Select MV_TESTING"
+                    aria-pressed={isTestMode}
+                  >
+                    {isTestMode && <span className="text-xs font-bold">✓</span>}
+                  </button>
+                  <div className={`text-xs font-bold ${isTestMode ? 'text-sky-300' : 'text-sky-400/60'}`}>MV_TESTING:</div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_LABEL}>Total</span>
+                      <span className={COUNTER_VALUE}>{testTotal}</span>
+                    </div>
+                  </div>
+                  {(() => {
+                    const filterLinkBase = 'underline decoration-1 underline-offset-2 hover:opacity-80 transition-opacity';
+                    return null;
+                  })()}
+
+                  {/* Passed (clickable filter) */}
+                  <div
+                    className={`${COUNTER_BOX} transition-all ${
+                      activeFilter === 'passed'
+                        ? `border-emerald-500 bg-emerald-950/40 ${filterActiveRing} ring-emerald-500`
+                        : 'hover:border-emerald-600'
+                    }`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isTestMode) setMvtSubMode('testing');
+                      setMvtTestFilter(activeFilter === 'passed' ? null : 'passed');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return;
+                      e.stopPropagation();
+                      if (!isTestMode) setMvtSubMode('testing');
+                      setMvtTestFilter(activeFilter === 'passed' ? null : 'passed');
+                    }}
+                    aria-pressed={activeFilter === 'passed'}
+                  >
+                    <div className={COUNTER_GRID}>
+                      <span className={`${passLabelCls} underline decoration-1 underline-offset-2 hover:opacity-80 transition-opacity`}>Passed</span>
+                      <span className={passValueCls}>{passed} ({passPct}%)</span>
+                    </div>
+                  </div>
+
+                  {/* Failed (clickable filter) */}
+                  <div
+                    className={`${COUNTER_BOX} transition-all ${
+                      activeFilter === 'failed'
+                        ? `border-red-500 bg-red-950/40 ${filterActiveRing} ring-red-500`
+                        : 'hover:border-red-600'
+                    }`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isTestMode) setMvtSubMode('testing');
+                      setMvtTestFilter(activeFilter === 'failed' ? null : 'failed');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return;
+                      e.stopPropagation();
+                      if (!isTestMode) setMvtSubMode('testing');
+                      setMvtTestFilter(activeFilter === 'failed' ? null : 'failed');
+                    }}
+                    aria-pressed={activeFilter === 'failed'}
+                  >
+                    <div className={COUNTER_GRID}>
+                      <span className={`${failLabelCls} underline decoration-1 underline-offset-2 hover:opacity-80 transition-opacity`}>Failed</span>
+                      <span className={failValueCls}>{failed}</span>
+                    </div>
+                  </div>
+
+                  {/* Not Tested (clickable filter) */}
+                  <div
+                    className={`${COUNTER_BOX} transition-all ${
+                      activeFilter === 'not_tested'
+                        ? `border-slate-400 bg-slate-700/40 ${filterActiveRing} ring-slate-400`
+                        : 'hover:border-slate-500'
+                    }`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isTestMode) setMvtSubMode('testing');
+                      setMvtTestFilter(activeFilter === 'not_tested' ? null : 'not_tested');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return;
+                      e.stopPropagation();
+                      if (!isTestMode) setMvtSubMode('testing');
+                      setMvtTestFilter(activeFilter === 'not_tested' ? null : 'not_tested');
+                    }}
+                    aria-pressed={activeFilter === 'not_tested'}
+                  >
+                    <div className={COUNTER_GRID}>
+                      <span className={`${isTestMode ? 'text-xs font-bold text-slate-400' : 'text-xs font-bold text-slate-500'} underline decoration-1 underline-offset-2 hover:opacity-80 transition-opacity`}>Not Tested</span>
+                      <span className={isTestMode ? 'text-xs font-bold text-slate-400 tabular-nums whitespace-nowrap' : 'text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap'}>{notTested}</span>
+                    </div>
+                  </div>
                 </div>
+
               </div>
-              <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-                <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                  <span className="text-xs font-bold text-slate-200">MV termination REMAINING</span>
-                  <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remaining}</span>
-                </div>
-              </div>
-            </>
+            </div>
           );
         })()}
       </div>
@@ -11875,9 +13092,13 @@ export default function BaseModule({
           const total = Number(lvttCsvTotals?.total) || 0;
           const passed = Number(lvttCsvTotals?.passed) || 0;
           const failed = Number(lvttCsvTotals?.failed) || 0;
+          const notTested = Math.max(0, total - passed - failed);
           const mode = String(lvttSubMode || 'termination');
           const isTermMode = mode === 'termination';
           const isTestMode = mode === 'testing';
+
+          const activeFilter = isTestMode ? lvttTestFilter : null;
+          const filterActiveRing = 'ring-2 ring-offset-1 ring-offset-slate-900';
 
           const termDone = Math.max(
             0,
@@ -11930,7 +13151,7 @@ export default function BaseModule({
                   >
                     {isTermMode && <span className="text-xs font-bold">✓</span>}
                   </button>
-                  <div className={`text-sm font-bold ${isTermMode ? 'text-emerald-300' : 'text-emerald-400/60'}`}>LV_TERMINATION:</div>
+                  <div className={`text-xs font-bold ${isTermMode ? 'text-emerald-300' : 'text-emerald-400/60'}`}>LV_TERMINATION:</div>
                   <div className={COUNTER_BOX}>
                     <div className={COUNTER_GRID}>
                       <span className={COUNTER_LABEL}>Total</span>
@@ -11953,7 +13174,7 @@ export default function BaseModule({
 
                 {/* LV TESTING row */}
                 <div
-                  className="grid grid-cols-[24px_170px_repeat(3,max-content)] items-center gap-x-3 gap-y-2 cursor-pointer"
+                  className="grid grid-cols-[24px_170px_repeat(4,max-content)] items-center gap-x-3 gap-y-2 cursor-pointer"
                   onClick={() => {
                     if (!isTestMode) {
                       setLvttSubMode('testing');
@@ -11980,26 +13201,116 @@ export default function BaseModule({
                   >
                     {isTestMode && <span className="text-xs font-bold">✓</span>}
                   </button>
-                  <div className={`text-sm font-bold ${isTestMode ? 'text-sky-300' : 'text-sky-400/60'}`}>LV_TESTING:</div>
+                  <div className={`text-xs font-bold ${isTestMode ? 'text-sky-300' : 'text-sky-400/60'}`}>LV_TESTING:</div>
                   <div className={COUNTER_BOX}>
                     <div className={COUNTER_GRID}>
                       <span className={COUNTER_LABEL}>Total</span>
                       <span className={COUNTER_VALUE}>{total}</span>
                     </div>
                   </div>
-                  <div className={COUNTER_BOX}>
+                  {/* Passed (clickable filter) */}
+                  <div
+                    className={`${COUNTER_BOX} transition-all ${
+                      activeFilter === 'passed'
+                        ? `border-emerald-500 bg-emerald-950/40 ${filterActiveRing} ring-emerald-500`
+                        : 'hover:border-emerald-600'
+                    }`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isTestMode) {
+                        setLvttSubMode('testing');
+                        setLvttPopup(null);
+                      }
+                      setLvttTestFilter(activeFilter === 'passed' ? null : 'passed');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return;
+                      e.stopPropagation();
+                      if (!isTestMode) {
+                        setLvttSubMode('testing');
+                        setLvttPopup(null);
+                      }
+                      setLvttTestFilter(activeFilter === 'passed' ? null : 'passed');
+                    }}
+                    aria-pressed={activeFilter === 'passed'}
+                  >
                     <div className={COUNTER_GRID}>
-                      <span className={passLabelCls}>PASSED</span>
+                      <span className={`${passLabelCls} underline decoration-1 underline-offset-2 hover:opacity-80 transition-opacity`}>Passed</span>
                       <span className={passValueCls}>{passed} ({passPct}%)</span>
                     </div>
                   </div>
-                  <div className={COUNTER_BOX}>
+
+                  {/* Failed (clickable filter) */}
+                  <div
+                    className={`${COUNTER_BOX} transition-all ${
+                      activeFilter === 'failed'
+                        ? `border-red-500 bg-red-950/40 ${filterActiveRing} ring-red-500`
+                        : 'hover:border-red-600'
+                    }`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isTestMode) {
+                        setLvttSubMode('testing');
+                        setLvttPopup(null);
+                      }
+                      setLvttTestFilter(activeFilter === 'failed' ? null : 'failed');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return;
+                      e.stopPropagation();
+                      if (!isTestMode) {
+                        setLvttSubMode('testing');
+                        setLvttPopup(null);
+                      }
+                      setLvttTestFilter(activeFilter === 'failed' ? null : 'failed');
+                    }}
+                    aria-pressed={activeFilter === 'failed'}
+                  >
                     <div className={COUNTER_GRID}>
-                      <span className={failLabelCls}>FAILED</span>
+                      <span className={`${failLabelCls} underline decoration-1 underline-offset-2 hover:opacity-80 transition-opacity`}>Failed</span>
                       <span className={failValueCls}>{failed}</span>
                     </div>
                   </div>
+
+                  {/* Not Tested (clickable filter) */}
+                  <div
+                    className={`${COUNTER_BOX} transition-all ${
+                      activeFilter === 'not_tested'
+                        ? `border-slate-400 bg-slate-700/40 ${filterActiveRing} ring-slate-400`
+                        : 'hover:border-slate-500'
+                    }`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isTestMode) {
+                        setLvttSubMode('testing');
+                        setLvttPopup(null);
+                      }
+                      setLvttTestFilter(activeFilter === 'not_tested' ? null : 'not_tested');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return;
+                      e.stopPropagation();
+                      if (!isTestMode) {
+                        setLvttSubMode('testing');
+                        setLvttPopup(null);
+                      }
+                      setLvttTestFilter(activeFilter === 'not_tested' ? null : 'not_tested');
+                    }}
+                    aria-pressed={activeFilter === 'not_tested'}
+                  >
+                    <div className={COUNTER_GRID}>
+                      <span className={`${isTestMode ? 'text-xs font-bold text-slate-400' : 'text-xs font-bold text-slate-500'} underline decoration-1 underline-offset-2 hover:opacity-80 transition-opacity`}>Not Tested</span>
+                      <span className={isTestMode ? 'text-xs font-bold text-slate-400 tabular-nums whitespace-nowrap' : 'text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap'}>{notTested}</span>
+                    </div>
+                  </div>
                 </div>
+
               </div>
             </div>
           );
@@ -12054,14 +13365,21 @@ export default function BaseModule({
                     ? 'border-emerald-500 bg-emerald-950/40 ' + filterActiveRing + ' ring-emerald-500' 
                     : 'border-slate-700 bg-slate-800 hover:border-emerald-600'
                 }`}
+                role="button"
+                tabIndex={0}
+                onClick={() => setDcctFilter(activeFilter === 'passed' ? null : 'passed')}
+                onKeyDown={(e) => e.key === 'Enter' && setDcctFilter(activeFilter === 'passed' ? null : 'passed')}
+                aria-pressed={activeFilter === 'passed'}
               >
                 <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
                   <span 
                     className={`text-xs font-bold text-emerald-400 ${filterLinkBase}`}
-                    onClick={() => setDcctFilter(activeFilter === 'passed' ? null : 'passed')}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => e.key === 'Enter' && setDcctFilter(activeFilter === 'passed' ? null : 'passed')}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDcctFilter(activeFilter === 'passed' ? null : 'passed');
+                    }}
+                    role="presentation"
+                    tabIndex={-1}
                   >
                     Passed
                   </span>
@@ -12076,14 +13394,21 @@ export default function BaseModule({
                     ? 'border-red-500 bg-red-950/40 ' + filterActiveRing + ' ring-red-500' 
                     : 'border-slate-700 bg-slate-800 hover:border-red-600'
                 }`}
+                role="button"
+                tabIndex={0}
+                onClick={() => setDcctFilter(activeFilter === 'failed' ? null : 'failed')}
+                onKeyDown={(e) => e.key === 'Enter' && setDcctFilter(activeFilter === 'failed' ? null : 'failed')}
+                aria-pressed={activeFilter === 'failed'}
               >
                 <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
                   <span 
                     className={`text-xs font-bold text-red-400 ${filterLinkBase}`}
-                    onClick={() => setDcctFilter(activeFilter === 'failed' ? null : 'failed')}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => e.key === 'Enter' && setDcctFilter(activeFilter === 'failed' ? null : 'failed')}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDcctFilter(activeFilter === 'failed' ? null : 'failed');
+                    }}
+                    role="presentation"
+                    tabIndex={-1}
                   >
                     Failed
                   </span>
@@ -12098,20 +13423,28 @@ export default function BaseModule({
                     ? 'border-slate-400 bg-slate-700/40 ' + filterActiveRing + ' ring-slate-400' 
                     : 'border-slate-700 bg-slate-800 hover:border-slate-500'
                 }`}
+                role="button"
+                tabIndex={0}
+                onClick={() => setDcctFilter(activeFilter === 'not_tested' ? null : 'not_tested')}
+                onKeyDown={(e) => e.key === 'Enter' && setDcctFilter(activeFilter === 'not_tested' ? null : 'not_tested')}
+                aria-pressed={activeFilter === 'not_tested'}
               >
                 <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
                   <span 
                     className={`text-xs font-bold text-slate-400 ${filterLinkBase}`}
-                    onClick={() => setDcctFilter(activeFilter === 'not_tested' ? null : 'not_tested')}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => e.key === 'Enter' && setDcctFilter(activeFilter === 'not_tested' ? null : 'not_tested')}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDcctFilter(activeFilter === 'not_tested' ? null : 'not_tested');
+                    }}
+                    role="presentation"
+                    tabIndex={-1}
                   >
                     Not Tested
                   </span>
                   <span className="text-xs font-bold text-slate-400 tabular-nums">{notTestedCount}</span>
                 </div>
               </div>
+
             </div>
           );
         })()}
@@ -12160,7 +13493,7 @@ export default function BaseModule({
     <div className="app">
       {_customSidebar}
       {/* Header with Buttons and Counters */}
-      <div className="sticky top-0 left-0 z-[1100] w-full min-h-[92px] border-b-2 border-slate-700 bg-slate-900 px-4 py-0 sm:px-6 relative flex items-center">
+      <div ref={headerBarRef} className="sticky top-0 left-0 z-[1100] w-full min-h-[92px] border-b-2 border-slate-700 bg-slate-900 px-4 py-0 sm:px-6 relative flex items-center">
         <div className="w-full">
         <div className="grid grid-cols-[1fr_auto] items-center gap-1">
           {/* Counters (left) */}
@@ -12216,7 +13549,7 @@ export default function BaseModule({
                                 >
                                   {lvibSubMode === 'lvBox' && <span className="text-xs font-bold">✓</span>}
                                 </button>
-                                  <div className={`text-sm font-bold ${lvibSubMode === 'lvBox' ? 'text-white' : 'text-slate-500'}`}>LV Box:</div>
+                                  <div className={`text-xs font-bold ${lvibSubMode === 'lvBox' ? 'text-white' : 'text-slate-500'}`}>LV Box:</div>
                                 <div className={COUNTER_BOX}>
                                   <div className={COUNTER_GRID}>
                                     <span className={COUNTER_LABEL}>Total</span>
@@ -12260,7 +13593,7 @@ export default function BaseModule({
                                 >
                                   {lvibSubMode === 'invBox' && <span className="text-xs font-bold">✓</span>}
                                 </button>
-                                  <div className={`text-sm font-bold ${lvibSubMode === 'invBox' ? 'text-white' : 'text-slate-500'}`}>INV Box:</div>
+                                  <div className={`text-xs font-bold ${lvibSubMode === 'invBox' ? 'text-white' : 'text-slate-500'}`}>INV Box:</div>
                                 <div className={COUNTER_BOX}>
                                   <div className={COUNTER_GRID}>
                                     <span className={COUNTER_LABEL}>Total</span>
@@ -12395,7 +13728,7 @@ export default function BaseModule({
                                   >
                                     {isTTMode && <span className="text-xs font-bold">✓</span>}
                                   </button>
-                                  <div className={`text-sm font-bold ${isTTMode ? 'text-white' : 'text-slate-500'}`}>Table-to-Table:</div>
+                                  <div className={`text-xs font-bold ${isTTMode ? 'text-white' : 'text-slate-500'}`}>Table-to-Table:</div>
                                   <div className={PTEP_COUNTER_BOX}>
                                     <div className="flex justify-between items-center">
                                       <span className={COUNTER_LABEL}>Total</span>
@@ -12466,7 +13799,7 @@ export default function BaseModule({
                                   >
                                     {isParamMode && <span className="text-xs font-bold">✓</span>}
                                   </button>
-                                  <div className={`text-sm font-bold ${isParamMode ? 'text-amber-400' : 'text-slate-500'}`}>Parameter-Earthing:</div>
+                                  <div className={`text-xs font-bold ${isParamMode ? 'text-amber-400' : 'text-slate-500'}`}>Parameter-Earthing:</div>
                                   <div className={PTEP_COUNTER_BOX}>
                                     <div className="flex justify-between items-center">
                                       <span className={COUNTER_LABEL}>Total</span>
@@ -12579,6 +13912,44 @@ export default function BaseModule({
               </button>
             )}
 
+            {/* Filter Export Buttons (MVT/LVTT/DCCT testing filter) */}
+            {isMVT && String(mvtSubMode || 'termination') === 'testing' && mvtTestFilter ? (
+              <button
+                type="button"
+                onClick={mvtExportFilteredTestResultsCsv}
+                disabled={mvtTestResultsDirty}
+                className={`${BTN_COMPACT_NEUTRAL} w-auto h-6 px-2 py-0 leading-none text-[10px] font-medium whitespace-nowrap`}
+                title={mvtTestResultsDirty ? 'Submit first, then export selected' : 'Export selected test results (CSV)'}
+                aria-label="Export Selected MV Test Results"
+              >
+                Export {mvtTestFilter === 'passed' ? 'Passed' : mvtTestFilter === 'failed' ? 'Failed' : 'Not Tested'}
+              </button>
+            ) : null}
+            {isLVTT && String(lvttSubMode || 'termination') === 'testing' && lvttTestFilter ? (
+              <button
+                type="button"
+                onClick={lvttExportFilteredTestResultsCsv}
+                disabled={lvttTestResultsDirty}
+                className={`${BTN_COMPACT_NEUTRAL} w-auto h-6 px-2 py-0 leading-none text-[10px] font-medium whitespace-nowrap`}
+                title={lvttTestResultsDirty ? 'Submit first, then export selected' : 'Export selected test results (CSV)'}
+                aria-label="Export Selected LV Test Results"
+              >
+                Export {lvttTestFilter === 'passed' ? 'Passed' : lvttTestFilter === 'failed' ? 'Failed' : 'Not Tested'}
+              </button>
+            ) : null}
+            {isDCCT && dcctFilter ? (
+              <button
+                type="button"
+                onClick={dcctExportFilteredTestResultsCsv}
+                disabled={dcctTestResultsDirty}
+                className={`${BTN_COMPACT_NEUTRAL} w-auto h-6 px-2 py-0 leading-none text-[10px] font-medium whitespace-nowrap`}
+                title={dcctTestResultsDirty ? 'Submit first, then export selected' : 'Export selected test results (CSV)'}
+                aria-label="Export Selected Test Results"
+              >
+                Export {dcctFilter === 'passed' ? 'Passed' : dcctFilter === 'failed' ? 'Failed' : 'Not Tested'}
+              </button>
+            ) : null}
+
             <div className="mx-1 h-10 w-[2px] bg-slate-600" />
 
             <button
@@ -12611,12 +13982,75 @@ export default function BaseModule({
               </svg>
             </button>
 
-            {!isDCCT && (
+            {isDCCT ? (
               <>
                 <button
-                  onClick={() => setModalOpen(true)}
+                  onClick={dcctSubmitTestResults}
+                  disabled={noteMode || !dcctTestResultsDirty}
+                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                  title={dcctTestResultsDirty ? 'Submit (save) DC test results' : 'No changes to submit'}
+                  aria-label="Submit Test Results"
+                >
+                  Submit
+                </button>
+
+                <input
+                  ref={dcctTestImportFileInputRef}
+                  type="file"
+                  accept=".csv"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target?.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        const text = String(reader.result || '');
+                        dcctImportTestResultsFromText(text, 'import');
+                      };
+                      reader.readAsText(file);
+                    }
+                    if (e.target) e.target.value = '';
+                  }}
+                />
+                <button
+                  onClick={() => dcctTestImportFileInputRef.current?.click()}
+                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                  title="Import Test Results (CSV)"
+                  aria-label="Import Test Results"
+                >
+                  Import Test Results
+                </button>
+                <button
+                  onClick={dcctExportTestResultsCsv}
+                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                  title={dcctTestResultsDirty ? 'Submit first, then export' : 'Export submitted test results (CSV)'}
+                  aria-label="Export Test Results"
+                >
+                  Export Test Results
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => {
+                    if (isMVT && String(mvtSubMode || 'termination') === 'testing') {
+                      mvtSubmitTestResults();
+                      return;
+                    }
+                    if (isLVTT && String(lvttSubMode || 'termination') === 'testing') {
+                      lvttSubmitTestResults();
+                      return;
+                    }
+                    setModalOpen(true);
+                  }}
                   disabled={
                     noteMode ||
+                    (isMVT && String(mvtSubMode || 'termination') === 'testing'
+                      ? !mvtTestResultsDirty
+                      : false) ||
+                    (isLVTT && String(lvttSubMode || 'termination') === 'testing'
+                      ? !lvttTestResultsDirty
+                      : false) ||
                     (isMC4 && !mc4SelectionMode) ||
                     (isMVF
                       ? (mvfSelectedTrenchParts.length === 0 && mvfActiveSegmentKeys.size === 0)
@@ -12629,129 +14063,197 @@ export default function BaseModule({
                               ? ptepCompletedTableToTable.size === 0
                             : ptepCompletedParameterMeters === 0)
                           : isLVTT
-                          ? (String(lvttSubMode || 'termination') === 'testing' || lvttCompletedForSubmit === 0)
+                          ? (String(lvttSubMode || 'termination') === 'testing' ? false : lvttCompletedForSubmit === 0)
                             : isMVT
-                              ? mvtCompletedForSubmit === 0
+                              ? (String(mvtSubMode || 'termination') === 'testing' ? false : mvtCompletedForSubmit === 0)
                               : isLV
                                 ? workAmount === 0
                                 : workSelectionCount === 0)))
                   }
                   className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-                  title={isMC4 && !mc4SelectionMode ? "Select MC4 Install or Cable Termination first" : "Submit Work"}
-                  aria-label="Submit Work"
+                  title={
+                    isMVT && String(mvtSubMode || 'termination') === 'testing'
+                      ? (mvtTestResultsDirty ? 'Submit (save) MV test results' : 'No changes to submit')
+                      : (isLVTT && String(lvttSubMode || 'termination') === 'testing'
+                        ? (lvttTestResultsDirty ? 'Submit (save) LV test results' : 'No changes to submit')
+                        : (isMC4 && !mc4SelectionMode
+                          ? 'Select MC4 Install or Cable Termination first'
+                          : 'Submit Work'))
+                  }
+                  aria-label={
+                    isMVT && String(mvtSubMode || 'termination') === 'testing'
+                      ? 'Submit Test Results'
+                      : (isLVTT && String(lvttSubMode || 'termination') === 'testing'
+                        ? 'Submit Test Results'
+                        : 'Submit Work')
+                  }
                 >
                   Submit
                 </button>
 
-                <button
-                  onClick={() => setHistoryOpen(true)}
-                  disabled={isLVTT && String(lvttSubMode || 'termination') === 'testing'}
-                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-                  title={isLVTT && String(lvttSubMode || 'termination') === 'testing' ? 'History disabled in LV_TESTING' : 'History'}
-                  aria-label="History"
-                >
-                  History
-                </button>
+                {isMVT && String(mvtSubMode || 'termination') === 'testing' ? (
+                  <>
+                    <input
+                      ref={mvtTestImportFileInputRef}
+                      type="file"
+                      accept=".csv"
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const file = e.target?.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            const text = String(reader.result || '');
+                            mvtImportTestResultsFromText(text);
+                          };
+                          reader.readAsText(file);
+                        }
+                        if (e.target) e.target.value = '';
+                      }}
+                    />
+                    <button
+                      onClick={() => mvtTestImportFileInputRef.current?.click()}
+                      className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                      title="Import Test Results (CSV)"
+                      aria-label="Import Test Results"
+                    >
+                      Import Test Results
+                    </button>
+                    <button
+                      onClick={mvtExportTestResultsCsv}
+                      className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                      title={mvtTestResultsDirty ? 'Submit first, then export' : 'Export submitted test results (CSV)'}
+                      aria-label="Export Test Results"
+                    >
+                      Export Test Results
+                    </button>
+                  </>
+                ) : (isLVTT && String(lvttSubMode || 'termination') === 'testing') ? (
+                  <>
+                    <input
+                      ref={lvttTestImportFileInputRef}
+                      type="file"
+                      accept=".csv"
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const file = e.target?.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            const text = String(reader.result || '');
+                            lvttImportTestResultsFromText(text);
+                          };
+                          reader.readAsText(file);
+                        }
+                        if (e.target) e.target.value = '';
+                      }}
+                    />
+                    <button
+                      onClick={() => lvttTestImportFileInputRef.current?.click()}
+                      className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                      title="Import Test Results (CSV)"
+                      aria-label="Import Test Results"
+                    >
+                      Import Test Results
+                    </button>
+                    <button
+                      onClick={lvttExportTestResultsCsv}
+                      className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                      title={lvttTestResultsDirty ? 'Submit first, then export' : 'Export submitted test results (CSV)'}
+                      aria-label="Export Test Results"
+                    >
+                      Export Test Results
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => setHistoryOpen(true)}
+                      disabled={isLVTT && String(lvttSubMode || 'termination') === 'testing'}
+                      className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                      title={isLVTT && String(lvttSubMode || 'termination') === 'testing'
+                        ? 'History disabled in LV_TESTING'
+                        : 'History'}
+                      aria-label="History"
+                    >
+                      History
+                    </button>
 
-                <button
-                  onClick={() =>
-                    exportToExcel(dailyLog, {
-                      moduleKey: isMC4
-                        ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST')
-                        : (isDATP
-                          ? 'DATP'
-                          : (isMVFT
-                            ? 'MVFT'
-                            : (isPTEP
-                              ? (ptepSubMode === 'tabletotable' ? 'PTEP_TT' : 'PTEP_PARAM')
-                              : (isMVT
-                                ? 'MVT_TERM'
-                                : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-                                  ? 'LVTT_TERM'
-                                  : (activeMode?.key || ''))))),
-                      moduleLabel: isMC4
-                        ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
-                        : (isDATP
-                          ? 'DC&AC Trench'
-                          : (isMVFT
-                            ? 'MV&Fibre Trench'
-                            : (isPTEP
-                              ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
-                              : (isMVT
+                    <button
+                      onClick={() => {
+                        const exportModuleKey = String(
+                          isMC4
+                            ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST')
+                            : (isDATP
+                              ? 'DATP'
+                              : (isMVFT
+                                ? 'MVFT'
+                                : (isPTEP
+                                  ? (ptepSubMode === 'tabletotable' ? 'PTEP_TT' : 'PTEP_PARAM')
+                                  : (isMVT
+                                    ? 'MVT_TERM'
+                                    : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                                      ? 'LVTT_TERM'
+                                      : (activeMode?.key || '')))))
+                        ).toUpperCase();
+
+                        const exportLog = isMC4
+                          ? (dailyLog || []).filter((r) => String(r?.module_key || '').toUpperCase() === exportModuleKey)
+                          : dailyLog;
+
+                        exportToExcel(exportLog, {
+                          moduleKey: exportModuleKey,
+                          moduleLabel: isMC4
+                            ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
+                            : (isDATP
+                              ? 'DC&AC Trench'
+                              : (isMVFT
+                                ? 'MV&Fibre Trench'
+                                : (isPTEP
+                                  ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+                                  : (isMVT
+                                    ? 'Cable Termination'
+                                    : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                                      ? 'Cable Termination'
+                                      : moduleName)))),
+                          unit: isMC4
+                            ? 'ends'
+                            : (isDATP || isMVFT
+                              ? 'm'
+                              : (isPTEP
+                                ? (ptepSubMode === 'tabletotable' ? 'pcs' : 'm')
+                                : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination')) ? 'cables' : 'm'))),
+                          chartSheetName: isDATP
+                            ? 'DC&AC Trench Progress'
+                            : (isMVFT
+                              ? 'MV&Fibre Trench Progress'
+                              : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
                                 ? 'Cable Termination'
-                                : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-                                  ? 'Cable Termination'
-                                  : moduleName)))),
-                      unit: isMC4
-                        ? 'ends'
-                        : (isDATP || isMVFT
-                          ? 'm'
-                          : (isPTEP
-                            ? (ptepSubMode === 'tabletotable' ? 'pcs' : 'm')
-                            : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination')) ? 'cables' : 'm'))),
-                      chartSheetName: isDATP
-                        ? 'DC&AC Trench Progress'
-                        : (isMVFT
-                          ? 'MV&Fibre Trench Progress'
-                          : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
-                            ? 'Cable Termination'
-                            : (isPTEP
-                              ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
-                              : undefined))),
-                      chartTitle: isDATP
-                        ? 'DC&AC Trench Progress'
-                        : (isMVFT
-                          ? 'MV&Fibre Trench Progress'
-                          : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
-                            ? 'Cable Termination'
-                            : (isPTEP
-                              ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
-                              : undefined))),
-                    })
-                  }
-                  disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || dailyLog.length === 0}
-                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-                  title={isLVTT && String(lvttSubMode || 'termination') === 'testing' ? 'Export disabled in LV_TESTING' : 'Export Excel'}
-                  aria-label="Export Excel"
-                >
-                  Export
-                </button>
-              </>
-            )}
-
-            {/* DCCT: Import/Export buttons */}
-            {isDCCT && (
-              <>
-                <input
-                  ref={dcctFileInputRef}
-                  type="file"
-                  accept=".csv"
-                  style={{ display: 'none' }}
-                  onChange={(e) => {
-                    const file = e.target?.files?.[0];
-                    if (file) {
-                      dcctImportCsv(file);
-                    }
-                    // Reset input so same file can be re-selected
-                    if (e.target) e.target.value = '';
-                  }}
-                />
-                <button
-                  onClick={() => dcctFileInputRef.current?.click()}
-                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-                  title="Import CSV file with test results"
-                  aria-label="Import CSV"
-                >
-                  Import
-                </button>
-                <button
-                  onClick={dcctExportCsv}
-                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-                  title="Export current test results to CSV"
-                  aria-label="Export CSV"
-                >
-                  Export
-                </button>
+                                : (isPTEP
+                                  ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+                                  : undefined))),
+                          chartTitle: isDATP
+                            ? 'DC&AC Trench Progress'
+                            : (isMVFT
+                              ? 'MV&Fibre Trench Progress'
+                              : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
+                                ? 'Cable Termination'
+                                : (isPTEP
+                                  ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+                                  : undefined))),
+                        });
+                      }}
+                      disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || dailyLog.length === 0}
+                      className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                      title={isLVTT && String(lvttSubMode || 'termination') === 'testing'
+                        ? 'Export disabled in LV_TESTING'
+                        : 'Export Excel'}
+                      aria-label="Export Excel"
+                    >
+                      Export
+                    </button>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -12761,7 +14263,7 @@ export default function BaseModule({
         {isMVF && mvfSegments.length > 0 && (
           <div className="fixed left-3 sm:left-5 top-[190px] z-[1190] w-[220px] border border-slate-600 bg-slate-900/95 text-white shadow-[0_10px_26px_rgba(0,0,0,0.5)] rounded">
             <div className="border-b border-slate-700 px-3 py-2">
-              <div className="text-[10px] font-extrabold uppercase tracking-wide text-slate-300">mv cable route and length</div>
+              <div className="text-[10px] font-extrabold uppercase tracking-wide text-slate-300">{isFIB ? 'fibre cable route and length' : 'mv cable route and length'}</div>
             </div>
             <div className="max-h-[280px] overflow-y-auto p-2">
               {mvfSegments.map((s) => {
@@ -13001,14 +14503,33 @@ export default function BaseModule({
                 <>
                   {isMVT ? (
                     <>
-                      <div className="flex items-center gap-2">
-                        <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-white">Unterminated</span>
-                      </div>
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Terminated</span>
-                      </div>
+                      {String(mvtSubMode || 'termination') === 'termination' ? (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-white">Unterminated</span>
+                          </div>
+                          <div className="mt-2 flex items-center gap-2">
+                            <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Terminated</span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">PASSED</span>
+                          </div>
+                          <div className="mt-2 flex items-center gap-2">
+                            <span className="h-3 w-3 border-2 border-red-300 bg-red-500" aria-hidden="true" />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">FAILED</span>
+                          </div>
+                          <div className="mt-2 flex items-center gap-2">
+                            <span className="h-3 w-3 border-2 border-slate-600 bg-slate-500" aria-hidden="true" />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-slate-300">NOT TESTED</span>
+                          </div>
+                        </>
+                      )}
                     </>
                   ) : isLVTT ? (
                     <>
@@ -13059,19 +14580,6 @@ export default function BaseModule({
                       </div>
                     </>
                   )}
-                  {isMVT ? (
-                    <>
-                      <div className="mt-3 border-t border-slate-700/70" />
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className="h-3 w-3 border-2 border-emerald-900 bg-emerald-500" aria-hidden="true" />
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">TESTED – Passed</span>
-                      </div>
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className="h-3 w-3 border-2 border-red-900 bg-red-500" aria-hidden="true" />
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">TESTED – Failed</span>
-                      </div>
-                    </>
-                  ) : null}
                 </>
               )}
             </div>
@@ -13150,7 +14658,7 @@ export default function BaseModule({
       </div>
 
       {/* MVT: click-position popups */}
-      {isMVT && mvtTestPopup ? (
+      {isMVT && String(mvtSubMode || 'termination') === 'testing' && mvtTestPopup ? (
         <div
           style={{
             position: 'fixed',
@@ -13162,10 +14670,17 @@ export default function BaseModule({
         >
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <div className="text-[11px] font-black uppercase tracking-wide text-white">Test Details</div>
+              <div className="text-[11px] font-black uppercase tracking-wide text-white">MV TESTING</div>
               <div className="mt-1 text-sm font-extrabold text-slate-100 truncate">
                 {mvtTestPopup.stationLabel || mvtTestPopup.fromKey || 'Substation'}
               </div>
+              {(() => {
+                const fromKey = normalizeId(mvtTestPopup.fromKey);
+                const toRaw = String(mvtTestToByFromRef.current?.[fromKey] || '').trim();
+                return toRaw ? (
+                  <div className="mt-0.5 text-[11px] font-bold text-slate-300 truncate">To: {toRaw}</div>
+                ) : null;
+              })()}
             </div>
             <button
               type="button"
@@ -13180,29 +14695,46 @@ export default function BaseModule({
 
           <div className="mt-3 space-y-2">
             {(['L1', 'L2', 'L3']).map((ph) => {
-              const obj = mvtTestPopup?.phases?.[ph] || { value: '', status: 'N/A' };
+              const fromKey = normalizeId(mvtTestPopup.fromKey);
+              const live = mvtTestCsvByFromRef.current?.[fromKey]?.[ph];
+              const obj = (live && typeof live === 'object') ? live : { value: '', status: 'N/A' };
               const statusRaw = String(obj?.status || 'N/A').trim();
               const statusU = statusRaw.toUpperCase();
               const val = String(obj?.value || '').trim();
               const pass = statusU === 'PASS';
-              const status = pass ? 'PASS' : (statusRaw || 'N/A');
+              const isNA = !statusU || statusU === 'N/A' || statusU === 'NA';
+              const status = pass ? 'PASS' : (isNA ? 'N/A' : 'FAIL');
               return (
-                <div key={ph} className="flex items-center justify-between border border-slate-700 bg-slate-800 px-2 py-1">
+                <div key={ph} className="flex items-center justify-between border border-slate-700 bg-slate-800 px-2 py-1.5">
                   <span className="text-[11px] font-black uppercase tracking-wide text-slate-200">{ph}</span>
                   <span className="ml-2 flex items-center gap-2">
-                    {val ? (
-                      <span className={`text-[11px] font-extrabold tabular-nums ${pass ? 'text-emerald-200' : 'text-red-200'}`}>{val}</span>
-                    ) : null}
-                    <span className={`text-[11px] font-black uppercase tracking-wide ${pass ? 'text-emerald-300' : 'text-red-300'}`}>
-                      {status}
-                    </span>
+                    <input
+                      type="text"
+                      value={val}
+                      onChange={(e) => {
+                        mvtUpdateTestPhase(fromKey, ph, { value: e.target.value });
+                      }}
+                      placeholder="Value"
+                      className={`h-7 w-[110px] border border-slate-700 bg-slate-900 px-2 text-[12px] font-extrabold tabular-nums outline-none focus:border-amber-400 ${pass ? 'text-emerald-200' : (isNA ? 'text-slate-200' : 'text-red-200')}`}
+                    />
+                    <select
+                      value={pass ? 'PASS' : (isNA ? 'N/A' : 'failed')}
+                      onChange={(e) => {
+                        const next = String(e.target.value || 'N/A');
+                        mvtUpdateTestPhase(fromKey, ph, { status: next });
+                      }}
+                      className={`h-7 w-[80px] border border-slate-700 bg-slate-900 px-2 text-[11px] font-black uppercase tracking-wide outline-none focus:border-amber-400 ${pass ? 'text-emerald-300' : (isNA ? 'text-slate-300' : 'text-red-300')}`}
+                      aria-label={`${ph} status`}
+                    >
+                      <option value="N/A">N/A</option>
+                      <option value="PASS">PASS</option>
+                      <option value="failed">FAIL</option>
+                    </select>
                   </span>
                 </div>
               );
             })}
           </div>
-
-          {/* Debug removed (requested) */}
         </div>
       ) : null}
 
@@ -13387,38 +14919,179 @@ export default function BaseModule({
               );
             })()
           ) : (
-            (lvttPopup.testData ? (
-              <div className="mt-3 space-y-2">
-                {(['L1', 'L2', 'L3']).map((ph) => {
-                  const obj = lvttPopup.testData?.[ph] || { value: '', status: 'N/A' };
-                  const statusRaw = String(obj?.status || 'N/A').trim();
-                  const statusU = statusRaw.toUpperCase();
-                  const val = String(obj?.value || '').trim();
-                  const pass = statusU === 'PASS';
-                  const status = pass ? 'PASS' : (statusRaw || 'N/A');
-                  return (
-                    <div key={ph} className="flex items-center justify-between border border-slate-700 bg-slate-800 px-2 py-1">
-                      <span className="text-[11px] font-black uppercase tracking-wide text-slate-200">{ph}</span>
-                      <span className="ml-2 flex items-center gap-2">
-                        {val ? (
-                          <span className={`text-[11px] font-extrabold tabular-nums ${pass ? 'text-emerald-200' : 'text-red-200'}`}>{val}</span>
-                        ) : null}
-                        <span className={`text-[11px] font-black uppercase tracking-wide ${pass ? 'text-emerald-300' : 'text-red-300'}`}>{status}</span>
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="mt-3 border border-slate-700 bg-slate-800 px-2 py-2 text-center">
-                <span className="text-[11px] font-black uppercase tracking-wide text-slate-400">NOT TESTED</span>
-              </div>
-            ))
+            <div className="mt-3 space-y-2">
+              {(['L1', 'L2', 'L3']).map((ph) => {
+                const invNorm = normalizeId(lvttPopup.invIdNorm);
+                const live = lvttTestCsvByInvRef.current?.[invNorm]?.[ph];
+                const obj = (live && typeof live === 'object') ? live : { value: '', status: 'N/A' }; 
+                const statusRaw = String(obj?.status || 'N/A').trim();
+                const statusU = statusRaw.toUpperCase();
+                const val = String(obj?.value || '').trim();
+                const pass = statusU === 'PASS';
+                const isNA = !statusU || statusU === 'N/A' || statusU === 'NA';
+
+                return (
+                  <div key={ph} className="flex items-center justify-between border border-slate-700 bg-slate-800 px-2 py-1.5">
+                    <span className="text-[11px] font-black uppercase tracking-wide text-slate-200">{ph}</span>
+                    <span className="ml-2 flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={val}
+                        onChange={(e) => {
+                          lvttUpdateTestPhase(invNorm, ph, { value: e.target.value });
+                        }}
+                        placeholder="Value"
+                        className={`h-7 w-[110px] border border-slate-700 bg-slate-900 px-2 text-[12px] font-extrabold tabular-nums outline-none focus:border-amber-400 ${pass ? 'text-emerald-200' : (isNA ? 'text-slate-200' : 'text-red-200')}`}
+                      />
+                      <select
+                        value={pass ? 'PASS' : (isNA ? 'N/A' : 'failed')}
+                        onChange={(e) => {
+                          const next = String(e.target.value || 'N/A');
+                          lvttUpdateTestPhase(invNorm, ph, { status: next });
+                        }}
+                        className={`h-7 w-[80px] border border-slate-700 bg-slate-900 px-2 text-[11px] font-black uppercase tracking-wide outline-none focus:border-amber-400 ${pass ? 'text-emerald-300' : (isNA ? 'text-slate-300' : 'text-red-300')}`}
+                        aria-label={`${ph} status`}
+                      >
+                        <option value="N/A">N/A</option>
+                        <option value="PASS">PASS</option>
+                        <option value="failed">FAIL</option>
+                      </select>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       ) : null}
 
-      {isMVT && mvtTermPopup ? (
+      {/* DCCT: click-position popup (testing) */}
+      {isDCCT && dcctPopup ? (
+        <div
+          style={{
+            position: 'fixed',
+            left: Math.min(window.innerWidth - 300, Math.max(8, (dcctPopup.x || 0) + 10)),
+            top: Math.min(window.innerHeight - 240, Math.max(8, (dcctPopup.y || 0) + 10)),
+            zIndex: 1400,
+          }}
+          className="w-[280px] border-2 border-slate-700 bg-slate-900 px-3 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.55)]"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] font-black uppercase tracking-wide text-white">DC Cable Testing</div>
+              <div className="mt-1 text-sm font-extrabold text-slate-100 truncate">{dcctPopup.displayId || dcctPopup.idNorm}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDcctPopup(null)}
+              className="inline-flex h-6 w-6 items-center justify-center border-2 border-slate-700 bg-slate-800 text-xs font-black text-white hover:bg-slate-700"
+              title="Close"
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            {([
+              { key: 'plus', label: 'Ins. Res (+)' },
+              { key: 'minus', label: 'Ins. Res (-)' },
+            ]).map((row) => {
+              const val = row.key === 'plus' ? String(dcctPopup.draftPlus ?? '') : String(dcctPopup.draftMinus ?? '');
+              const ok = row.key === 'plus' ? dcctPopup.draftStatus === 'passed' : dcctPopup.draftStatus === 'passed';
+              void ok;
+              return (
+                <div key={row.key} className="flex items-center justify-between border border-slate-700 bg-slate-800 px-2 py-1.5">
+                  <span className="text-[11px] font-black uppercase tracking-wide text-slate-200">{row.label}</span>
+                  <input
+                    type="text"
+                    value={val}
+                    onChange={(e) => {
+                      const nextVal = e.target.value;
+                      setDcctPopup((p) => {
+                        if (!p) return p;
+                        return row.key === 'plus'
+                          ? { ...p, draftPlus: nextVal }
+                          : { ...p, draftMinus: nextVal };
+                      });
+                      const idNorm = String(dcctPopup.idNorm || '');
+                      if (!idNorm) return;
+                      const riso = dcctRisoByIdRef.current || {};
+                      const prev = riso[idNorm] || {};
+                      riso[idNorm] = {
+                        ...prev,
+                        plus: row.key === 'plus' ? nextVal : (prev.plus ?? '0'),
+                        minus: row.key === 'minus' ? nextVal : (prev.minus ?? '0'),
+                        status: dcctNormalizeStatus(prev.status || prev.remarkRaw) || null,
+                        remarkRaw: prev.remarkRaw || '',
+                        originalId: prev.originalId || dcctFormatDisplayId(idNorm, ''),
+                      };
+                      dcctRisoByIdRef.current = riso;
+                      setDcctTestResultsDirty(true);
+                      dcctTestResultsSubmittedRef.current = null;
+                      try { localStorage.removeItem('cew:dcct:test_results_submitted'); } catch (_e) { void _e; }
+                    }}
+                    className="h-7 w-[110px] border border-slate-700 bg-slate-900 px-2 text-[12px] font-extrabold tabular-nums text-slate-200 outline-none focus:border-amber-400"
+                    placeholder="Value"
+                  />
+                </div>
+              );
+            })}
+
+            <div className="flex items-center justify-between border border-slate-700 bg-slate-800 px-2 py-1.5">
+              <span className="text-[11px] font-black uppercase tracking-wide text-slate-200">Status</span>
+              <select
+                value={dcctPopup.draftStatus === 'passed' ? 'PASSED' : dcctPopup.draftStatus === 'failed' ? 'FAILED' : ''}
+                onChange={(e) => {
+                  const raw = String(e.target.value || '');
+                  const next = raw === 'PASSED' ? 'passed' : raw === 'FAILED' ? 'failed' : null;
+                  const idNorm = String(dcctPopup.idNorm || '');
+                  if (!idNorm) return;
+
+                  setDcctPopup((p) => (p ? { ...p, draftStatus: next } : p));
+
+                  const riso = dcctRisoByIdRef.current || {};
+                  const prev = riso[idNorm] || {};
+                  riso[idNorm] = {
+                    ...prev,
+                    plus: prev.plus ?? '0',
+                    minus: prev.minus ?? '0',
+                    status: next,
+                    remarkRaw: next === 'passed' ? 'PASSED' : next === 'failed' ? 'FAILED' : '',
+                    originalId: prev.originalId || dcctFormatDisplayId(idNorm, ''),
+                  };
+                  dcctRisoByIdRef.current = riso;
+
+                  setDcctTestData((prevTest) => {
+                    const out = { ...(prevTest || {}) };
+                    if (next === 'passed') out[idNorm] = 'passed';
+                    else if (next === 'failed') out[idNorm] = 'failed';
+                    else delete out[idNorm];
+                    return out;
+                  });
+
+                  setDcctTestResultsDirty(true);
+                  dcctTestResultsSubmittedRef.current = null;
+                  try { localStorage.removeItem('cew:dcct:test_results_submitted'); } catch (_e) { void _e; }
+                  setStringMatchVersion((v) => v + 1);
+                }}
+                className={`h-7 w-[140px] border border-slate-700 bg-slate-900 px-2 text-[11px] font-black uppercase tracking-wide outline-none focus:border-amber-400 ${
+                  dcctPopup.draftStatus === 'passed'
+                    ? 'text-emerald-300'
+                    : (dcctPopup.draftStatus === 'failed' ? 'text-red-300' : 'text-slate-300')
+                }`}
+                aria-label="Status"
+              >
+                <option value="">NOT TESTED</option>
+                <option value="PASSED">PASSED</option>
+                <option value="FAILED">FAILED</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isMVT && String(mvtSubMode || 'termination') === 'termination' && mvtTermPopup ? (
         <div
           style={{
             position: 'fixed',
@@ -13446,15 +15119,16 @@ export default function BaseModule({
 
           {(() => {
             const stationNorm = String(mvtTermPopup.stationNorm || '');
-            const stored = Math.max(0, Math.min(3, Number(mvtTerminationByStation?.[stationNorm] ?? 0)));
-            const draft = Math.max(0, Math.min(3, Number(mvtTermPopup.draft ?? stored)));
-            const locked = stored === 3;
-            const setDraft = (v) => setMvtTermPopup((p) => (p ? { ...p, draft: Math.max(0, Math.min(3, v)) } : p));
+            const max = mvtTerminationMaxForNorm(stationNorm);
+            const stored = clampMvtTerminationCount(stationNorm, mvtTerminationByStation?.[stationNorm] ?? 0);
+            const draft = clampMvtTerminationCount(stationNorm, mvtTermPopup.draft ?? stored);
+            const locked = Boolean(max) && stored === max;
+            const setDraft = (v) => setMvtTermPopup((p) => (p ? { ...p, draft: clampMvtTerminationCount(stationNorm, v) } : p));
 
             const applyDraft = (valueToApply) => {
               if (!stationNorm) return;
-              const nextVal = Math.max(0, Math.min(3, Number(valueToApply ?? 0)));
-              const prevVal = Math.max(0, Math.min(3, Number(mvtTerminationByStationRef.current?.[stationNorm] ?? 0)));
+              const nextVal = clampMvtTerminationCount(stationNorm, valueToApply ?? 0);
+              const prevVal = clampMvtTerminationCount(stationNorm, mvtTerminationByStationRef.current?.[stationNorm] ?? 0);
               if (nextVal === prevVal) return;
               mvtTermPushHistory(stationNorm, prevVal, nextVal);
               setMvtTerminationByStation((prev) => {
@@ -13465,28 +15139,10 @@ export default function BaseModule({
             };
 
             const orderedStations = (() => {
-              const pts = stringTextPointsRef.current || [];
-              const seen = new Set();
-              const arr = [];
-              for (const pt of pts) {
-                const raw = String(pt?.text || '').trim();
-                const norm = normalizeId(raw);
-                if (!(norm && /^ss\d{1,2}$/i.test(norm))) continue;
-                if (seen.has(norm)) continue;
-                seen.add(norm);
-                arr.push({ norm, label: raw || norm });
-              }
-              const numOf = (n) => {
-                const m = String(n || '').match(/\d+/);
-                return m ? Number(m[0]) : Number.POSITIVE_INFINITY;
-              };
-              arr.sort((a, b) => {
-                const na = numOf(a.norm);
-                const nb = numOf(b.norm);
-                if (na !== nb) return na - nb;
-                return a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' });
-              });
-              return arr;
+              const norm = mvtCanonicalTerminationStationNorm(stationNorm);
+              const prefix = norm.startsWith('ss') ? 'ss' : 'sub';
+              const mk = (n) => ({ norm: `${prefix}${String(n).padStart(2, '0')}`, label: `${prefix.toUpperCase()}${n}` });
+              return [mk(1), mk(2), mk(3), mk(4), mk(5), mk(6), { norm: 'css', label: 'CSS' }];
             })();
 
             const openNextStation = () => {
@@ -13504,8 +15160,9 @@ export default function BaseModule({
               let next = null;
               for (let step = 1; step <= list.length; step++) {
                 const cand = list[(start + step) % list.length];
-                const vv = Math.max(0, Math.min(3, Number(snapshot?.[cand.norm] ?? 0)));
-                if (vv === 3) continue; // skip locked
+                const vv = clampMvtTerminationCount(cand.norm, snapshot?.[cand.norm] ?? 0);
+                const mm = mvtTerminationMaxForNorm(cand.norm);
+                if (mm > 0 && vv === mm) continue; // skip locked
                 next = { norm: cand.norm, label: cand.label, draft: vv };
                 break;
               }
@@ -13537,7 +15194,7 @@ export default function BaseModule({
                       <input
                         type="number"
                         min={0}
-                        max={3}
+                        max={max || 0}
                         step={1}
                         value={draft}
                         disabled={locked}
@@ -13554,13 +15211,13 @@ export default function BaseModule({
                         onChange={(e) => {
                           const v = e.target.value;
                           if (v === '') return;
-                          const n = Math.max(0, Math.min(3, parseInt(v, 10)));
+                          const n = clampMvtTerminationCount(stationNorm, parseInt(v, 10));
                           if (Number.isFinite(n)) setDraft(n);
                         }}
                         className={`w-14 h-8 border-2 bg-slate-900 px-2 text-center text-[13px] font-black tabular-nums outline-none ${
-                          locked ? 'border-slate-700 text-slate-500 cursor-not-allowed' : (draft === 3 ? 'border-emerald-700 text-emerald-200' : 'border-red-700 text-red-200')
+                          locked ? 'border-slate-700 text-slate-500 cursor-not-allowed' : (max > 0 && draft === max ? 'border-emerald-700 text-emerald-200' : 'border-red-700 text-red-200')
                         }`}
-                        title="Enter 0..3"
+                        title={max ? `Enter 0..${max}` : 'Enter value'}
                       />
                     </div>
                   </div>
@@ -13578,7 +15235,7 @@ export default function BaseModule({
                     className={`flex-1 h-8 border-2 text-[11px] font-extrabold uppercase tracking-wide ${
                       locked ? 'border-slate-700 bg-slate-900/40 text-slate-500 cursor-not-allowed' : 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
                     }`}
-                    title={locked ? 'Locked at 3/3' : 'Apply and open next SS'}
+                    title={locked ? (max ? `Locked at ${max}/${max}` : 'Locked') : 'Apply and open next station'}
                   >
                     Next
                   </button>
@@ -14800,12 +16457,18 @@ export default function BaseModule({
           // MVT: Submit station termination counts
           if (isMVT) {
             const terminations = mvtTerminationByStationRef.current || {};
-            const stationIds = Object.keys(terminations).filter((k) => (terminations[k] || 0) > 0);
+            const stationIds = Object.entries(terminations)
+              .map(([k, v]) => {
+                const kk = mvtCanonicalTerminationStationNorm(k);
+                const vv = clampMvtTerminationCount(kk, v);
+                return vv > 0 ? kk : null;
+              })
+              .filter(Boolean);
             if (stationIds.length === 0) {
               alert('No terminations to submit.');
               return;
             }
-            const totalCables = Object.values(terminations).reduce((sum, v) => sum + Math.max(0, Math.min(3, Number(v) || 0)), 0);
+            const totalCables = Object.entries(terminations).reduce((sum, [k, v]) => sum + clampMvtTerminationCount(k, v), 0);
             const recordWithSelections = {
               ...record,
               total_cable: totalCables,
@@ -15152,6 +16815,25 @@ export default function BaseModule({
                                     mvfCommittedTrenchPartsRef.current = (mvfCommittedTrenchPartsRef.current || []).filter(
                                       (p) => !recordPolygonIds.includes(String(p?.id || ''))
                                     );
+
+                                    // MVF/FIBRE: unselect submitted segments when history record is deleted
+                                    const segKeys = recordPolygonIds
+                                      .map((id) => String(id || ''))
+                                      .filter((id) => id.startsWith('segment:'))
+                                      .map((id) => id.replace('segment:', ''))
+                                      .filter(Boolean);
+                                    if (segKeys.length > 0) {
+                                      setMvfDoneSegmentKeys((prev) => {
+                                        const next = new Set(prev);
+                                        segKeys.forEach((k) => next.delete(String(k)));
+                                        return next;
+                                      });
+                                      setMvfActiveSegmentKeys((prev) => {
+                                        const next = new Set(prev);
+                                        segKeys.forEach((k) => next.delete(String(k)));
+                                        return next;
+                                      });
+                                    }
                                   } else if (isMVFT) {
                                     // MVFT: remove committed trench parts by ID
                                     setMvftCommittedTrenchParts((prev) => {

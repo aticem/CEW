@@ -14,3 +14,8 @@ body {
 .leaflet-tooltip.punch-list-tooltip {
   font-weight: 600;
 }
+
+/* Force classic arrow cursor everywhere (requested) */
+*, *::before, *::after {
+  cursor: default !important;
+}

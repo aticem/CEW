@@ -17,7 +17,6 @@ export const DC_MODULE_CONFIG = {
       color: '#eab308',
       fillColor: '#facc15',
       weight: 3,
-      fillOpacity: 0.6,
     },
     {
       url: '/dc-cable-pulling-progress/boundry.geojson',
@@ -208,12 +207,21 @@ export const FIBRE_MODULE_CONFIG = {
     { url: '/FIBRE_PULLING_PROGRESS_TRACKING/mv_trench.geojson', name: 'mv_trench', color: '#eab308', fillColor: '#facc15' },
     { url: '/FIBRE_PULLING_PROGRESS_TRACKING/subs.geojson', name: 'subs', color: '#94a3b8', fillColor: '#94a3b8' },
     { url: '/FIBRE_PULLING_PROGRESS_TRACKING/subs_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
+    {
+      url: '/FIBRE_PULLING_PROGRESS_TRACKING/boundry.geojson',
+      name: 'boundry',
+      color: 'rgba(239, 68, 68, 0.7)',
+      fillColor: 'transparent',
+      weight: 1.2,
+      fillOpacity: 0,
+      interactive: false,
+    },
   ],
 };
 
 export const MC4_MODULE_CONFIG = {
   key: 'MC4',
-  label: 'MC4 INSTALLATION',
+  label: 'MC4 INSTALLATION & DC TERMINATION PROGRESS',
   // Files live in: public/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/
   csvFormat: 'mc4_strings',
   csvPath: '/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/dc_strings.csv',
@@ -222,30 +230,39 @@ export const MC4_MODULE_CONFIG = {
   mc4DefaultStrings: 9056,
   // Render inv_id points as LV-style text plates (visual only; not clickable completion).
   invIdLabelMode: true,
-  // Match LV inv_id appearance
-  invIdTextScale: 1.2,
-  invIdTextBaseSize: 16,
-  invIdTextStyle: '400',
-  invIdTextMinFontSize: 10,
-  invIdTextMaxFontSize: 18,
+  // Match LV CABLE PULLING PROGRESS TRACKING inv_id appearance (birebir)
+  invIdTextScale: 0.8,
+  invIdTextBaseSize: 12,
+  invIdTextStyle: '600',
+  invIdTextMinFontSize: 7,
+  invIdTextMaxFontSize: 14,
   invIdTextRefZoom: 20,
-  invIdTextStrokeColor: 'rgba(0,0,0,0.65)',
+  invIdTextStrokeColor: 'rgba(0,0,0,0.8)',
   invIdTextStrokeWidthFactor: 1.0,
-  invIdTextBgColor: 'rgba(11,18,32,0.86)',
-  invIdTextBgPaddingX: 5,
-  invIdTextBgPaddingY: 2,
-  invIdTextBgStrokeColor: 'rgba(255,255,255,0.35)',
-  invIdTextBgStrokeWidth: 1,
+  invIdTextBgColor: null,
+  invIdTextBgPaddingX: 0,
+  invIdTextBgPaddingY: 0,
+  invIdTextBgStrokeColor: null,
+  invIdTextBgStrokeWidth: 0,
   invIdTextBgCornerRadius: 0,
-  invIdTextMinTextZoom: 16,
-  invIdTextMinBgZoom: 18,
+  invIdDoneTextColor: 'rgba(34,197,94,1)',
+  invIdDoneTextColorNoBg: 'rgba(34,197,94,1)',
+  invIdDoneBgColor: null,
+  invIdDoneBgStrokeColor: null,
+  invIdDoneBgStrokeWidth: 0,
+  invIdHighlightTextColor: 'rgba(249,115,22,1)',
+  invIdHighlightBgColor: null,
+  invIdHighlightBgStrokeColor: null,
+  invIdHighlightBgStrokeWidth: 0,
+  invIdTextMinTextZoom: 17,
+  invIdTextMinBgZoom: 99,
   // MC4: render ONLY subs_text labels (we map subs_text.geojson to the shared string_text renderer).
   // We still do NOT include string_text.geojson in this mode.
   stringTextVisibility: 'always',
   stringTextToggle: false,
   stringTextDefaultOn: false,
   // subs_text styling
-  stringTextColor: 'rgba(250,204,21,0.98)',
+  stringTextColor: 'rgba(250,204,21,0.65)',
   stringTextBaseSize: 22,
   stringTextStyle: '400',
   stringTextStrokeColor: 'rgba(0,0,0,0.85)',
@@ -283,12 +300,22 @@ export const MC4_MODULE_CONFIG = {
       weight: 3,
       fillOpacity: 0.6,
     },
+    {
+      // Boundary: render + style must match DC CABLE PULLING PROGRESS TRACKING
+      url: '/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/boundry.geojson',
+      name: 'boundry',
+      color: 'rgba(239, 68, 68, 0.7)',
+      fillColor: 'transparent',
+      weight: 1.2,
+      fillOpacity: 0,
+      interactive: false,
+    },
   ],
 };
 
 export const MV_TERMINATION_MODULE_CONFIG = {
   key: 'MVT',
-  label: 'MV TERMINATION PROGRESS TRACKING',
+  label: 'MV Termination & Testing Progress',
   // Files live in: public/MV_TERMINATION_PROGRESS_TRACKING/
   csvFormat: null, // no CSV for now
   csvPath: null,
@@ -313,12 +340,22 @@ export const MV_TERMINATION_MODULE_CONFIG = {
     { url: '/MV_TERMINATION_PROGRESS_TRACKING/subs_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
     { url: '/MV_TERMINATION_PROGRESS_TRACKING/mv_text.geojson', name: 'mv_text', color: '#22c55e', fillColor: '#22c55e' },
     { url: '/MV_TERMINATION_PROGRESS_TRACKING/arrow.geojson', name: 'arrow', color: '#f97316', fillColor: '#fb923c' },
+    {
+      // Boundary: render + style must match DC CABLE PULLING PROGRESS TRACKING
+      url: '/MV_TERMINATION_PROGRESS_TRACKING/boundry.geojson',
+      name: 'boundry',
+      color: 'rgba(239, 68, 68, 0.7)',
+      fillColor: 'transparent',
+      weight: 1.2,
+      fillOpacity: 0,
+      interactive: false,
+    },
   ],
 };
 
 export const LV_TERMINATION_AND_TESTING_MODULE_CONFIG = {
   key: 'LVTT',
-  label: 'LV_TERMINATION_and_TESTING PROGRESS',
+  label: 'LV TERMINATION & TESTING PROGRESS',
   // Files live in: public/LV_TERMINATION_and_TESTING PROGRESS/
   csvFormat: null,
   csvPath: '/LV_TERMINATION_and_TESTING PROGRESS/lv_testing.csv',
@@ -338,14 +375,36 @@ export const LV_TERMINATION_AND_TESTING_MODULE_CONFIG = {
   stringTextRefZoom: 20,
   // Enable inv_id labels in label mode (clickable for LVTT test popup)
   invIdLabelMode: true,
-  invIdTextScale: 1,
-  invIdTextBaseSize: 18,
-  invIdTextRefZoom: 20,
+  // Match LV CABLE PULLING PROGRESS TRACKING inv_id appearance (birebir)
+  invIdTextScale: 0.8,
+  invIdTextBaseSize: 12,
   invIdTextStyle: '600',
-  invIdTextMinFontSize: 10,
-  invIdTextMaxFontSize: 24,
-  invIdTextStrokeColor: 'rgba(0,0,0,0.88)',
-  invIdTextStrokeWidthFactor: 1.45,
+  invIdTextMinFontSize: 7,
+  invIdTextMaxFontSize: 14,
+  invIdTextRefZoom: 20,
+  invIdTextStrokeColor: 'rgba(0,0,0,0.8)',
+  invIdTextStrokeWidthFactor: 1.0,
+  // NO background plate behind inv_id - EVER (clean AutoCAD look)
+  invIdTextBgColor: null,
+  invIdTextBgPaddingX: 0,
+  invIdTextBgPaddingY: 0,
+  invIdTextBgStrokeColor: null,
+  invIdTextBgStrokeWidth: 0,
+  invIdTextBgCornerRadius: 0,
+  // Completed inv_id - GREEN TEXT only (no background box)
+  invIdDoneTextColor: 'rgba(34,197,94,1)',
+  invIdDoneTextColorNoBg: 'rgba(34,197,94,1)',
+  invIdDoneBgColor: null,
+  invIdDoneBgStrokeColor: null,
+  invIdDoneBgStrokeWidth: 0,
+  // History highlight - ORANGE TEXT only (no background box)
+  invIdHighlightTextColor: 'rgba(249,115,22,1)',
+  invIdHighlightBgColor: null,
+  invIdHighlightBgStrokeColor: null,
+  invIdHighlightBgStrokeWidth: 0,
+  // Declutter: hide inv_id when zoomed out too far
+  invIdTextMinTextZoom: 17,
+  invIdTextMinBgZoom: 99,
   geojsonFiles: [
     { url: '/LV_TERMINATION_and_TESTING PROGRESS/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
     // Map subs_text.geojson into the shared string_text rendering path
@@ -360,12 +419,22 @@ export const LV_TERMINATION_AND_TESTING_MODULE_CONFIG = {
       weight: 3,
       fillOpacity: 0.6,
     },
+    {
+      // Boundary: thin red line (same as DC/LV)
+      url: '/LV_TERMINATION_and_TESTING PROGRESS/boundry.geojson',
+      name: 'boundry',
+      color: 'rgba(239, 68, 68, 0.7)',
+      fillColor: 'transparent',
+      weight: 1.2,
+      fillOpacity: 0,
+      interactive: false,
+    },
   ],
 };
 
 export const DC_CABLE_TESTING_PROGRESS_MODULE_CONFIG = {
   key: 'DCCT',
-  label: 'DC_CABLE_TESTING_PROGRESS',
+  label: 'DC CABLE TESTING PROGRESS',
   // DCCT uses dc_riso.csv for passed/failed testing data
   csvFormat: 'dcct_riso',
   csvPath: '/DC_CABLE_TESTING_PROGRESS/dc_riso.csv',
@@ -388,7 +457,8 @@ export const DC_CABLE_TESTING_PROGRESS_MODULE_CONFIG = {
   // No inv_id label mode for DCCT - we color strings based on test results
   invIdLabelMode: false,
   geojsonFiles: [
-    { url: '/DC_CABLE_TESTING_PROGRESS/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
+    // Tables: match DC cable pulling base styling
+    { url: '/DC_CABLE_TESTING_PROGRESS/full.geojson', name: 'full', color: 'rgba(255,255,255,0.55)', fillColor: 'transparent' },
     { url: '/DC_CABLE_TESTING_PROGRESS/string_text.geojson', name: 'string_text', color: '#dc2626', fillColor: '#ef4444' },
     { url: '/DC_CABLE_TESTING_PROGRESS/inv_id.geojson', name: 'inv_id', color: '#16a34a', fillColor: '#22c55e' },
     {
@@ -398,6 +468,16 @@ export const DC_CABLE_TESTING_PROGRESS_MODULE_CONFIG = {
       fillColor: '#facc15',
       weight: 3,
       fillOpacity: 0.6,
+    },
+    {
+      // Boundary: thin red line (same as DC)
+      url: '/DC_CABLE_TESTING_PROGRESS/boundry.geojson',
+      name: 'boundry',
+      color: 'rgba(239, 68, 68, 0.7)',
+      fillColor: 'transparent',
+      weight: 1.2,
+      fillOpacity: 0,
+      interactive: false,
     },
   ],
 };
