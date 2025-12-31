@@ -525,6 +525,7 @@ export default function BaseModule({
   const stringTextRendererRef = useRef(null); // dedicated canvas renderer for string_text to avoid ghosting
   const lvttInvIdRendererRef = useRef(null); // dedicated canvas renderer for LVTT inv_id labels to avoid overlap when switching modes
   const lvttTermCounterRendererRef = useRef(null); // dedicated canvas renderer for LVTT termination counters
+  const lvttSubCounterRendererRef = useRef(null); // dedicated canvas renderer for LVTT SUB counters
   const ptepTableToTableSvgRendererRef = useRef(null); // dedicated SVG renderer for PTEP table-to-table (ensures clickability under preferCanvas)
   const ptepParameterSvgRendererRef = useRef(null); // dedicated SVG renderer for PTEP parameter (ensures clickability under preferCanvas)
   const layersRef = useRef([]);
@@ -608,6 +609,12 @@ export default function BaseModule({
   const lvttTermCounterLayerRef = useRef(null); // L.LayerGroup
   const lvttTermCounterLabelPoolRef = useRef([]); // L.TextLabel[]
   const lvttTermCounterLabelActiveCountRef = useRef(0);
+  // LVTT: separate clickable SUB counters (0/max per SUB, max derived from LV cable pulling CSV)
+  const lvttSubCounterLayerRef = useRef(null); // L.LayerGroup
+  const lvttSubCounterLabelPoolRef = useRef([]); // L.TextLabel[]
+  const lvttSubCounterLabelActiveCountRef = useRef(0);
+  const lvttTxInvMaxByTxRef = useRef({}); // txNumber -> maxInv
+  const [lvttTxInvMaxVersion, setLvttTxInvMaxVersion] = useState(0);
   // LVTT: sub-mode selector (single module with two internal modes)
   const [lvttSubMode, setLvttSubMode] = useState(() => {
     try {
@@ -634,6 +641,108 @@ export default function BaseModule({
   useEffect(() => {
     lvttTerminationByInvRef.current = lvttTerminationByInv || {};
   }, [lvttTerminationByInv]);
+
+  // LVTT: manual termination/progress counts per SUB (persistent)
+  const lvttCanonicalSubNorm = useCallback((raw) => {
+    const norm = normalizeId(raw);
+    if (!norm) return '';
+    // LVTT subs_text uses SSxx labels (e.g., SS06). Users may refer to them as SUB.
+    // Accept both SSxx and SUBxx.
+    const m = norm.match(/^(ss|sub)(\d{1,2})$/i);
+    if (!m) return '';
+    const prefix = String(m[1] || '').toLowerCase();
+    const n = parseInt(m[2], 10);
+    if (!Number.isFinite(n) || n <= 0) return '';
+    return `${prefix}${String(n).padStart(2, '0')}`;
+  }, []);
+
+  const [lvttSubTerminationBySub, setLvttSubTerminationBySub] = useState(() => ({})); // subNN -> 0..maxInv
+  const lvttSubTerminationBySubRef = useRef(lvttSubTerminationBySub);
+  useEffect(() => {
+    lvttSubTerminationBySubRef.current = lvttSubTerminationBySub || {};
+  }, [lvttSubTerminationBySub]);
+
+  // LVTT: load TX->max INV map from LV cable pulling CSV (public/LV_CABLE_PULLING _PROGRESS_TRACKING/lv_pulling.csv)
+  useEffect(() => {
+    if (!isLVTT) {
+      lvttTxInvMaxByTxRef.current = {};
+      setLvttTxInvMaxVersion((v) => v + 1);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        // Folder name contains a space, so be defensive and try encoded + literal variants.
+        const basePaths = [
+          '/LV_CABLE_PULLING _PROGRESS_TRACKING/lv_pulling.csv',
+          encodeURI('/LV_CABLE_PULLING _PROGRESS_TRACKING/lv_pulling.csv'),
+          '/LV_CABLE_PULLING%20_PROGRESS_TRACKING/lv_pulling.csv',
+        ];
+
+        let text = '';
+        let lastErr = null;
+        for (const p of basePaths) {
+          try {
+            const url = `${p}?v=${Date.now()}`;
+            const r = await fetch(url, { cache: 'no-store' });
+            if (r && r.ok) {
+              text = await r.text();
+              break;
+            }
+            lastErr = new Error(`HTTP ${r?.status || '??'} for ${p}`);
+          } catch (e) {
+            lastErr = e;
+          }
+        }
+        if (!text) throw lastErr || new Error('Failed to load lv_pulling.csv');
+        if (cancelled) return;
+
+        const rawText = String(text || '');
+        const rawLinesArr = rawText.split(/\r?\n/);
+        const lines = rawLinesArr.map((l) => String(l || '').trim()).filter(Boolean);
+        if (lines.length <= 1) {
+          lvttTxInvMaxByTxRef.current = {};
+          setLvttTxInvMaxVersion((v) => v + 1);
+          return;
+        }
+
+        const first = String(lines[0] || '');
+        const sep = first.includes('\t') ? '\t' : (first.includes(';') && first.split(';').length > first.split(',').length ? ';' : ',');
+        const header = first.split(sep).map((h) => h.replace(/^\uFEFF/, '').trim().toLowerCase());
+        const idIdx = header.findIndex((h) => h === 'id' || h === 'name' || h === 'key');
+        const out = {};
+
+        for (let i = 1; i < lines.length; i++) {
+          const parts = String(lines[i] || '').split(sep).map((p) => String(p || '').trim());
+          const rawId = idIdx >= 0 ? parts[idIdx] : parts[0];
+          const id = String(rawId || '').trim();
+          if (!id) continue;
+          const m = id.match(/^\s*TX\s*(\d+)\s*[-_ ]\s*INV\s*(\d+)\s*$/i) || id.match(/TX\s*(\d+).*INV\s*(\d+)/i);
+          if (!m) continue;
+          const tx = parseInt(m[1], 10);
+          const inv = parseInt(m[2], 10);
+          if (!Number.isFinite(tx) || !Number.isFinite(inv)) continue;
+          if (tx <= 0 || inv <= 0) continue;
+          const prev = Number(out[tx] || 0);
+          out[tx] = Math.max(prev, inv);
+        }
+
+        lvttTxInvMaxByTxRef.current = out;
+        setLvttTxInvMaxVersion((v) => v + 1);
+        // eslint-disable-next-line no-console
+        console.log('[LVTT] loaded lv_pulling.csv TX max', out);
+      } catch (e) {
+        if (cancelled) return;
+        // eslint-disable-next-line no-console
+        console.warn('[LVTT] failed to load lv_pulling.csv for SUB counters', e);
+        lvttTxInvMaxByTxRef.current = {};
+        setLvttTxInvMaxVersion((v) => v + 1);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLVTT]);
 
   // DCCT: DC Cable Testing Progress state
   // dcctTestData: { [normalizedId]: 'passed' | 'failed' }
@@ -1066,6 +1175,7 @@ export default function BaseModule({
   }, [lvttTestFilter]);
   const lvttTestResultsSubmittedRef = useRef(null); // { byInv, updatedAt, source } | null
   const lvttTestImportFileInputRef = useRef(null);
+  const lvttTermInvInputRef = useRef(null);
   const [lvttCsvVersion, setLvttCsvVersion] = useState(0);
   const [mvtCsvVersion, setMvtCsvVersion] = useState(0);
   const [mvtCsvDebug, setMvtCsvDebug] = useState(() => ({ url: '', textLen: 0, rawLines: 0, filteredLines: 0, keys: 0 }));
@@ -1683,6 +1793,9 @@ export default function BaseModule({
   const lvBoxLayersByInvIdRef = useRef({}); // invIdNorm -> L.Layer[] (lv_box geometries)
   const lvAllBoxLayersRef = useRef([]); // L.Layer[] (all lv_box layers for reset)
   const prevHistoryInvHighlightRef = useRef(new Set()); // invIdNorms highlighted by history selection
+
+  // LVTT: history selection highlight (orange) for SS/SUB labels
+  const lvttHistoryHighlightSubSetRef = useRef(new Set()); // Set<subNorm>
 
   // LV: Track submitted/committed inv_id entries (locked until history record is deleted)
   const [lvCommittedInvIds, setLvCommittedInvIds] = useState(() => new Set());
@@ -3456,6 +3569,16 @@ export default function BaseModule({
       // MVT/LVTT: filters for testing-mode label highlighting
       const mvtActiveFilter = isMVT ? mvtTestFilterRef.current : null;
 
+      // LVTT: max inverter count per SS/SUB comes from LV cable pulling CSV (TXn -> max INVn)
+      const lvttMaxInvForSubNorm = (subNorm) => {
+        const m = String(subNorm || '').match(/^(ss|sub)(\d{2})$/i);
+        if (!m) return 0;
+        const tx = parseInt(m[2], 10);
+        if (!Number.isFinite(tx) || tx <= 0) return 0;
+        const dict = lvttTxInvMaxByTxRef.current || {};
+        return Math.max(0, Number(dict?.[tx] ?? dict?.[String(tx)] ?? 0) || 0);
+      };
+
       for (let k = 0; k < runTotal; k++) {
         if (count >= maxCount) break;
         const idx = cursorCandidates ? cursorCandidates[k] : (iterateIndices ? iterateIndices[k] : k);
@@ -3534,6 +3657,34 @@ export default function BaseModule({
           // NOTE: In DCCT we keep other labels stable; counter click only highlights the counter itself.
         }
 
+        // LVTT: SS/SUB labels show completion by color (GREEN=done/max, RED=not complete)
+        // and are underlined to represent clickability (we removed numeric counters under the text).
+        if (isLVTT) {
+          const raw = String(pt.text || '').trim();
+          const subNorm = lvttCanonicalSubNorm(raw);
+          if (subNorm) {
+            const maxInv = lvttMaxInvForSubNorm(subNorm);
+            if (maxInv > 0) {
+              const stored = Number(lvttSubTerminationBySubRef.current?.[subNorm] ?? 0);
+              const done = Math.max(0, Math.min(maxInv, Number.isFinite(stored) ? stored : 0));
+              // LVTT should match MC4-style: uncompleted = white, completed = green.
+              nextTextColor = done >= maxInv ? 'rgba(34,197,94,0.98)' : 'rgba(255,255,255,0.98)';
+            } else {
+              // Unknown max (missing TX mapping) => neutral gray
+              nextTextColor = 'rgba(148,163,184,0.98)';
+            }
+
+            // If a history record is selected, highlight its SS/SUB items in orange.
+            const historyHighlighted =
+              Boolean(historyOpenRef.current) &&
+              Boolean(historySelectedRecordIdRef.current) &&
+              Boolean(lvttHistoryHighlightSubSetRef.current?.has(subNorm));
+            if (historyHighlighted) {
+              nextTextColor = 'rgba(11,18,32,0.98)';
+            }
+          }
+        }
+
         // Create once, then reuse
         let label = pool[count];
         if (!label) {
@@ -3549,9 +3700,9 @@ export default function BaseModule({
             minFontSize: stringTextMinFontSizeCfg,
             maxFontSize: stringTextMaxFontSizeCfg,
             rotation: pt.angle || 0,
-            // MVT: make SS labels clickable in both termination and testing modes
-            interactive: isMVT,
-            radius: isMVT ? 22 : 0,
+            // MVT: SS labels clickable; LVTT: SS/SUB labels clickable (editing sub completion)
+            interactive: isMVT || isLVTT,
+            radius: (isMVT || isLVTT) ? 22 : 0,
             bubblingMouseEvents: false,
           });
           pool[count] = label;
@@ -3618,6 +3769,44 @@ export default function BaseModule({
                 setMvtTestPanel(null);
                 setMvtTestPopup({ stationLabel: stationLabel || stationNorm, fromKey, x, y });
               }
+            });
+          }
+
+          if (isLVTT) {
+            label.on('click', (evt) => {
+              try {
+                if (evt?.originalEvent) {
+                  evt.originalEvent.stopImmediatePropagation?.();
+                  L.DomEvent.stopPropagation(evt.originalEvent);
+                  L.DomEvent.preventDefault(evt.originalEvent);
+                }
+              } catch (_e) { void _e; }
+
+              if (String(lvttSubModeRef.current || 'termination') !== 'termination') return;
+              const subNorm = String(label._lvttSubNorm || '');
+              const maxInv = Number(label._lvttSubMax || 0);
+              if (!subNorm || !(maxInv > 0)) return;
+              const curRaw = Number(lvttSubTerminationBySubRef.current?.[subNorm] ?? 0);
+              const cur = Math.max(0, Math.min(maxInv, Number.isFinite(curRaw) ? curRaw : 0));
+              const oe = evt?.originalEvent;
+              const x = oe?.clientX ?? 0;
+              const y = oe?.clientY ?? 0;
+              setLvttPopup({
+                mode: 'sub_termination',
+                subId: String(label._lvttSubId || ''),
+                subNorm,
+                max: maxInv,
+                draft: cur,
+                x,
+                y,
+              });
+            });
+
+            label.on('mouseover', () => {
+              try { map.getContainer().style.cursor = 'pointer'; } catch (_e) { void _e; }
+            });
+            label.on('mouseout', () => {
+              try { map.getContainer().style.cursor = ''; } catch (_e) { void _e; }
             });
           }
         }
@@ -3725,6 +3914,66 @@ export default function BaseModule({
             if (label.options.bgPaddingY !== 0) { label.options.bgPaddingY = 0; needsRedraw = true; }
             if (label.options.bgCornerRadius !== 0) { label.options.bgCornerRadius = 0; needsRedraw = true; }
             }
+          }
+        }
+
+        // LVTT: update per-draw metadata for SS/SUB labels and keep underline + history highlight in sync.
+        if (isLVTT) {
+          const raw = String(pt.text || '').trim();
+          const subNorm = lvttCanonicalSubNorm(raw);
+          if (subNorm) {
+            // LVTT: match SS/SUB label sizing to CSS level (no downscale)
+            const lvttSubTextBaseSizeLocal = Math.max(1, Number(stringTextBaseSizeCfg));
+            const maxInv = lvttMaxInvForSubNorm(subNorm);
+            const historyHighlighted =
+              Boolean(historyOpenRef.current) &&
+              Boolean(historySelectedRecordIdRef.current) &&
+              Boolean(lvttHistoryHighlightSubSetRef.current?.has(subNorm));
+            const highlightBgColor = 'rgba(249,115,22,1)'; // #f97316
+            const highlightTextColor = 'rgba(11,18,32,0.98)';
+
+            label._lvttSubNorm = subNorm;
+            label._lvttSubId = raw;
+            label._lvttSubMax = maxInv;
+            if (label.options.interactive !== true) { label.options.interactive = true; needsRedraw = true; }
+            if (label.options.radius !== 22) { label.options.radius = 22; needsRedraw = true; }
+            if (label.options.underline !== true) { label.options.underline = true; needsRedraw = true; }
+            if (label.options.textBaseSize !== lvttSubTextBaseSizeLocal) { label.options.textBaseSize = lvttSubTextBaseSizeLocal; needsRedraw = true; }
+
+            // Underline should match current text color (including history highlight override).
+            if (label.options.underlineColor !== label.options.textColor) { label.options.underlineColor = label.options.textColor; needsRedraw = true; }
+
+            // Orange background highlight when a history record is selected.
+            if (historyHighlighted) {
+              if (label.options.bgColor !== highlightBgColor) { label.options.bgColor = highlightBgColor; needsRedraw = true; }
+              if (label.options.bgPaddingX !== 4) { label.options.bgPaddingX = 4; needsRedraw = true; }
+              if (label.options.bgPaddingY !== 2) { label.options.bgPaddingY = 2; needsRedraw = true; }
+              if (label.options.bgCornerRadius !== 3) { label.options.bgCornerRadius = 3; needsRedraw = true; }
+              // Ensure highlighted text stays readable.
+              if (label.options.textColor !== highlightTextColor) { label.options.textColor = highlightTextColor; needsRedraw = true; }
+            } else {
+              if (label.options.bgColor != null) { label.options.bgColor = null; needsRedraw = true; }
+              if (label.options.bgPaddingX !== 0) { label.options.bgPaddingX = 0; needsRedraw = true; }
+              if (label.options.bgPaddingY !== 0) { label.options.bgPaddingY = 0; needsRedraw = true; }
+              if (label.options.bgCornerRadius !== 0) { label.options.bgCornerRadius = 0; needsRedraw = true; }
+            }
+          } else {
+            label._lvttSubNorm = '';
+            label._lvttSubId = '';
+            label._lvttSubMax = 0;
+            if (label.options.underline) { label.options.underline = false; needsRedraw = true; }
+            if (label.options.underlineColor) { label.options.underlineColor = null; needsRedraw = true; }
+            if (label.options.interactive !== false) { label.options.interactive = false; needsRedraw = true; }
+            if (label.options.radius !== 0) { label.options.radius = 0; needsRedraw = true; }
+
+            // Revert pooled labels back to default sizing when reused for non-SUB text.
+            if (label.options.textBaseSize !== stringTextBaseSizeCfg) { label.options.textBaseSize = stringTextBaseSizeCfg; needsRedraw = true; }
+
+            // Clear history highlight background when pooled label is reused.
+            if (label.options.bgColor != null) { label.options.bgColor = null; needsRedraw = true; }
+            if (label.options.bgPaddingX !== 0) { label.options.bgPaddingX = 0; needsRedraw = true; }
+            if (label.options.bgPaddingY !== 0) { label.options.bgPaddingY = 0; needsRedraw = true; }
+            if (label.options.bgCornerRadius !== 0) { label.options.bgCornerRadius = 0; needsRedraw = true; }
           }
         }
         const nextRot = pt.angle || 0;
@@ -4015,6 +4264,23 @@ export default function BaseModule({
     }
   }, []);
 
+  const clearLvttSubCounterLabelsNow = useCallback(() => {
+    const layer = lvttSubCounterLayerRef.current;
+    if (!layer) return;
+    const pool = lvttSubCounterLabelPoolRef.current;
+    const prevActive = lvttSubCounterLabelActiveCountRef.current;
+    for (let i = 0; i < prevActive; i++) {
+      const lbl = pool[i];
+      if (lbl && layer.hasLayer(lbl)) layer.removeLayer(lbl);
+    }
+    lvttSubCounterLabelActiveCountRef.current = 0;
+    try {
+      lvttSubCounterRendererRef.current?._clear?.();
+    } catch (_e) {
+      void _e;
+    }
+  }, []);
+
   // MVT: load/save manual termination counters (independent from TESTED).
   useEffect(() => {
     if (!isMVT) {
@@ -4076,6 +4342,32 @@ export default function BaseModule({
       void _e;
     }
   }, [isLVTT, lvttTerminationByInv]);
+
+  // LVTT: load/save SUB counters
+  useEffect(() => {
+    if (!isLVTT) {
+      setLvttSubTerminationBySub({});
+      return;
+    }
+    try {
+      const raw = localStorage.getItem('cew:lvtt:sub_counts');
+      const obj = raw ? JSON.parse(raw) : {};
+      if (obj && typeof obj === 'object') setLvttSubTerminationBySub(obj);
+      else setLvttSubTerminationBySub({});
+    } catch (_e) {
+      void _e;
+      setLvttSubTerminationBySub({});
+    }
+  }, [isLVTT]);
+
+  useEffect(() => {
+    if (!isLVTT) return;
+    try {
+      localStorage.setItem('cew:lvtt:sub_counts', JSON.stringify(lvttSubTerminationBySub || {}));
+    } catch (_e) {
+      void _e;
+    }
+  }, [isLVTT, lvttSubTerminationBySub]);
 
   // MVT: load circuit test status CSV (grouped by `from`, phase L1/L2/L3 taken ONLY from that row group).
   useEffect(() => {
@@ -4995,7 +5287,8 @@ export default function BaseModule({
       if (mode === 'termination') {
         const terminated = Math.max(0, Math.min(3, Number(lvttTerminationByInvRef.current?.[invNorm] ?? 0)));
         const locked = terminated === 3;
-        nextColor = locked ? 'rgba(34,197,94,0.98)' : 'rgba(239,68,68,0.98)';
+        // LVTT should match MC4-style: uncompleted = white, completed = green.
+        nextColor = locked ? 'rgba(34,197,94,0.98)' : 'rgba(255,255,255,0.98)';
       } else {
         const testData = lvttTestCsvByInvRef.current?.[invNorm];
         const l1 = String(testData?.L1?.status || 'N/A').trim().toUpperCase();
@@ -5027,6 +5320,9 @@ export default function BaseModule({
       let redraw = false;
       if (lbl.options.text !== nextText) { lbl.options.text = nextText; redraw = true; }
       if (lbl.options.textColor !== nextColor) { lbl.options.textColor = nextColor; redraw = true; }
+      // LVTT: show clickability by underlining the INV ID text (we no longer render separate 0/3 counters).
+      if (lbl.options.underline !== true) { lbl.options.underline = true; redraw = true; }
+      if (lbl.options.underlineColor !== nextColor) { lbl.options.underlineColor = nextColor; redraw = true; }
       lbl._lvttLocked = mode === 'termination' && nextColor === 'rgba(34,197,94,0.98)';
       if (redraw) lbl.redraw?.();
     };
@@ -5042,180 +5338,123 @@ export default function BaseModule({
     scheduleStringTextLabelUpdate();
   }, [isMVT, mvtTestFilter, scheduleStringTextLabelUpdate]);
 
-  // LVTT: draw clickable termination counters (0/3..3/3) under each inv_id, MV-termination-style.
+  // LVTT: repaint SS/SUB labels when manual sub completion or TX->INV max mapping changes.
+  useEffect(() => {
+    if (!isLVTT) return;
+    if (String(lvttSubModeRef.current || 'termination') !== 'termination') return;
+    lastStringLabelKeyRef.current = '';
+    scheduleStringTextLabelUpdate();
+  }, [isLVTT, lvttSubTerminationBySub, lvttTxInvMaxVersion, scheduleStringTextLabelUpdate]);
+
+  // LVTT: fallback hit-test for SS/SUB label clicks.
+  // Canvas renderers can stack; only the top canvas receives DOM events, so per-label click handlers
+  // can become unreliable. We detect clicks near SS/SUB label positions and open the same popup.
   useEffect(() => {
     if (!isLVTT || !mapReady || !mapRef.current) return;
-
-    if (String(lvttSubMode || 'termination') !== 'termination') {
-      clearLvttTermCounterLabelsNow();
-      return;
-    }
-
     const map = mapRef.current;
-    const layer = lvttTermCounterLayerRef.current;
-    if (!layer) return;
 
-    if (!lvttTermCounterRendererRef.current) lvttTermCounterRendererRef.current = L.canvas({ padding: 0.1 });
-
-    const invScale = typeof activeMode?.invIdTextScale === 'number' ? activeMode.invIdTextScale : 1;
-    const invBase = typeof activeMode?.invIdTextBaseSize === 'number' ? activeMode.invIdTextBaseSize : 19;
-    const invRefZoom = typeof activeMode?.invIdTextRefZoom === 'number' ? activeMode.invIdTextRefZoom : 20;
-    const invTextStyle = activeMode?.invIdTextStyle || '600';
-    const invMinFs = typeof activeMode?.invIdTextMinFontSize === 'number' ? activeMode.invIdTextMinFontSize : null;
-    const invMaxFs = typeof activeMode?.invIdTextMaxFontSize === 'number' ? activeMode.invIdTextMaxFontSize : null;
-    const invStrokeColor = activeMode?.invIdTextStrokeColor || 'rgba(0,0,0,0.88)';
-    const invStrokeWidthFactor =
-      typeof activeMode?.invIdTextStrokeWidthFactor === 'number' ? activeMode.invIdTextStrokeWidthFactor : 1.45;
-
-    const computeFontSizePx = () => {
-      const zoom = map.getZoom();
-      const scale = Math.pow(2, zoom - invRefZoom);
-      let fs = (invBase * invScale) * scale;
-      if (invMinFs != null) fs = Math.max(invMinFs, fs);
-      if (invMaxFs != null) fs = Math.min(invMaxFs, fs);
-      return fs;
+    const maxInvForSubNorm = (subNorm) => {
+      const m = String(subNorm || '').match(/^(ss|sub)(\d{2})$/i);
+      if (!m) return 0;
+      const tx = parseInt(m[2], 10);
+      if (!Number.isFinite(tx) || tx <= 0) return 0;
+      const dict = lvttTxInvMaxByTxRef.current || {};
+      return Math.max(0, Number(dict?.[tx] ?? dict?.[String(tx)] ?? 0) || 0);
     };
 
-    const render = () => {
+    const onMapClick = (evt) => {
       try {
-        lvttTermCounterRendererRef.current?._clear?.();
+        if (String(lvttSubModeRef.current || 'termination') !== 'termination') return;
+        const clickP = evt?.containerPoint;
+        if (!clickP) return;
+
+        // If the click is near an inverter ID label, let its own handler win.
+        try {
+          const metaByNorm = lvttInvMetaByNormRef.current || {};
+          const keys = Object.keys(metaByNorm);
+          if (keys.length) {
+            let bestInv = Infinity;
+            const invThreshold = 26;
+            for (const invNorm of keys) {
+              const meta = metaByNorm[invNorm];
+              if (!meta) continue;
+              const lat = Number(meta.lat);
+              const lng = Number(meta.lng);
+              if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+              const p = map.latLngToContainerPoint([lat, lng]);
+              const d = p.distanceTo(clickP);
+              if (d < bestInv) bestInv = d;
+            }
+            if (bestInv <= invThreshold) return;
+          }
+        } catch (_e) {
+          void _e;
+        }
+
+        const pts = stringTextPointsRef.current || [];
+        if (!pts.length) return;
+
+        let best = null;
+        let bestD = Infinity;
+        const threshold = 28; // px
+
+        for (let i = 0; i < pts.length; i++) {
+          const pt = pts[i];
+          const raw = String(pt?.text || '').trim();
+          if (!raw) continue;
+          const subNorm = lvttCanonicalSubNorm(raw);
+          if (!subNorm) continue;
+          const maxInv = maxInvForSubNorm(subNorm);
+          if (!(maxInv > 0)) continue;
+          const lat = Number(pt?.lat);
+          const lng = Number(pt?.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+          const p = map.latLngToContainerPoint([lat, lng]);
+          const d = p.distanceTo(clickP);
+          if (d < bestD) {
+            bestD = d;
+            best = { raw, subNorm, maxInv };
+          }
+        }
+
+        if (!best || !(bestD <= threshold)) return;
+
+        const curRaw = Number(lvttSubTerminationBySubRef.current?.[best.subNorm] ?? 0);
+        const cur = Math.max(0, Math.min(best.maxInv, Number.isFinite(curRaw) ? curRaw : 0));
+        const oe = evt?.originalEvent;
+        const x = oe?.clientX ?? 0;
+        const y = oe?.clientY ?? 0;
+        setLvttPopup({
+          mode: 'sub_termination',
+          subId: String(best.raw || ''),
+          subNorm: best.subNorm,
+          max: best.maxInv,
+          draft: cur,
+          x,
+          y,
+        });
       } catch (_e) {
         void _e;
       }
-
-      const fs = computeFontSizePx();
-      const offY = 1.25 * fs;
-      const metaByNorm = lvttInvMetaByNormRef.current || {};
-      const pool = lvttTermCounterLabelPoolRef.current;
-      let activeCount = 0;
-
-      Object.keys(metaByNorm).forEach((invNorm) => {
-        const meta = metaByNorm[invNorm];
-        if (!meta) return;
-        const lat = Number(meta.lat);
-        const lng = Number(meta.lng);
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-
-        const terminated = Math.max(0, Math.min(3, Number(lvttTerminationByInvRef.current?.[invNorm] ?? 0)));
-        const locked = terminated === 3;
-        const color = locked ? 'rgba(34,197,94,0.98)' : 'rgba(239,68,68,0.98)';
-
-        const rot = (Number(meta.angle) || 0) * Math.PI / 180;
-        const baseP = map.latLngToContainerPoint([lat, lng]);
-        const dx = -Math.sin(rot) * offY;
-        const dy = Math.cos(rot) * offY;
-        const ll = map.containerPointToLatLng([baseP.x + dx, baseP.y + dy]);
-
-        let lbl = pool[activeCount];
-        if (!lbl) {
-          lbl = L.textLabel(ll, {
-            text: `${terminated}/3`,
-            renderer: lvttTermCounterRendererRef.current,
-            textBaseSize: (invBase * invScale) * 0.95,
-            refZoom: invRefZoom,
-            textStyle: invTextStyle,
-            textColor: color,
-            textStrokeColor: invStrokeColor,
-            textStrokeWidthFactor: invStrokeWidthFactor,
-            minFontSize: invMinFs,
-            maxFontSize: invMaxFs,
-            rotation: Number(meta.angle) || 0,
-            underline: true,
-            underlineColor: color,
-            underlineWidthFactor: 1,
-            bgColor: 'rgba(10,15,25,0.75)',
-            bgPaddingX: 4,
-            bgPaddingY: 2,
-            bgCornerRadius: 3,
-            radius: 28, // big hitbox at all zoom levels
-            interactive: true,
-            pane: 'overlayPane',
-            bubblingMouseEvents: false,
-          });
-
-          lbl.on('click', (evt) => {
-            try {
-              if (evt?.originalEvent) {
-                evt.originalEvent.stopImmediatePropagation?.();
-                L.DomEvent.stopPropagation(evt.originalEvent);
-                L.DomEvent.preventDefault(evt.originalEvent);
-              }
-            } catch (_e) { void _e; }
-            const invN = String(lbl._lvttInvNorm || '');
-            if (!invN) return;
-            const cur = Math.max(0, Math.min(3, Number(lvttTerminationByInvRef.current?.[invN] ?? 0)));
-            if (cur === 3) return;
-            const oe = evt?.originalEvent;
-            const x = oe?.clientX ?? 0;
-            const y = oe?.clientY ?? 0;
-            setLvttPopup({
-              mode: 'termination',
-              invId: String(lbl._lvttDisplayId || ''),
-              invIdNorm: invN,
-              draft: cur,
-              x,
-              y,
-            });
-          });
-
-          lbl.on('mouseover', () => {
-            try { map.getContainer().style.cursor = 'pointer'; } catch (_e) { void _e; }
-          });
-          lbl.on('mouseout', () => {
-            try { map.getContainer().style.cursor = ''; } catch (_e) { void _e; }
-          });
-
-          pool[activeCount] = lbl;
-        }
-
-        lbl._lvttInvNorm = invNorm;
-        lbl._lvttDisplayId = String(meta.displayId || '').trim() || String(meta.raw || '').trim() || invNorm;
-
-        lbl.setLatLng(ll);
-        let redraw = false;
-        const txt = `${terminated}/3`;
-        if (lbl.options.text !== txt) { lbl.options.text = txt; redraw = true; }
-        if (lbl.options.textColor !== color) { lbl.options.textColor = color; redraw = true; }
-        if (lbl.options.underline !== true) { lbl.options.underline = true; redraw = true; }
-        if (lbl.options.underlineColor !== color) { lbl.options.underlineColor = color; redraw = true; }
-        if (lbl.options.rotation !== (Number(meta.angle) || 0)) { lbl.options.rotation = Number(meta.angle) || 0; redraw = true; }
-        if (lbl.options.radius !== 28) { lbl.options.radius = 28; redraw = true; }
-        if (!layer.hasLayer(lbl)) layer.addLayer(lbl);
-        if (redraw) lbl.redraw?.();
-
-        activeCount++;
-      });
-
-      const prevActive = lvttTermCounterLabelActiveCountRef.current;
-      for (let i = activeCount; i < prevActive; i++) {
-        const old = pool[i];
-        if (old && layer.hasLayer(old)) layer.removeLayer(old);
-      }
-      lvttTermCounterLabelActiveCountRef.current = activeCount;
     };
 
-    render();
-    map.on('zoomend', render);
-    map.on('moveend', render);
+    map.on('click', onMapClick);
     return () => {
-      map.off('zoomend', render);
-      map.off('moveend', render);
+      map.off('click', onMapClick);
     };
-  }, [
-    isLVTT,
-    mapReady,
-    lvttSubMode,
-    lvttTerminationByInv,
-    activeMode?.invIdTextScale,
-    activeMode?.invIdTextBaseSize,
-    activeMode?.invIdTextRefZoom,
-    activeMode?.invIdTextStyle,
-    activeMode?.invIdTextMinFontSize,
-    activeMode?.invIdTextMaxFontSize,
-    activeMode?.invIdTextStrokeColor,
-    activeMode?.invIdTextStrokeWidthFactor,
-    clearLvttTermCounterLabelsNow,
-  ]);
+  }, [isLVTT, mapReady, stringMatchVersion, lvttTxInvMaxVersion, lvttSubTerminationBySub, lvttSubMode, lvttCanonicalSubNorm]);
+
+  // LVTT: we no longer render numeric counters on the map (0/3, 0/26).
+  // Clickability is represented by underlined INV + SS/SUB labels.
+  useEffect(() => {
+    if (!isLVTT) return;
+    clearLvttTermCounterLabelsNow();
+  }, [isLVTT, lvttSubMode, clearLvttTermCounterLabelsNow]);
+
+  useEffect(() => {
+    if (!isLVTT) return;
+    clearLvttSubCounterLabelsNow();
+  }, [isLVTT, lvttSubMode, clearLvttSubCounterLabelsNow]);
 
   // When the effective visibility changes (TEXT ON/OFF or module config), immediately refresh labels.
   useEffect(() => {
@@ -5522,6 +5761,25 @@ export default function BaseModule({
         lastStringLabelKeyRef.current = '';
         scheduleStringTextLabelUpdate();
       } catch (_e) { void _e; }
+      return;
+    }
+
+    // LVTT: highlight SS/SUB labels (orange) when selecting a history record
+    // IMPORTANT: This is render-time (string label) highlight, so we store a Set and force a redraw.
+    if (isLVTT) {
+      const shouldHighlight = Boolean(historyOpenRef.current) && Boolean(historySelectedRecordId);
+      const idsToHighlight = shouldHighlight
+        ? new Set(editingPolygonIds.map((x) => lvttCanonicalSubNorm(x)).filter(Boolean))
+        : new Set();
+
+      lvttHistoryHighlightSubSetRef.current = idsToHighlight;
+
+      try {
+        lastStringLabelKeyRef.current = '';
+        scheduleStringTextLabelUpdate();
+      } catch (_e) {
+        void _e;
+      }
       return;
     }
 
@@ -6733,6 +6991,12 @@ export default function BaseModule({
     }
     lvttTermCounterLabelPoolRef.current = [];
     lvttTermCounterLabelActiveCountRef.current = 0;
+    if (lvttSubCounterLayerRef.current) {
+      try { lvttSubCounterLayerRef.current.remove(); } catch (_e) { void _e; }
+      lvttSubCounterLayerRef.current = null;
+    }
+    lvttSubCounterLabelPoolRef.current = [];
+    lvttSubCounterLabelActiveCountRef.current = 0;
     // MVF: clear highlight + trench graph on reload
     try {
       mvfHighlightLayerRef.current?.clearLayers?.();
@@ -6928,15 +7192,9 @@ export default function BaseModule({
             mvtCounterLayerRef.current = null;
           }
 
-          // LVTT: create a separate interactive layer for clickable termination counters.
-          if (isLVTT) {
-            const counterLayer = L.layerGroup();
-            lvttTermCounterLayerRef.current = counterLayer;
-            counterLayer.addTo(mapRef.current);
-            layersRef.current.push(counterLayer);
-          } else {
-            lvttTermCounterLayerRef.current = null;
-          }
+          // LVTT: numeric counters are removed (no separate 0/3 or 0/26 overlays).
+          lvttTermCounterLayerRef.current = null;
+          lvttSubCounterLayerRef.current = null;
           continue;
         }
         
@@ -8674,7 +8932,8 @@ export default function BaseModule({
                 const mode = String(lvttSubModeRef.current || 'termination');
                 if (mode === 'termination') {
                   const terminated = Math.max(0, Math.min(3, Number(lvttTerminationByInvRef.current?.[invIdNorm] ?? 0)));
-                  textColor = terminated === 3 ? 'rgba(34,197,94,0.98)' : 'rgba(239,68,68,0.98)';
+                  // LVTT should match MC4-style: uncompleted = white, completed = green.
+                  textColor = terminated === 3 ? 'rgba(34,197,94,0.98)' : 'rgba(255,255,255,0.98)';
                 } else {
                   const testData = lvttTestCsvByInvRef.current?.[invIdNorm];
                   if (testData) {
@@ -8728,6 +8987,9 @@ export default function BaseModule({
                 minTextZoom: invMinTextZoom,
                 minBgZoom: invMinBgZoom,
                 rotation: feature.properties.angle || 0,
+                underline: isLVTT ? true : undefined,
+                underlineColor: isLVTT ? textColor : undefined,
+                underlineWidthFactor: isLVTT ? 1 : undefined,
                 interactive: isLV || isLVTT,
                 radius
               });
@@ -8772,7 +9034,6 @@ export default function BaseModule({
                   const mode = String(lvttSubModeRef.current || 'termination');
                   if (mode === 'termination') {
                     const cur = Math.max(0, Math.min(3, Number(lvttTerminationByInvRef.current?.[invIdNorm] ?? 0)));
-                    if (cur === 3) return;
                     const oe = e?.originalEvent;
                     const x = oe?.clientX ?? 0;
                     const y = oe?.clientY ?? 0;
@@ -8804,7 +9065,8 @@ export default function BaseModule({
                 label._lvttInvNorm = invIdNorm;
                 label._lvttDisplayId = displayId;
                 label._lvttRaw = raw;
-                label._lvttLocked = lvttModeNow === 'termination' && lvttTerminatedNow === 3;
+                // NOTE: do not lock interaction at 3/3; users must be able to correct before submit.
+                label._lvttLocked = false;
                 // store meta so we can draw a separate clickable 0/3 counter under the inv_id
                 lvttInvMetaByNormRef.current[invIdNorm] = {
                   lat: latlng.lat,
@@ -12649,7 +12911,46 @@ export default function BaseModule({
       Object.values(lvttTerminationByInv || {}).reduce((s, v) => s + Math.max(0, Math.min(3, Number(v) || 0)), 0)
     )
     : 0;
-  const lvttWorkUnit = lvttCompletedForSubmit === 1 ? 'cable terminated' : 'cables terminated';
+
+  // LVTT: also surface INV-side (SS/SUB) termination count in submit + history text.
+  const lvttInvSideDoneForSubmit = (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+    ? (() => {
+        try {
+          const LVTT_INV_SIDE_MULTIPLIER = 3;
+          const pts = stringTextPointsRef.current || [];
+          const seen = new Set();
+          let doneInv = 0;
+          const dict = lvttTxInvMaxByTxRef.current || {};
+          const subMaxInvForNorm = (subNorm) => {
+            const m = String(subNorm || '').match(/^(ss|sub)(\d{2})$/i);
+            if (!m) return 0;
+            const tx = parseInt(m[2], 10);
+            if (!Number.isFinite(tx) || tx <= 0) return 0;
+            return Math.max(0, Number(dict?.[tx] ?? dict?.[String(tx)] ?? 0) || 0);
+          };
+
+          for (let i = 0; i < pts.length; i++) {
+            const raw = String(pts[i]?.text || '').trim();
+            if (!raw) continue;
+            const subNorm = lvttCanonicalSubNorm(raw);
+            if (!subNorm || seen.has(subNorm)) continue;
+            seen.add(subNorm);
+            const maxInv = subMaxInvForNorm(subNorm);
+            if (!(maxInv > 0)) continue;
+            const stored = Number(lvttSubTerminationBySubRef.current?.[subNorm] ?? 0);
+            const done = Math.max(0, Math.min(maxInv, Number.isFinite(stored) ? stored : 0));
+            doneInv += done;
+          }
+          return Math.max(0, doneInv) * LVTT_INV_SIDE_MULTIPLIER;
+        } catch (_e) {
+          void _e;
+          return 0;
+        }
+      })()
+    : 0;
+
+  // For LVTT, show explicit sides (requested).
+  const lvttWorkUnit = `termination panel side, ${lvttInvSideDoneForSubmit} termination inv. side`;
   // PTEP completed amounts for submit
   const ptepCompletedForSubmit = isPTEP
     ? (ptepSubMode === 'tabletotable' ? ptepCompletedTableToTable.size : ptepCompletedParameterMeters)
@@ -13119,29 +13420,65 @@ export default function BaseModule({
           const failLabelCls = isTestMode ? 'text-xs font-bold text-red-400' : 'text-xs font-bold text-slate-500';
           const failValueCls = isTestMode ? 'text-xs font-bold text-red-400 tabular-nums whitespace-nowrap' : 'text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap';
 
+          // LVTT: INV-side counters come from SS/SUB progress (done/maxInv per sub).
+          const subMaxInvForNorm = (subNorm) => {
+            const m = String(subNorm || '').match(/^(ss|sub)(\d{2})$/i);
+            if (!m) return 0;
+            const tx = parseInt(m[2], 10);
+            if (!Number.isFinite(tx) || tx <= 0) return 0;
+            const dict = lvttTxInvMaxByTxRef.current || {};
+            return Math.max(0, Number(dict?.[tx] ?? dict?.[String(tx)] ?? 0) || 0);
+          };
+
+          const invSideTotals = (() => {
+            const LVTT_INV_SIDE_MULTIPLIER = 3;
+            const pts = stringTextPointsRef.current || [];
+            const seen = new Set();
+            let totalInv = 0;
+            let doneInv = 0;
+            for (let i = 0; i < pts.length; i++) {
+              const raw = String(pts[i]?.text || '').trim();
+              if (!raw) continue;
+              const subNorm = lvttCanonicalSubNorm(raw);
+              if (!subNorm || seen.has(subNorm)) continue;
+              seen.add(subNorm);
+              const maxInv = subMaxInvForNorm(subNorm);
+              if (!(maxInv > 0)) continue;
+              totalInv += maxInv;
+              const stored = Number(lvttSubTerminationBySubRef.current?.[subNorm] ?? 0);
+              const done = Math.max(0, Math.min(maxInv, Number.isFinite(stored) ? stored : 0));
+              doneInv += done;
+            }
+            const remInv = Math.max(0, totalInv - doneInv);
+
+            // LVTT: Inv. Side total must be a fixed number (requested).
+            const FIXED_TOTAL_INV_SIDE = 462;
+            const doneScaled = doneInv * LVTT_INV_SIDE_MULTIPLIER;
+            const remScaled = Math.max(0, FIXED_TOTAL_INV_SIDE - doneScaled);
+            const pct = FIXED_TOTAL_INV_SIDE > 0 ? ((doneScaled / FIXED_TOTAL_INV_SIDE) * 100).toFixed(1) : '0.0';
+
+            return {
+              totalInv: FIXED_TOTAL_INV_SIDE,
+              doneInv: doneScaled,
+              remInv: remScaled,
+              pct,
+            };
+          })();
+
           return (
-            <div className="min-w-[820px] border-2 border-slate-700 bg-slate-900/40 py-3 px-3">
-              <div className="flex flex-col gap-2">
-                {/* LV TERMINATION row */}
-                <div
-                  className="grid grid-cols-[24px_170px_repeat(3,max-content)] items-center gap-x-3 gap-y-2 cursor-pointer"
-                  onClick={() => {
-                    if (!isTermMode) {
-                      setLvttSubMode('termination');
-                      setLvttPopup(null);
-                    }
-                  }}
-                >
+            <div className="min-w-[820px] border-2 border-slate-700 bg-slate-900/40 py-2 px-3">
+              <div className="flex flex-col gap-1">
+                {/* LV TERMINATION (Panel Side + Inv. Side) with a single selector centered between the two rows */}
+                <div className="grid grid-cols-[24px_190px_repeat(3,max-content)] items-center gap-x-2 gap-y-1">
                   <button
                     type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
+                    onClick={() => {
                       if (!isTermMode) {
                         setLvttSubMode('termination');
                         setLvttPopup(null);
                       }
                     }}
-                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
+                    className={`row-span-2 w-5 h-5 border-2 rounded flex items-center justify-center transition-colors justify-self-start self-center ${
                       isTermMode
                         ? 'border-emerald-500 bg-emerald-500 text-white'
                         : 'border-slate-500 bg-slate-800 hover:border-emerald-400'
@@ -13151,7 +13488,9 @@ export default function BaseModule({
                   >
                     {isTermMode && <span className="text-xs font-bold">✓</span>}
                   </button>
-                  <div className={`text-xs font-bold ${isTermMode ? 'text-emerald-300' : 'text-emerald-400/60'}`}>LV_TERMINATION:</div>
+
+                  {/* Panel Side row */}
+                  <div className={`text-[11px] font-bold ${isTermMode ? 'text-emerald-300' : 'text-emerald-400/60'}`}>LV Termination Panel Side:</div>
                   <div className={COUNTER_BOX}>
                     <div className={COUNTER_GRID}>
                       <span className={COUNTER_LABEL}>Total</span>
@@ -13170,11 +13509,32 @@ export default function BaseModule({
                       <span className={COUNTER_VALUE}>{termRem}</span>
                     </div>
                   </div>
+
+                  {/* Inv. Side row (driven by SS/SUB progress) */}
+                  <div className={`text-[11px] font-bold ${isTermMode ? 'text-amber-300' : 'text-amber-400/60'}`}>LV Termination Inv. Side:</div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_LABEL}>Total</span>
+                      <span className={COUNTER_VALUE}>{invSideTotals.totalInv}</span>
+                    </div>
+                  </div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_DONE_LABEL}>Done</span>
+                      <span className={COUNTER_DONE_VALUE}>{invSideTotals.doneInv} ({invSideTotals.pct}%)</span>
+                    </div>
+                  </div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_LABEL}>Remaining</span>
+                      <span className={COUNTER_VALUE}>{invSideTotals.remInv}</span>
+                    </div>
+                  </div>
                 </div>
 
                 {/* LV TESTING row */}
                 <div
-                  className="grid grid-cols-[24px_170px_repeat(4,max-content)] items-center gap-x-3 gap-y-2 cursor-pointer"
+                  className="grid grid-cols-[24px_190px_repeat(4,max-content)] items-center gap-x-2 gap-y-1 cursor-pointer"
                   onClick={() => {
                     if (!isTestMode) {
                       setLvttSubMode('testing');
@@ -13201,7 +13561,7 @@ export default function BaseModule({
                   >
                     {isTestMode && <span className="text-xs font-bold">✓</span>}
                   </button>
-                  <div className={`text-xs font-bold ${isTestMode ? 'text-sky-300' : 'text-sky-400/60'}`}>LV_TESTING:</div>
+                  <div className={`text-[11px] font-bold ${isTestMode ? 'text-sky-300' : 'text-sky-400/60'}`}>LV_TESTING:</div>
                   <div className={COUNTER_BOX}>
                     <div className={COUNTER_GRID}>
                       <span className={COUNTER_LABEL}>Total</span>
@@ -13912,7 +14272,7 @@ export default function BaseModule({
               </button>
             )}
 
-            {/* Filter Export Buttons (MVT/LVTT/DCCT testing filter) */}
+            {/* Filter Export Buttons (MVT/DCCT testing filter) */}
             {isMVT && String(mvtSubMode || 'termination') === 'testing' && mvtTestFilter ? (
               <button
                 type="button"
@@ -13925,18 +14285,6 @@ export default function BaseModule({
                 Export {mvtTestFilter === 'passed' ? 'Passed' : mvtTestFilter === 'failed' ? 'Failed' : 'Not Tested'}
               </button>
             ) : null}
-            {isLVTT && String(lvttSubMode || 'termination') === 'testing' && lvttTestFilter ? (
-              <button
-                type="button"
-                onClick={lvttExportFilteredTestResultsCsv}
-                disabled={lvttTestResultsDirty}
-                className={`${BTN_COMPACT_NEUTRAL} w-auto h-6 px-2 py-0 leading-none text-[10px] font-medium whitespace-nowrap`}
-                title={lvttTestResultsDirty ? 'Submit first, then export selected' : 'Export selected test results (CSV)'}
-                aria-label="Export Selected LV Test Results"
-              >
-                Export {lvttTestFilter === 'passed' ? 'Passed' : lvttTestFilter === 'failed' ? 'Failed' : 'Not Tested'}
-              </button>
-            ) : null}
             {isDCCT && dcctFilter ? (
               <button
                 type="button"
@@ -13947,6 +14295,20 @@ export default function BaseModule({
                 aria-label="Export Selected Test Results"
               >
                 Export {dcctFilter === 'passed' ? 'Passed' : dcctFilter === 'failed' ? 'Failed' : 'Not Tested'}
+              </button>
+            ) : null}
+
+            {/* Filter Export Button (LVTT testing filter) */}
+            {isLVTT && String(lvttSubMode || 'termination') === 'testing' && lvttTestFilter ? (
+              <button
+                type="button"
+                onClick={lvttExportFilteredTestResultsCsv}
+                disabled={lvttTestResultsDirty}
+                className={`${BTN_COMPACT_NEUTRAL} w-auto h-6 px-2 py-0 leading-none text-[10px] font-medium whitespace-nowrap`}
+                title={lvttTestResultsDirty ? 'Submit first, then export selected' : 'Export selected test results (CSV)'}
+                aria-label="Export Selected LV Test Results"
+              >
+                Export {lvttTestFilter === 'passed' ? 'Passed' : lvttTestFilter === 'failed' ? 'Failed' : 'Not Tested'}
               </button>
             ) : null}
 
@@ -14154,7 +14516,10 @@ export default function BaseModule({
                       title="Import Test Results (CSV)"
                       aria-label="Import Test Results"
                     >
-                      Import Test Results
+                      <span className="flex flex-col items-center leading-[1.05]">
+                        <span>Import</span>
+                        <span>Test Results</span>
+                      </span>
                     </button>
                     <button
                       onClick={lvttExportTestResultsCsv}
@@ -14162,7 +14527,10 @@ export default function BaseModule({
                       title={lvttTestResultsDirty ? 'Submit first, then export' : 'Export submitted test results (CSV)'}
                       aria-label="Export Test Results"
                     >
-                      Export Test Results
+                      <span className="flex flex-col items-center leading-[1.05]">
+                        <span>Export</span>
+                        <span>Test Results</span>
+                      </span>
                     </button>
                   </>
                 ) : (
@@ -14179,6 +14547,7 @@ export default function BaseModule({
                       History
                     </button>
 
+                    {!isLVTT && (
                     <button
                       onClick={() => {
                         const exportModuleKey = String(
@@ -14252,6 +14621,7 @@ export default function BaseModule({
                     >
                       Export
                     </button>
+                    )}
                   </>
                 )}
               </>
@@ -14269,25 +14639,25 @@ export default function BaseModule({
               {mvfSegments.map((s) => {
                 const active = mvfActiveSegmentKeys.has(s.key);
                 return (
-                    <button
+                  <button
                     key={s.key}
-                      type="button"
-                      onClick={() => {
-                        const ck = String(s.key || '');
+                    type="button"
+                    onClick={() => {
+                      const ck = String(s.key || '');
                       // Toggle selection - when selected, route shows GREEN on map
-                        setMvfActiveSegmentKeys((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(s.key)) next.delete(s.key);
-                          else next.add(s.key);
-                          return next;
-                        });
-                      // Also mark as done when selected (so it appears green)
-                          setMvfDoneSegmentKeys((prev) => {
-                            const next = new Set(prev);
+                      setMvfActiveSegmentKeys((prev) => {
+                        const next = new Set(prev);
                         if (next.has(ck)) next.delete(ck);
                         else next.add(ck);
-                            return next;
-                          });
+                        return next;
+                      });
+                      // Also mark as done when selected (so it appears green)
+                      setMvfDoneSegmentKeys((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(ck)) next.delete(ck);
+                        else next.add(ck);
+                        return next;
+                      });
                     }}
                     className={`mb-1 flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-[12px] transition-colors ${
                       active
@@ -14302,7 +14672,7 @@ export default function BaseModule({
                         ? `${Math.round(Number(s.length || 0) / mvfCircuitsMultiplier)}*${mvfCircuitsMultiplier}`
                         : `${Math.round(Number(s.length || 0))}`}
                     </span>
-                      </button>
+                  </button>
                 );
               })}
             </div>
@@ -14536,12 +14906,12 @@ export default function BaseModule({
                       {String(lvttSubMode || 'termination') === 'termination' ? (
                         <>
                           <div className="flex items-center gap-2">
-                            <span className="h-3 w-3 border-2 border-red-300 bg-red-500" aria-hidden="true" />
-                            <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">0/3 – 2/3</span>
+                            <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-white">Uncompleted</span>
                           </div>
                           <div className="mt-2 flex items-center gap-2">
                             <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
-                            <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">3/3</span>
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Completed</span>
                           </div>
                         </>
                       ) : (
@@ -14752,10 +15122,16 @@ export default function BaseModule({
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <div className="text-[11px] font-black uppercase tracking-wide text-white">
-                {lvttPopup.mode === 'termination' ? 'LV Termination' : 'LV Testing'}
+                {lvttPopup.mode === 'termination'
+                  ? 'LV Termination'
+                  : lvttPopup.mode === 'sub_termination'
+                  ? 'LV Termination'
+                  : 'LV Testing'}
               </div>
               <div className="mt-1 text-sm font-extrabold text-slate-100 truncate">
-                {lvttPopup.invId || 'Inverter'}
+                {lvttPopup.mode === 'sub_termination'
+                  ? (lvttPopup.subId || 'SUB')
+                  : (lvttPopup.invId || 'Inverter')}
               </div>
             </div>
             <button
@@ -14774,8 +15150,21 @@ export default function BaseModule({
               const invNorm = String(lvttPopup.invIdNorm || '');
               const stored = Math.max(0, Math.min(3, Number(lvttTerminationByInv?.[invNorm] ?? 0)));
               const draft = Math.max(0, Math.min(3, Number(lvttPopup.draft ?? stored)));
-              const locked = stored === 3;
               const setDraft = (v) => setLvttPopup((p) => (p ? { ...p, draft: Math.max(0, Math.min(3, v)) } : p));
+
+              const readDraftFromInput = (fallback) => {
+                try {
+                  const el = lvttTermInvInputRef.current;
+                  const raw = el?.value;
+                  if (raw == null || raw === '') return fallback;
+                  const n = parseInt(String(raw), 10);
+                  if (!Number.isFinite(n)) return fallback;
+                  return Math.max(0, Math.min(3, n));
+                } catch (_e) {
+                  void _e;
+                  return fallback;
+                }
+              };
 
               const applyDraft = (valueToApply) => {
                 if (!invNorm) return;
@@ -14801,13 +15190,13 @@ export default function BaseModule({
                   .sort((a, b) => a.display.localeCompare(b.display, undefined, { numeric: true, sensitivity: 'base' }));
               })();
 
-              const openNextInv = () => {
+              const openNextInv = (appliedValue) => {
                 const list = orderedInvs;
                 if (!list.length || !invNorm) return;
 
                 const snapshot = {
                   ...(lvttTerminationByInvRef.current || {}),
-                  [invNorm]: draft,
+                  [invNorm]: Math.max(0, Math.min(3, Number(appliedValue ?? draft) || 0)),
                 };
 
                 const idx = list.findIndex((x) => x.norm === invNorm);
@@ -14839,28 +15228,23 @@ export default function BaseModule({
               return (
                 <div className="mt-3">
                   <div className="border border-slate-700 bg-slate-800 px-2 py-2">
-                    {locked ? (
-                      <div className="flex items-center justify-end">
-                        <span className="text-[11px] font-black uppercase tracking-wide text-emerald-300">LOCKED</span>
-                      </div>
-                    ) : null}
                     <div className="mt-0 flex items-center justify-end gap-2">
                       <div className="flex items-center gap-1">
                         <input
+                          ref={lvttTermInvInputRef}
                           type="number"
                           min={0}
                           max={3}
                           step={1}
                           value={draft}
-                          disabled={locked}
                           onKeyDown={(e) => {
                             if (e.key !== 'Enter') return;
                             try {
                               e.preventDefault();
                               e.stopPropagation();
                             } catch (_e) { void _e; }
-                            if (locked) return;
-                            applyDraft(draft);
+                            const v = readDraftFromInput(draft);
+                            applyDraft(v);
                             setLvttPopup(null);
                           }}
                           onChange={(e) => {
@@ -14870,9 +15254,7 @@ export default function BaseModule({
                             if (Number.isFinite(n)) setDraft(n);
                           }}
                           className={`w-14 h-8 border-2 bg-slate-900 px-2 text-center text-[13px] font-black tabular-nums outline-none ${
-                            locked
-                              ? 'border-slate-700 text-slate-500 cursor-not-allowed'
-                              : (draft === 3 ? 'border-emerald-700 text-emerald-200' : 'border-red-700 text-red-200')
+                            draft === 3 ? 'border-emerald-700 text-emerald-200' : 'border-red-700 text-red-200'
                           }`}
                           title="Enter 0..3"
                         />
@@ -14882,34 +15264,110 @@ export default function BaseModule({
                   <div className="mt-3 flex items-center gap-2">
                     <button
                       type="button"
-                      disabled={locked}
                       onClick={() => {
-                        if (locked) return;
-                        applyDraft(draft);
-                        openNextInv();
+                        const v = readDraftFromInput(draft);
+                        applyDraft(v);
+                        openNextInv(v);
                       }}
                       className={`flex-1 h-8 border-2 text-[11px] font-extrabold uppercase tracking-wide ${
-                        locked
-                          ? 'border-slate-700 bg-slate-900/40 text-slate-500 cursor-not-allowed'
-                          : 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
+                        'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
                       }`}
-                      title={locked ? 'Locked at 3/3' : 'Apply and open next inverter'}
+                      title="Apply and open next inverter"
                     >
                       Next
                     </button>
                     <button
                       type="button"
-                      disabled={locked}
                       onClick={() => {
                         if (!invNorm) return;
-                        applyDraft(draft);
+                        const v = readDraftFromInput(draft);
+                        applyDraft(v);
                         setLvttPopup(null);
                       }}
                       className={`flex-1 h-8 border-2 text-[11px] font-extrabold uppercase tracking-wide ${
-                        locked
-                          ? 'border-slate-700 bg-slate-900/40 text-slate-500 cursor-not-allowed'
-                          : 'border-emerald-700 bg-emerald-950/30 text-emerald-200 hover:bg-emerald-950/40'
+                        'border-emerald-700 bg-emerald-950/30 text-emerald-200 hover:bg-emerald-950/40'
                       }`}
+                      title="Apply"
+                    >
+                      OK
+                    </button>
+                  </div>
+                </div>
+              );
+            })()
+          ) : lvttPopup.mode === 'sub_termination' ? (
+            (() => {
+              const LVTT_INV_SIDE_MULTIPLIER = 3;
+              const subNorm = String(lvttPopup.subNorm || '');
+              const maxInv = Math.max(0, Number(lvttPopup.max ?? 0) || 0);
+              const storedRaw = Number(lvttSubTerminationBySubRef.current?.[subNorm] ?? 0);
+              const stored = Math.max(0, Math.min(maxInv, Number.isFinite(storedRaw) ? storedRaw : 0));
+              const draft = Math.max(0, Math.min(maxInv, Number(lvttPopup.draft ?? stored) || 0));
+              const setDraft = (v) => setLvttPopup((p) => (p ? { ...p, draft: Math.max(0, Math.min(maxInv, Number(v) || 0)) } : p));
+
+              const applyDraft = (valueToApply) => {
+                if (!subNorm || !(maxInv > 0)) return;
+                const nextVal = Math.max(0, Math.min(maxInv, Number(valueToApply ?? 0) || 0));
+                const prevVal = Math.max(0, Math.min(maxInv, Number(lvttSubTerminationBySubRef.current?.[subNorm] ?? 0) || 0));
+                if (nextVal === prevVal) return;
+                setLvttSubTerminationBySub((prev) => {
+                  const base = prev && typeof prev === 'object' ? { ...prev } : {};
+                  base[subNorm] = nextVal;
+                  return base;
+                });
+              };
+
+              const done = draft;
+              const complete = maxInv > 0 && done >= maxInv;
+              const doneScaled = done * LVTT_INV_SIDE_MULTIPLIER;
+              const maxScaled = maxInv * LVTT_INV_SIDE_MULTIPLIER;
+
+              return (
+                <div className="mt-3">
+                  <div className="border border-slate-700 bg-slate-800 px-2 py-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-black uppercase tracking-wide text-slate-300">Progress</span>
+                      <span className={`text-[11px] font-black uppercase tracking-wide ${complete ? 'text-emerald-300' : 'text-red-300'}`}>{doneScaled}/{maxScaled}</span>
+                    </div>
+                    <div className="mt-2 flex items-center justify-end gap-2">
+                      <input
+                        type="number"
+                        min={0}
+                        max={maxInv}
+                        step={1}
+                        value={draft}
+                        onKeyDown={(e) => {
+                          if (e.key !== 'Enter') return;
+                          try {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          } catch (_e) { void _e; }
+                          applyDraft(draft);
+                          setLvttPopup(null);
+                        }}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === '') return;
+                          const n = Math.max(0, Math.min(maxInv, parseInt(v, 10)));
+                          if (Number.isFinite(n)) setDraft(n);
+                        }}
+                        className={`w-20 h-8 border-2 bg-slate-900 px-2 text-center text-[13px] font-black tabular-nums outline-none ${
+                          complete
+                            ? 'border-emerald-700 text-emerald-200'
+                            : 'border-red-700 text-red-200'
+                        }`}
+                        title={`Enter 0..${maxInv}`}
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        applyDraft(draft);
+                        setLvttPopup(null);
+                      }}
+                      className="flex-1 h-8 border-2 border-emerald-700 bg-emerald-950/30 text-[11px] font-extrabold uppercase tracking-wide text-emerald-200 hover:bg-emerald-950/40"
                       title="Apply"
                     >
                       OK
@@ -16786,8 +17244,8 @@ export default function BaseModule({
                             }
                           }}
                         >
-                              <div className="history-item-header">
-                                <span className="history-subcontractor">{record.subcontractor}</span>
+                          <div className="history-item-header">
+                            <span className="history-subcontractor">{record.subcontractor}</span>
                             <button
                               className="history-item-delete"
                               onClick={(e) => {
@@ -16868,18 +17326,19 @@ export default function BaseModule({
                             >
                               🗑️
                             </button>
-                              </div>
-                              <div className="history-item-stats">
-                                <div className="stat">
-                                  <span>{record.workers} workers</span>
-                                </div>
-                                <div className="stat stat-total">
+                          </div>
+
+                          <div className="history-item-stats">
+                            <div className="stat">
+                              <span>{record.workers} workers</span>
+                            </div>
+                            <div className="stat stat-total">
                               <span>
                                 {(record.total_cable || 0).toFixed(0)} {record.unit || 'm'}
                               </span>
-                                </div>
-                              </div>
                             </div>
+                          </div>
+                        </div>
                       );
                     })}
 
