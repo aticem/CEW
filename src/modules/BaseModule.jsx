@@ -548,7 +548,7 @@ export default function BaseModule({
   const mvtTerminationByStationRef = useRef({}); // stationNorm -> 0..max (per station)
 
   // MVT termination: station-specific max counts
-  // SUB1-3 => max 3, SUB4-6 => max 6, CSS => max 9
+  // SUB1-3 => max 6, SUB4-6 => max 3, CSS => max 9
   const mvtCanonicalTerminationStationNorm = (rawNorm) => {
     const norm = normalizeId(rawNorm);
     if (!norm) return '';
@@ -573,8 +573,8 @@ export default function BaseModule({
     if (norm === 'css') return 9;
     const m = norm.match(/^(ss|sub)(\d{2})$/i);
     const n = m ? parseInt(m[2], 10) : 0;
-    if (n >= 1 && n <= 3) return 3;
-    if (n >= 4 && n <= 6) return 6;
+    if (n >= 1 && n <= 3) return 6;
+    if (n >= 4 && n <= 6) return 3;
     return 0;
   };
   const clampMvtTerminationCount = (stationNorm, value) => {
@@ -1793,6 +1793,7 @@ export default function BaseModule({
   const lvBoxLayersByInvIdRef = useRef({}); // invIdNorm -> L.Layer[] (lv_box geometries)
   const lvAllBoxLayersRef = useRef([]); // L.Layer[] (all lv_box layers for reset)
   const prevHistoryInvHighlightRef = useRef(new Set()); // invIdNorms highlighted by history selection
+  const prevHistoryMc4InvHighlightRef = useRef(new Set()); // invIdNorms highlighted by history selection (MC4)
 
   // LVTT: history selection highlight (orange) for SS/SUB labels
   const lvttHistoryHighlightSubSetRef = useRef(new Set()); // Set<subNorm>
@@ -2433,12 +2434,19 @@ export default function BaseModule({
     MC4: 'mc4',
     TERMINATED: 'terminated',
   };
-  // MC4 selection mode: 'mc4' or 'termination' - determines what type of work is being done
+  // MC4 selection mode:
+  // - 'mc4': MC4 installation
+  // - 'termination_panel': Cable termination (panel side) via panel ends
+  // - 'termination_inv': Cable termination (inv. side) via inverter popup counts
   // Default to 'mc4' (matches prior behavior), but allow user to uncheck back to null.
-  const [mc4SelectionMode, setMc4SelectionMode] = useState('mc4'); // null | 'mc4' | 'termination'
+  const [mc4SelectionMode, setMc4SelectionMode] = useState('mc4'); // null | 'mc4' | 'termination_panel' | 'termination_inv'
   const mc4SelectionModeRef = useRef(mc4SelectionMode);
+  const mc4LastTerminationModeRef = useRef('termination_panel');
   useEffect(() => {
     mc4SelectionModeRef.current = mc4SelectionMode;
+    if (mc4SelectionMode === 'termination_panel' || mc4SelectionMode === 'termination_inv') {
+      mc4LastTerminationModeRef.current = mc4SelectionMode;
+    }
   }, [mc4SelectionMode]);
   const [mc4Toast, setMc4Toast] = useState('');
   const mc4ToastTimerRef = useRef(null);
@@ -2457,9 +2465,18 @@ export default function BaseModule({
   // Users can intentionally set it to null (no mode) and we must respect that.
   const mc4TodayYmd = getTodayYmd();
   const mc4PanelStatesStorageKey = `cew:mc4:panel_states:${mc4TodayYmd}`;
+  const mc4SubmittedStorageKey = `cew:mc4:submitted_counts:${mc4TodayYmd}`;
+  const mc4InvTerminationStorageKey = `cew:mc4:inv_termination:${mc4TodayYmd}`;
   const [mc4PanelStates, setMc4PanelStates] = useState(() => ({})); // { [panelId]: { left, right } }
   const mc4PanelStatesRef = useRef(mc4PanelStates);
   const [mc4TotalStringsCsv, setMc4TotalStringsCsv] = useState(null); // number | null
+  const [mc4SubmittedCounts, setMc4SubmittedCounts] = useState(() => ({ mc4: 0, termination_panel: 0, termination_inv: 0 }));
+  const mc4SubmittedCountsRef = useRef(mc4SubmittedCounts);
+  const mc4InvMaxByInvRef = useRef({}); // invIdNorm -> max STR number
+  const [mc4InvTerminationByInv, setMc4InvTerminationByInv] = useState(() => ({})); // invIdNorm -> count
+  const mc4InvTerminationByInvRef = useRef(mc4InvTerminationByInv);
+  const [mc4InvPopup, setMc4InvPopup] = useState(null); // { invId, invIdNorm, draft, max, x, y } | null
+  const mc4InvInputRef = useRef(null);
   const mc4HistoryRef = useRef({ actions: [], index: -1 });
   const [mc4HistoryTick, setMc4HistoryTick] = useState(0);
   const mc4EndsLayerRef = useRef(null); // L.LayerGroup
@@ -2467,6 +2484,14 @@ export default function BaseModule({
   useEffect(() => {
     mc4PanelStatesRef.current = mc4PanelStates;
   }, [mc4PanelStates]);
+
+  useEffect(() => {
+    mc4SubmittedCountsRef.current = mc4SubmittedCounts;
+  }, [mc4SubmittedCounts]);
+
+  useEffect(() => {
+    mc4InvTerminationByInvRef.current = mc4InvTerminationByInv;
+  }, [mc4InvTerminationByInv]);
 
   const mc4GetPanelState = useCallback((panelId) => {
     const s = mc4PanelStatesRef.current?.[panelId];
@@ -2481,8 +2506,8 @@ export default function BaseModule({
       if (cur === MC4_PANEL_STATES.MC4) return MC4_PANEL_STATES.NONE;
       // If already terminated, can't change in MC4 mode
       return cur;
-    } else if (mc4SelectionMode === 'termination') {
-      // Termination mode: MC4 -> TERMINATED, or toggle TERMINATED off
+    } else if (mc4SelectionMode === 'termination_panel' || mc4SelectionMode === 'termination_inv') {
+      // Termination (panel side): MC4 -> TERMINATED, or toggle TERMINATED off
       if (cur === MC4_PANEL_STATES.MC4) return MC4_PANEL_STATES.TERMINATED;
       if (cur === MC4_PANEL_STATES.TERMINATED) return MC4_PANEL_STATES.MC4; // back to MC4, not NONE
       // Can't terminate if not MC4 first
@@ -2500,8 +2525,8 @@ export default function BaseModule({
       // MC4 mode: set to MC4 (blue) if not already
       if (cur == null) return MC4_PANEL_STATES.MC4;
       return cur; // Don't change if already MC4 or TERMINATED
-    } else if (mc4SelectionMode === 'termination') {
-      // Termination mode: advance to TERMINATED if currently MC4
+    } else if (mc4SelectionMode === 'termination_panel' || mc4SelectionMode === 'termination_inv') {
+      // Termination (panel side): advance to TERMINATED if currently MC4
       if (cur === MC4_PANEL_STATES.MC4) return MC4_PANEL_STATES.TERMINATED;
       if (cur === MC4_PANEL_STATES.TERMINATED) return MC4_PANEL_STATES.TERMINATED;
       // Can't terminate if not MC4 first - leave as is
@@ -2957,6 +2982,55 @@ export default function BaseModule({
     mc4HistoryRef.current = { actions: [], index: -1 };
     setMc4HistoryTick((t) => t + 1);
   }, [isMC4, mc4PanelStatesStorageKey]);
+
+  useEffect(() => {
+    if (!isMC4) return;
+    try {
+      const raw = localStorage.getItem(mc4SubmittedStorageKey);
+      const obj = raw ? JSON.parse(raw) : null;
+      const next = {
+        mc4: Math.max(0, Number(obj?.mc4 ?? 0) || 0),
+        // Back-compat: older builds used key name 'termination'
+        termination_panel: Math.max(0, Number(obj?.termination_panel ?? obj?.termination ?? 0) || 0),
+        termination_inv: Math.max(0, Number(obj?.termination_inv ?? 0) || 0),
+      };
+      setMc4SubmittedCounts(next);
+      mc4SubmittedCountsRef.current = next;
+    } catch (_e) {
+      void _e;
+      const next = { mc4: 0, termination_panel: 0, termination_inv: 0 };
+      setMc4SubmittedCounts(next);
+      mc4SubmittedCountsRef.current = next;
+    }
+  }, [isMC4, mc4SubmittedStorageKey]);
+
+  useEffect(() => {
+    if (!isMC4) return;
+    try {
+      const raw = localStorage.getItem(mc4InvTerminationStorageKey);
+      const obj = raw ? JSON.parse(raw) : {};
+      if (obj && typeof obj === 'object') {
+        setMc4InvTerminationByInv(obj);
+        mc4InvTerminationByInvRef.current = obj;
+      } else {
+        setMc4InvTerminationByInv({});
+        mc4InvTerminationByInvRef.current = {};
+      }
+    } catch (_e) {
+      void _e;
+      setMc4InvTerminationByInv({});
+      mc4InvTerminationByInvRef.current = {};
+    }
+  }, [isMC4, mc4InvTerminationStorageKey]);
+
+  useEffect(() => {
+    if (!isMC4) return;
+    try {
+      localStorage.setItem(mc4InvTerminationStorageKey, JSON.stringify(mc4InvTerminationByInv || {}));
+    } catch (_e) {
+      void _e;
+    }
+  }, [isMC4, mc4InvTerminationStorageKey, mc4InvTerminationByInv]);
 
   useEffect(() => {
     if (!isMC4) return;
@@ -3770,6 +3844,16 @@ export default function BaseModule({
                 setMvtTestPopup({ stationLabel: stationLabel || stationNorm, fromKey, x, y });
               }
             });
+
+            label.on('mouseover', () => {
+              try { if (!label._mvtLocked) map.getContainer().style.cursor = 'pointer'; } catch (_e) { void _e; }
+            });
+            label.on('mouseout', () => {
+              try { map.getContainer().style.cursor = ''; } catch (_e) { void _e; }
+            });
+
+            // Mark so pooled labels reused across modules still get MVT handlers.
+            label._mvtHandlersBound = true;
           }
 
           if (isLVTT) {
@@ -3837,6 +3921,76 @@ export default function BaseModule({
               const termMode = modeNow === 'termination';
               const testMode = modeNow === 'testing';
 
+               // If this label instance came from the pool (created in another module),
+               // it won't have the MVT click handler. Bind it lazily here.
+               if (!label._mvtHandlersBound) {
+                 label.on('click', (evt) => {
+                   try {
+                     if (evt?.originalEvent) {
+                       evt.originalEvent.stopImmediatePropagation?.();
+                       L.DomEvent.stopPropagation(evt.originalEvent);
+                       L.DomEvent.preventDefault(evt.originalEvent);
+                     }
+                   } catch (_e) { void _e; }
+                   const modeNow2 = String(mvtSubModeRef.current || 'termination');
+                   const stationLabel2 = String(label._mvtStationLabel || '').trim();
+                   const stationNorm2 = String(label._mvtStationNorm || '');
+                   if (!stationNorm2) return;
+                   const oe = evt?.originalEvent;
+                   const x = oe?.clientX ?? 0;
+                   const y = oe?.clientY ?? 0;
+                   if (modeNow2 === 'termination') {
+                     const lockedNow2 = Boolean(label._mvtLocked);
+                     if (lockedNow2) return;
+                     const cur2 = clampMvtTerminationCount(stationNorm2, mvtTerminationByStationRef.current?.[stationNorm2] ?? 0);
+                     setMvtTermPopup({
+                       stationLabel: stationLabel2 || stationNorm2,
+                       stationNorm: stationNorm2,
+                       draft: cur2,
+                       x,
+                       y,
+                     });
+                     return;
+                   }
+                   if (modeNow2 === 'testing') {
+                     const csv = mvtTestCsvByFromRef.current || {};
+                     const normSt = normalizeId(stationLabel2 || stationNorm2);
+                     const candKeys = [normSt];
+                     const pad2 = (n) => String(n).padStart(2, '0');
+                     const mSs = normSt.match(/^ss(\d{1,2})$/i);
+                     const mSub = normSt.match(/^sub(\d{1,2})$/i);
+                     if (mSs) {
+                       const nn = pad2(mSs[1]);
+                       candKeys.push(`ss${nn}`);
+                       candKeys.push(`sub${nn}`);
+                     }
+                     if (mSub) {
+                       const nn = pad2(mSub[1]);
+                       candKeys.push(`sub${nn}`);
+                       candKeys.push(`ss${nn}`);
+                     }
+                     let fromKey = '';
+                     for (const k of candKeys) {
+                       if (csv[k]) { fromKey = k; break; }
+                     }
+                     if (!fromKey) {
+                       const preferred = candKeys.find((k) => /^sub\d{2}$/i.test(k)) || candKeys[0] || '';
+                       fromKey = preferred;
+                     }
+                     setMvtTestPanel(null);
+                     setMvtTestPopup({ stationLabel: stationLabel2 || stationNorm2, fromKey, x, y });
+                   }
+                 });
+
+                 label.on('mouseover', () => {
+                   try { if (!label._mvtLocked) map.getContainer().style.cursor = 'pointer'; } catch (_e) { void _e; }
+                 });
+                 label.on('mouseout', () => {
+                   try { map.getContainer().style.cursor = ''; } catch (_e) { void _e; }
+                 });
+                 label._mvtHandlersBound = true;
+               }
+
               // MVT: CSS is excluded from MV testing. Keep it WHITE and non-interactive in testing mode.
               if (stationKey === 'css' && testMode) {
                 label._mvtStationNorm = '';
@@ -3844,6 +3998,8 @@ export default function BaseModule({
                 label._mvtLocked = false;
                 if (label.options.radius !== 0) { label.options.radius = 0; needsRedraw = true; }
                 if (label.options.interactive !== false) { label.options.interactive = false; needsRedraw = true; }
+                if (label.options.underline) { label.options.underline = false; needsRedraw = true; }
+                if (label.options.underlineColor) { label.options.underlineColor = null; needsRedraw = true; }
                 if (label.options.textBaseSize !== mvtBaseSizeLocal) { label.options.textBaseSize = mvtBaseSizeLocal; needsRedraw = true; }
                 const desiredTextColor = historyHighlighted ? 'rgba(11,18,32,0.98)' : 'rgba(255,255,255,0.98)';
                 if (label.options.textColor !== desiredTextColor) { label.options.textColor = desiredTextColor; needsRedraw = true; }
@@ -3884,10 +4040,15 @@ export default function BaseModule({
             if (label.options.radius !== ((termMode || testMode) ? 22 : 0)) { label.options.radius = (termMode || testMode) ? 22 : 0; needsRedraw = true; }
             if (label.options.interactive !== (termMode || testMode)) { label.options.interactive = (termMode || testMode); needsRedraw = true; }
             if (label.options.textBaseSize !== mvtBaseSizeLocal) { label.options.textBaseSize = mvtBaseSizeLocal; needsRedraw = true; }
+            // MVT: clickability is represented by underlined station labels (no extra numeric overlay labels).
+            if (label.options.underline !== (termMode || testMode)) { label.options.underline = (termMode || testMode); needsRedraw = true; }
+            if ((termMode || testMode) && label.options.underlineColor !== label.options.textColor) { label.options.underlineColor = label.options.textColor; needsRedraw = true; }
             // MVT station labels: base color (white/green) OR history-highlight (orange)
             {
               const desiredTextColor = historyHighlighted ? highlightTextColor : baseTextColor;
               if (label.options.textColor !== desiredTextColor) { label.options.textColor = desiredTextColor; needsRedraw = true; }
+              // Keep underline color in sync with the resolved text color (including history highlight override).
+              if ((termMode || testMode) && label.options.underlineColor !== desiredTextColor) { label.options.underlineColor = desiredTextColor; needsRedraw = true; }
               if (historyHighlighted) {
                 if (label.options.bgColor !== highlightBgColor) { label.options.bgColor = highlightBgColor; needsRedraw = true; }
                 if (label.options.bgPaddingX !== 4) { label.options.bgPaddingX = 4; needsRedraw = true; }
@@ -3907,6 +4068,8 @@ export default function BaseModule({
             label._mvtLocked = false;
             if (label.options.radius !== 0) { label.options.radius = 0; needsRedraw = true; }
             if (label.options.interactive !== false) { label.options.interactive = false; needsRedraw = true; }
+            if (label.options.underline) { label.options.underline = false; needsRedraw = true; }
+            if (label.options.underlineColor) { label.options.underlineColor = null; needsRedraw = true; }
             if (label.options.textBaseSize !== stringTextBaseSizeCfg) { label.options.textBaseSize = stringTextBaseSizeCfg; needsRedraw = true; }
             // Clear background when pooled label is reused for non-SS text
             if (label.options.bgColor != null) { label.options.bgColor = null; needsRedraw = true; }
@@ -3988,160 +4151,9 @@ export default function BaseModule({
         count++;
       }
 
-      // MVT: draw clickable termination counters next to each substation label.
-      // Helper: compute the effective font size in pixels (must match L.TextLabel._updatePath)
-      const computeFontSizePx = (baseSize) => {
-        const scale = Math.pow(2, zoom - stringTextRefZoomCfg);
-        let fs = (typeof baseSize === 'number' ? baseSize : stringTextBaseSizeCfg) * scale;
-        const minFs = typeof stringTextMinFontSizeCfg === 'number' ? stringTextMinFontSizeCfg : null;
-        const maxFs = typeof stringTextMaxFontSizeCfg === 'number' ? stringTextMaxFontSizeCfg : null;
-        if (minFs != null) fs = Math.max(minFs, fs);
-        if (maxFs != null) fs = Math.min(maxFs, fs);
-        return fs;
-      };
-
-      // MVT: draw clickable termination counters next to each substation label.
-      if (isMVT && String(mvtSubModeRef.current || 'termination') === 'termination' && mvtCounterLayerRef.current && mvtCountsByStation && !cursorBounds) {
-        const counterLayer = mvtCounterLayerRef.current;
-        const counterPool = mvtCounterLabelPoolRef.current;
-        let counterCount = 0;
-
-        const counterOffsetXFactorFor = (rawStation) => {
-          const s = String(rawStation || '').trim();
-          const n = Math.max(2, Math.min(10, s.length));
-          // approx half text width in "em": n*0.6/2, plus gap ~1.1em
-          return (n * 0.6) / 2 + 1.1;
-        };
-
-        for (let k = 0; k < runTotal; k++) {
-          const idx = cursorCandidates ? cursorCandidates[k] : (iterateIndices ? iterateIndices[k] : k);
-          const pt = points[idx];
-          if (!pt) continue;
-          if (!bounds.contains([pt.lat, pt.lng])) continue;
-
-          const rawStation = String(pt.text || '').trim();
-          const stationKey = mvtCanonicalTerminationStationNorm(rawStation);
-          if (!(stationKey && isMvtTerminationStationNorm(stationKey))) continue;
-
-          // Place the label at the actual on-screen text location (important for click hit-testing).
-          const fs = computeFontSizePx(mvtBaseSizeLocal);
-          const rot = (pt.angle || 0) * Math.PI / 180;
-          const baseP = map.latLngToContainerPoint([pt.lat, pt.lng]);
-          const offX = counterOffsetXFactorFor(rawStation) * fs;
-          const dx = Math.cos(rot) * offX;
-          const dy = Math.sin(rot) * offX;
-          const ll = map.containerPointToLatLng([baseP.x + dx, baseP.y + dy]);
-
-          const max = mvtTerminationMaxForNorm(stationKey);
-          const terminated = clampMvtTerminationCount(stationKey, Number(mvtCountsByStation[stationKey] ?? 0));
-          const locked = max > 0 && terminated === max;
-          const counterText = `${terminated}/${max}`;
-          // MVT rule: max/max => GREEN, otherwise WHITE (not red)
-          const baseCounterColor = locked ? 'rgba(34,197,94,0.98)' : 'rgba(255,255,255,0.98)';
-          const historyHighlighted =
-            Boolean(historyOpenRef.current) &&
-            Boolean(historySelectedRecordIdRef.current) &&
-            Boolean(mvtHistoryHighlightStationSetRef.current?.has(stationKey));
-          const highlightBgColor = 'rgba(249,115,22,1)'; // #f97316
-          const highlightTextColor = 'rgba(11,18,32,0.98)';
-          const counterColor = historyHighlighted ? highlightTextColor : baseCounterColor;
-          const counterBg = historyHighlighted ? highlightBgColor : 'rgba(10,15,25,0.75)';
-
-          let lbl = counterPool[counterCount];
-          if (!lbl) {
-            lbl = L.textLabel(ll, {
-              text: counterText,
-              renderer: canvasRenderer,
-              textBaseSize: mvtBaseSizeLocal,
-              refZoom: stringTextRefZoomCfg,
-              textStyle: stringTextStyleCfg,
-              textColor: counterColor,
-              textStrokeColor: stringTextStrokeColorCfg,
-              textStrokeWidthFactor: stringTextStrokeWidthFactorCfg,
-              minFontSize: stringTextMinFontSizeCfg,
-              maxFontSize: stringTextMaxFontSizeCfg,
-              rotation: pt.angle || 0,
-              underline: true,
-              underlineColor: counterColor,
-              bgColor: counterBg,
-              bgPaddingX: 4,
-              bgPaddingY: 2,
-              bgCornerRadius: 3,
-              offsetXFactor: 0,
-              offsetYFactor: 0,
-              radius: 18, // hitbox for canvas event detection
-              interactive: true,
-              pane: 'overlayPane',
-              bubblingMouseEvents: false,
-            });
-
-            lbl.on('click', (evt) => {
-              try {
-                if (evt?.originalEvent) {
-                  evt.originalEvent.stopImmediatePropagation?.();
-                  L.DomEvent.stopPropagation(evt.originalEvent);
-                  L.DomEvent.preventDefault(evt.originalEvent);
-                }
-              } catch (_e) { void _e; }
-              if (String(mvtSubModeRef.current || 'termination') !== 'termination') return;
-              const stationNorm = String(lbl._mvtStationNorm || '');
-              const lockedNow = Boolean(lbl._mvtLocked);
-              if (!stationNorm || lockedNow) return;
-              const oe = evt?.originalEvent;
-              const x = oe?.clientX ?? 0;
-              const y = oe?.clientY ?? 0;
-              const cur = clampMvtTerminationCount(stationNorm, mvtTerminationByStationRef.current?.[stationNorm] ?? 0);
-              setMvtTermPopup({
-                stationLabel: String(lbl._mvtStationLabel || '').trim() || stationNorm,
-                stationNorm,
-                draft: cur,
-                x,
-                y,
-              });
-            });
-
-            lbl.on('mouseover', () => {
-              try { if (!lbl._mvtLocked) map.getContainer().style.cursor = 'pointer'; } catch (_e) { void _e; }
-            });
-            lbl.on('mouseout', () => {
-              try { map.getContainer().style.cursor = ''; } catch (_e) { void _e; }
-            });
-
-            counterPool[counterCount] = lbl;
-          }
-
-          lbl._mvtStationNorm = stationKey;
-          lbl._mvtLocked = locked;
-          lbl._mvtStationLabel = rawStation;
-
-          lbl.setLatLng(ll);
-          let redraw = false;
-          if (lbl.options.text !== counterText) { lbl.options.text = counterText; redraw = true; }
-          if (lbl.options.textColor !== counterColor) { lbl.options.textColor = counterColor; redraw = true; }
-          if (lbl.options.rotation !== (pt.angle || 0)) { lbl.options.rotation = pt.angle || 0; redraw = true; }
-          if (lbl.options.radius !== 18) { lbl.options.radius = 18; redraw = true; }
-          if (lbl.options.textBaseSize !== mvtBaseSizeLocal) { lbl.options.textBaseSize = mvtBaseSizeLocal; redraw = true; }
-          if (lbl.options.underline !== true) { lbl.options.underline = true; redraw = true; }
-          if (lbl.options.underlineColor !== counterColor) { lbl.options.underlineColor = counterColor; redraw = true; }
-          if (lbl.options.bgColor !== counterBg) { lbl.options.bgColor = counterBg; redraw = true; }
-          if (lbl.options.bgPaddingX !== 4) { lbl.options.bgPaddingX = 4; redraw = true; }
-          if (lbl.options.bgPaddingY !== 2) { lbl.options.bgPaddingY = 2; redraw = true; }
-          if (lbl.options.bgCornerRadius !== 3) { lbl.options.bgCornerRadius = 3; redraw = true; }
-
-          if (!counterLayer.hasLayer(lbl)) counterLayer.addLayer(lbl);
-          if (redraw) lbl.redraw?.();
-          counterCount++;
-        }
-
-        const prevActive = mvtCounterLabelActiveCountRef.current;
-        for (let i = counterCount; i < prevActive; i++) {
-          const old = counterPool[i];
-          if (old && counterLayer.hasLayer(old)) counterLayer.removeLayer(old);
-        }
-        mvtCounterLabelActiveCountRef.current = counterCount;
-      } else {
-        clearMvtCounterLabelsNow();
-      }
+      // MVT termination mode: DO NOT render separate numeric counter labels next to SS/CSS.
+      // Counts are edited via clicking the underlined SS/CSS label itself (LVTT-style).
+      clearMvtCounterLabelsNow();
 
       // MVT: MV_TESTING uses the existing substation labels directly; no extra TEST_RESULTS label.
 
@@ -5444,6 +5456,94 @@ export default function BaseModule({
     };
   }, [isLVTT, mapReady, stringMatchVersion, lvttTxInvMaxVersion, lvttSubTerminationBySub, lvttSubMode, lvttCanonicalSubNorm]);
 
+  // MVT: fallback hit-test for SS/SUB/CSS label clicks in termination mode.
+  // Canvas renderers can stack; only the top canvas receives DOM events, so per-label click handlers
+  // can become unreliable. Detect clicks near station label positions and open the same popup.
+  useEffect(() => {
+    if (!isMVT || !mapReady || !mapRef.current) return;
+    const map = mapRef.current;
+
+    const canonicalStationNorm = (raw) => {
+      const norm = normalizeId(raw);
+      if (!norm) return '';
+      if (norm === 'css') return 'css';
+      const m = norm.match(/^(ss|sub)(\d{1,2})$/i);
+      if (!m) return '';
+      const prefix = String(m[1] || '').toLowerCase();
+      const nn = String(parseInt(m[2], 10)).padStart(2, '0');
+      return `${prefix}${nn}`;
+    };
+
+    const isStationNorm = (stationNorm) => {
+      const norm = canonicalStationNorm(stationNorm);
+      if (norm === 'css') return true;
+      const m = norm.match(/^(ss|sub)(\d{2})$/i);
+      if (!m) return false;
+      const n = parseInt(m[2], 10);
+      return Number.isFinite(n) && n >= 1 && n <= 6;
+    };
+
+    const onMapClick = (evt) => {
+      try {
+        if (noteMode) return;
+        if (String(mvtSubModeRef.current || 'termination') !== 'termination') return;
+        const clickP = evt?.containerPoint;
+        if (!clickP) return;
+
+        const pts = stringTextPointsRef.current || [];
+        if (!pts.length) return;
+
+        let best = null;
+        let bestD = Infinity;
+        const threshold = 28; // px (match LVTT feel)
+
+        for (let i = 0; i < pts.length; i++) {
+          const pt = pts[i];
+          const raw = String(pt?.text || '').trim();
+          if (!raw) continue;
+          const stationNorm = canonicalStationNorm(raw);
+          if (!(stationNorm && isStationNorm(stationNorm))) continue;
+
+          const max = mvtTerminationMaxForNorm(stationNorm);
+          if (!(max > 0)) continue;
+          const cur = clampMvtTerminationCount(stationNorm, mvtTerminationByStationRef.current?.[stationNorm] ?? 0);
+          const locked = max > 0 && cur === max;
+          if (locked) continue;
+
+          const lat = Number(pt?.lat);
+          const lng = Number(pt?.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+          const p = map.latLngToContainerPoint([lat, lng]);
+          const d = p.distanceTo(clickP);
+          if (d < bestD) {
+            bestD = d;
+            best = { stationLabel: raw, stationNorm, cur };
+          }
+        }
+
+        if (!best || !(bestD <= threshold)) return;
+
+        const oe = evt?.originalEvent;
+        const x = oe?.clientX ?? 0;
+        const y = oe?.clientY ?? 0;
+        setMvtTermPopup({
+          stationLabel: String(best.stationLabel || '').trim() || best.stationNorm,
+          stationNorm: best.stationNorm,
+          draft: best.cur,
+          x,
+          y,
+        });
+      } catch (_e) {
+        void _e;
+      }
+    };
+
+    map.on('click', onMapClick);
+    return () => {
+      map.off('click', onMapClick);
+    };
+  }, [isMVT, mapReady, noteMode, mvtSubMode]);
+
   // LVTT: we no longer render numeric counters on the map (0/3, 0/26).
   // Clickability is represented by underlined INV + SS/SUB labels.
   useEffect(() => {
@@ -5612,6 +5712,44 @@ export default function BaseModule({
           } catch (_e) {
             void _e;
           }
+
+          // 0b) Termination: fallback hit-test against active SS/CSS text labels
+          // (stationPointsRef may be empty depending on data source, but label pool is always present).
+          try {
+            if (String(mvtSubModeRef.current || 'termination') === 'termination') {
+              const pool = stringTextLabelPoolRef.current || [];
+              const active = stringTextLabelActiveCountRef.current || 0;
+              let best = null;
+              let bestD = Infinity;
+              for (let i = 0; i < active; i++) {
+                const lbl = pool[i];
+                if (!lbl || !lbl._mvtStationNorm) continue;
+                const d = distToLabelPx(lbl);
+                if (d < hitRadius && d < bestD) { bestD = d; best = lbl; }
+              }
+              if (best) {
+                const stationLabel = String(best._mvtStationLabel || '').trim();
+                const stationNorm = String(best._mvtStationNorm || '');
+                const lockedNow = Boolean(best._mvtLocked);
+                if (stationNorm && !lockedNow) {
+                  const x = e?.clientX ?? 0;
+                  const y = e?.clientY ?? 0;
+                  const cur = clampMvtTerminationCount(stationNorm, mvtTerminationByStationRef.current?.[stationNorm] ?? 0);
+                  setMvtTermPopup({
+                    stationLabel: stationLabel || stationNorm,
+                    stationNorm,
+                    draft: cur,
+                    x,
+                    y,
+                  });
+                  draggingRef.current = null;
+                  return;
+                }
+              }
+            }
+          } catch (_e) {
+            void _e;
+          }
         });
       });
       
@@ -5682,6 +5820,64 @@ export default function BaseModule({
 
       return;
     }
+
+      // MC4: highlight inv_id labels (orange) when selecting a history record that contains inverter IDs.
+      // NOTE: MC4 panel-side/MC4-install use panel IDs, so we only activate this when IDs look like TX..-INV..
+      if (isMC4) {
+        const labels = lvInvLabelByIdRef.current || {};
+        const looksLikeInvId = (id) => {
+          const s = String(id || '').toLowerCase();
+          if (!s) return false;
+          return /tx\s*\d+/.test(s) && /inv\s*\d+/.test(s);
+        };
+
+        const invIdsToHighlight = historySelectedRecordId
+          ? new Set(editingPolygonIds.map(normalizeId).filter(looksLikeInvId))
+          : new Set();
+
+        // Default styling from config
+        const invBgColor = activeMode?.invIdTextBgColor || null;
+        const invBgStrokeColor = activeMode?.invIdTextBgStrokeColor || null;
+        const invBgStrokeWidth = typeof activeMode?.invIdTextBgStrokeWidth === 'number' ? activeMode.invIdTextBgStrokeWidth : 0;
+
+        // Cleanup previous highlights (restore to normal state)
+        prevHistoryMc4InvHighlightRef.current.forEach((invIdNorm) => {
+          if (invIdsToHighlight.has(invIdNorm)) return;
+          const lbl = labels[invIdNorm];
+          if (!lbl) return;
+          lbl.options.textColor = 'rgba(255,255,255,0.98)';
+          lbl.options.textColorNoBg = null;
+          lbl.options.bgColor = invBgColor;
+          lbl.options.bgStrokeColor = invBgStrokeColor;
+          lbl.options.bgStrokeWidth = invBgStrokeWidth;
+          lbl.redraw?.();
+        });
+
+        // If this record doesn't contain inverter IDs, allow normal polygon highlighting to run.
+        if (!historySelectedRecordId || invIdsToHighlight.size === 0) {
+          prevHistoryMc4InvHighlightRef.current = new Set();
+        } else {
+          // Apply orange highlight
+          const highlightTextColor = activeMode?.invIdHighlightTextColor || 'rgba(255,255,255,0.98)';
+          const highlightBgColor = activeMode?.invIdHighlightBgColor || 'rgba(249, 115, 22, 1)';
+          const highlightBgStrokeColor = activeMode?.invIdHighlightBgStrokeColor || 'rgba(255,255,255,0.9)';
+          const highlightBgStrokeWidth = activeMode?.invIdHighlightBgStrokeWidth || 2.5;
+
+          invIdsToHighlight.forEach((invIdNorm) => {
+            const lbl = labels[invIdNorm];
+            if (!lbl) return;
+            lbl.options.textColor = highlightTextColor;
+            lbl.options.textColorNoBg = null;
+            lbl.options.bgColor = highlightBgColor;
+            lbl.options.bgStrokeColor = highlightBgStrokeColor;
+            lbl.options.bgStrokeWidth = highlightBgStrokeWidth;
+            lbl.redraw?.();
+          });
+
+          prevHistoryMc4InvHighlightRef.current = invIdsToHighlight;
+          return;
+        }
+      }
     
     // LV: highlight inv_id labels (orange)
     if (isLV) {
@@ -5838,7 +6034,7 @@ export default function BaseModule({
     });
 
     prevHistoryHighlightRef.current = polygonIdsToHighlight;
-  }, [historySelectedRecordId, editingPolygonIds, committedPolygons, isLV, isMVF, isMVFT, dailyLog, activeMode, lvCompletedInvIds, mvftCommittedTrenchParts]);
+  }, [historySelectedRecordId, editingPolygonIds, committedPolygons, isLV, isMC4, isMVF, isMVFT, dailyLog, activeMode, lvCompletedInvIds, mvftCommittedTrenchParts]);
   
   // Save notes to localStorage
   useEffect(() => {
@@ -6450,10 +6646,33 @@ export default function BaseModule({
               // (In the uploaded file each ID appears twice, so unique IDs would be 4528.)
               const rowCount = Math.max(0, lines.length - start);
               setMc4TotalStringsCsv(rowCount);
+
+              // Build inverter max STR index map (TXn-INVn-STRk) -> max k
+              const invMax = {};
+              const rx = /^(TX\d+)[-_\s]*INV\s*(\d+)[-_\s]*STR\s*(\d+)$/i;
+              for (let i = start; i < lines.length; i++) {
+                const line = lines[i];
+                if (!line) continue;
+                const parts = line.split(',');
+                const idRaw = String(parts?.[0] || '').trim();
+                if (!idRaw) continue;
+                const m = idRaw.match(rx);
+                if (!m) continue;
+                const tx = String(m[1] || '').replace(/\s+/g, '').toUpperCase();
+                const invNum = String(m[2] || '').trim();
+                const strNum = parseInt(String(m[3] || '0'), 10);
+                if (!tx || !invNum || !Number.isFinite(strNum) || strNum <= 0) continue;
+                const invId = `${tx}-INV${invNum}`;
+                const invNorm = normalizeId(invId);
+                const prev = Number(invMax[invNorm] || 0) || 0;
+                if (strNum > prev) invMax[invNorm] = strNum;
+              }
+              mc4InvMaxByInvRef.current = invMax;
             }
           } catch (_e) {
             void _e;
             setMc4TotalStringsCsv(null);
+            mc4InvMaxByInvRef.current = {};
           }
           // This mode doesn't use lengthData totals.
           setLengthData({});
@@ -8074,9 +8293,13 @@ export default function BaseModule({
                   safeStop(evt);
                   if (noteMode) return;
                   // Require selection mode to be set
-                  const currentMode = mc4SelectionModeRef.current; // null | 'mc4' | 'termination'
+                  const currentMode = mc4SelectionModeRef.current; // null | 'mc4' | 'termination_panel' | 'termination_inv'
                   if (!currentMode) {
                     showMc4Toast('Please select a mode above.');
+                    return;
+                  }
+                  if (currentMode === 'termination_inv') {
+                    // Inv-side termination is driven by inverter popups, not panel-end clicks.
                     return;
                   }
                   const side = sideFromClick(evt);
@@ -8086,13 +8309,13 @@ export default function BaseModule({
                   if (currentMode === 'mc4') {
                     // MC4 mode: set to MC4 (blue), but never downgrade TERMINATED (green)
                     if (nextState !== 'terminated') nextState = 'mc4';
-                  } else if (currentMode === 'termination') {
+                  } else if (currentMode === 'termination_panel') {
                     // Termination mode: ONLY MC4 (blue) -> TERMINATED (green)
                     // If not already MC4, do nothing (can't terminate without MC4).
                     if (nextState === 'mc4') nextState = 'terminated';
                     else if (nextState === 'terminated') nextState = 'terminated';
                     else {
-                      showMc4Toast('You must complete MC4 installation first.');
+                      showMc4Toast('Some tables were not MC4-installed yet');
                       return;
                     }
                   } else {
@@ -8108,6 +8331,7 @@ export default function BaseModule({
                 featureLayer.on('dblclick', (evt) => {
                   safeStop(evt);
                   if (noteMode) return;
+                  if (mc4SelectionModeRef.current === 'termination_inv') return;
                   const side = sideFromClick(evt);
                   const prev = mc4GetPanelState(uniqueId);
                   const next = { ...prev, [side]: MC4_PANEL_STATES.TERMINATED };
@@ -8990,9 +9214,40 @@ export default function BaseModule({
                 underline: isLVTT ? true : undefined,
                 underlineColor: isLVTT ? textColor : undefined,
                 underlineWidthFactor: isLVTT ? 1 : undefined,
-                interactive: isLV || isLVTT,
+                interactive: isLV || isLVTT || isMC4,
                 radius
               });
+
+              // MC4: inverter click popup in Cable Termination Inv. Side mode
+              if (isMC4) {
+                label.on('click', (e) => {
+                  try {
+                    if (e?.originalEvent) {
+                      L.DomEvent.stopPropagation(e.originalEvent);
+                      L.DomEvent.preventDefault(e.originalEvent);
+                    }
+                  } catch (_e) {
+                    void _e;
+                  }
+                  const mode = String(mc4SelectionModeRef.current || 'mc4');
+                  if (mode !== 'termination_inv' && mode !== 'termination_panel') return;
+
+                  const invNorm2 = normalizeId(displayId);
+                  const max = Math.max(0, Number(mc4InvMaxByInvRef.current?.[invNorm2] ?? 0) || 0);
+                  const stored = Math.max(0, Math.min(max > 0 ? max : 999999, Number(mc4InvTerminationByInvRef.current?.[invNorm2] ?? 0) || 0));
+                  const oe = e?.originalEvent;
+                  const x = oe?.clientX ?? 0;
+                  const y = oe?.clientY ?? 0;
+                  setMc4InvPopup({
+                    invId: displayId,
+                    invIdNorm: invNorm2,
+                    draft: stored,
+                    max,
+                    x,
+                    y,
+                  });
+                });
+              }
 
               // Toggle completed on click (LV only)
               if (isLV) {
@@ -10856,58 +11111,62 @@ export default function BaseModule({
             });
             if (ids.length > 0) {
               // Calculate next state based on current mode (using ref to get latest value)
-              const currentMode = mc4SelectionModeRef.current; // null | 'mc4' | 'termination'
+              const currentMode = mc4SelectionModeRef.current; // null | 'mc4' | 'termination_panel' | 'termination_inv'
               if (!currentMode) {
                 // Show warning, but DO NOT return early; onMouseUp must continue so the selection box closes.
                 showMc4Toast('Please select a mode above.');
               } else {
-                const advanceState = (cur) => {
-                  if (currentMode === 'mc4') {
-                    // MC4 mode: set to MC4 (blue), but never downgrade TERMINATED (green)
-                    if (cur === 'terminated') return 'terminated';
-                    return 'mc4';
-                  } else if (currentMode === 'termination') {
-                    // Termination mode: ONLY MC4 (blue) -> TERMINATED (green)
-                    if (cur === 'mc4') return 'terminated';
-                    if (cur === 'terminated') return 'terminated';
+                // Inv-side termination does not edit panel ends (left click); allow right-click erase.
+                if (!isRightClick && currentMode === 'termination_inv') {
+                  // no-op
+                } else {
+                  const advanceState = (cur) => {
+                    if (currentMode === 'mc4') {
+                      // MC4 mode: set to MC4 (blue), but never downgrade TERMINATED (green)
+                      if (cur === 'terminated') return 'terminated';
+                      return 'mc4';
+                    } else if (currentMode === 'termination_panel') {
+                      // Termination mode: ONLY MC4 (blue) -> TERMINATED (green)
+                      if (cur === 'mc4') return 'terminated';
+                      if (cur === 'terminated') return 'terminated';
+                      return cur;
+                    }
                     return cur;
+                  };
+                  const changes = ids.map((pid) => {
+                    const prev = mc4GetPanelState(pid);
+                    const next = isRightClick
+                      ? { left: null, right: null }
+                      : { left: advanceState(prev.left), right: advanceState(prev.right) };
+                    return { id: pid, prev, next };
+                  });
+
+                  // Warn if user is trying to terminate panels that are not MC4-installed (not blue)
+                  if (!isRightClick && currentMode === 'termination_panel') {
+                    let advanced = 0;
+                    let blocked = 0;
+                    changes.forEach((c) => {
+                      const prev = c?.prev || { left: null, right: null };
+                      const next = c?.next || { left: null, right: null };
+                      if (prev.left === 'mc4' && next.left === 'terminated') advanced += 1;
+                      if (prev.right === 'mc4' && next.right === 'terminated') advanced += 1;
+                      if (prev.left == null && next.left == null) blocked += 1;
+                      if (prev.right == null && next.right == null) blocked += 1;
+                    });
+                    if ((advanced === 0 && blocked > 0) || blocked > 0) showMc4Toast('Some tables were not MC4-installed yet');
                   }
-                  return cur;
-                };
-                const changes = ids.map((pid) => {
-                  const prev = mc4GetPanelState(pid);
-                  const next = isRightClick
-                    ? { left: null, right: null }
-                    : { left: advanceState(prev.left), right: advanceState(prev.right) };
-                  return { id: pid, prev, next };
-                });
 
-                // Warn if user is trying to terminate panels that are not MC4-installed (not blue)
-                if (!isRightClick && currentMode === 'termination') {
-                  let advanced = 0;
-                  let blocked = 0;
-                  changes.forEach((c) => {
-                    const prev = c?.prev || { left: null, right: null };
-                    const next = c?.next || { left: null, right: null };
-                    if (prev.left === 'mc4' && next.left === 'terminated') advanced += 1;
-                    if (prev.right === 'mc4' && next.right === 'terminated') advanced += 1;
-                    if (prev.left == null && next.left == null) blocked += 1;
-                    if (prev.right == null && next.right == null) blocked += 1;
+                  setMc4PanelStates((s) => {
+                    const out = { ...(s || {}) };
+                    changes.forEach((c) => {
+                      if (!c?.id) return;
+                      if (isRightClick) delete out[c.id];
+                      else out[c.id] = { left: c.next.left ?? null, right: c.next.right ?? null };
+                    });
+                    return out;
                   });
-                  if (advanced === 0 && blocked > 0) showMc4Toast('You must complete MC4 installation first.');
-                  else if (blocked > 0) showMc4Toast('Some tables were not MC4-installed yet.');
+                  mc4PushHistory(changes);
                 }
-
-                setMc4PanelStates((s) => {
-                  const out = { ...(s || {}) };
-                  changes.forEach((c) => {
-                    if (!c?.id) return;
-                    if (isRightClick) delete out[c.id];
-                    else out[c.id] = { left: c.next.left ?? null, right: c.next.right ?? null };
-                  });
-                  return out;
-                });
-                mc4PushHistory(changes);
               }
             }
           } else if (isPTEP) {
@@ -11707,7 +11966,7 @@ export default function BaseModule({
           return;
         }
 
-        // MVT: intercept clicks on our custom labels (counter + TESTED) before any other selection logic.
+        // MVT: intercept clicks on our custom labels (station labels + TESTED) before any other selection logic.
         if (isMVT) {
           const distToLabelPx = (lbl) => {
             try {
@@ -11726,7 +11985,43 @@ export default function BaseModule({
 
           // 0) Prefer cached station point hit-test (tiny list, very reliable)
           try {
-            if (String(mvtSubModeRef.current || 'termination') === 'testing') {
+            const modeNow = String(mvtSubModeRef.current || 'termination');
+            if (modeNow === 'termination') {
+              const stations = mvtStationPointsRef.current || [];
+              let bestStation = null;
+              let bestD = Infinity;
+              for (let i = 0; i < stations.length; i++) {
+                const s = stations[i];
+                if (!s) continue;
+                const pt = map.latLngToLayerPoint([s.lat, s.lng]);
+                const d = Math.sqrt((pt.x - clickPoint.x) ** 2 + (pt.y - clickPoint.y) ** 2);
+                if (d < hitRadius && d < bestD) { bestD = d; bestStation = s; }
+              }
+              if (bestStation) {
+                const stationLabel = String(bestStation.stationLabel || '').trim();
+                const stationNorm = mvtCanonicalTerminationStationNorm(stationLabel);
+                if (stationNorm && isMvtTerminationStationNorm(stationNorm)) {
+                  const max = mvtTerminationMaxForNorm(stationNorm);
+                  const cur = clampMvtTerminationCount(stationNorm, mvtTerminationByStationRef.current?.[stationNorm] ?? 0);
+                  const lockedNow = max > 0 && cur >= max;
+                  if (!lockedNow) {
+                    const x = e?.clientX ?? 0;
+                    const y = e?.clientY ?? 0;
+                    setMvtTermPopup({
+                      stationLabel: stationLabel || stationNorm,
+                      stationNorm,
+                      draft: cur,
+                      x,
+                      y,
+                    });
+                    draggingRef.current = null;
+                    return;
+                  }
+                }
+              }
+            }
+
+            if (modeNow === 'testing') {
               const stations = mvtStationPointsRef.current || [];
               let bestStation = null;
               let bestD = Infinity;
@@ -11908,13 +12203,17 @@ export default function BaseModule({
           });
 
           if (clickedPanelId) {
-            const currentMode = mc4SelectionModeRef.current; // null | 'mc4' | 'termination'
+            const currentMode = mc4SelectionModeRef.current; // null | 'mc4' | 'termination_panel' | 'termination_inv'
+            if (currentMode === 'termination_inv') {
+              draggingRef.current = null;
+              return;
+            }
             const advanceState = (cur) => {
               if (currentMode === 'mc4') {
                 // MC4 mode: set to MC4 (blue), but never downgrade TERMINATED (green)
                 if (cur === 'terminated') return 'terminated';
                 return 'mc4';
-              } else if (currentMode === 'termination') {
+              } else if (currentMode === 'termination_panel') {
                 // Termination mode: ONLY MC4 (blue) -> TERMINATED (green)
                 if (cur === 'mc4') return 'terminated';
                 if (cur === 'terminated') return 'terminated';
@@ -11929,7 +12228,7 @@ export default function BaseModule({
             const next = { left: advanceState(prev.left), right: advanceState(prev.right) };
             const changes = [{ id: clickedPanelId, prev, next }];
             // In termination mode, if neither end changes, treat as no-op.
-            if (currentMode === 'termination' && next.left === prev.left && next.right === prev.right) {
+            if (currentMode === 'termination_panel' && next.left === prev.left && next.right === prev.right) {
               draggingRef.current = null;
               return;
             }
@@ -12820,15 +13119,13 @@ export default function BaseModule({
   // IMPORTANT: Must be defined before workSelectionCount/workAmount which depend on it
   const mc4Counts = useMemo(() => {
     if (!isMC4) return null;
-    // Source of truth for total strings:
-    // 1) MC4 dc_strings.csv row count (9056)
-    // 2) module default (9056)
-    // Never fall back to string_text.geojson because it can be incomplete/different.
+    // Spec override: totals must show 9517 in both MC4 sub-modes.
+    const totalEnds = Math.max(0, Number(activeMode?.mc4TotalEnds ?? 9517) || 0);
+    // Keep for legacy/debug purposes (not used in UI total).
     const totalStrings =
       typeof mc4TotalStringsCsv === 'number' && Number.isFinite(mc4TotalStringsCsv)
         ? mc4TotalStringsCsv
-        : (Number(activeMode?.mc4DefaultStrings) || 9056);
-    const totalEnds = totalStrings * 2;
+        : (Number(activeMode?.mc4DefaultStrings) || 0);
 
     // Completed ends should match the number of VISIBLE dots.
     // Many panels can overlap the same physical table/end; dedupe by end position.
@@ -12971,7 +13268,36 @@ export default function BaseModule({
     if (isDATP) return datpCompletedForSubmit;
     if (isMVFT) return mvftCompletedForSubmit;
     if (isPTEP) return ptepCompletedForSubmit;
-    if (isMC4) return mc4Counts?.mc4Completed || 0;
+    if (isMC4) {
+      const mode = String(mc4SelectionMode || mc4SelectionModeRef.current || 'mc4');
+
+      const invDoneNow = (() => {
+        const byInv = mc4InvTerminationByInv || {};
+        let sum = 0;
+        for (const [k, v] of Object.entries(byInv)) {
+          const invNorm = normalizeId(k);
+          const max = Math.max(0, Number(mc4InvMaxByInvRef.current?.[invNorm] ?? 0) || 0);
+          const n = Math.max(0, Number(v) || 0);
+          sum += max > 0 ? Math.min(max, n) : n;
+        }
+        return sum;
+      })();
+
+      const doneNow = mode === 'termination_panel'
+        ? (mc4Counts?.terminatedCompleted || 0)
+        : mode === 'termination_inv'
+          ? invDoneNow
+          : (mc4Counts?.mc4Completed || 0);
+
+      const submitted = mc4SubmittedCountsRef.current || { mc4: 0, termination_panel: 0, termination_inv: 0 };
+      const submittedNow = mode === 'termination_panel'
+        ? (Number(submitted.termination_panel) || 0)
+        : mode === 'termination_inv'
+          ? (Number(submitted.termination_inv) || 0)
+          : (Number(submitted.mc4) || 0);
+
+      return Math.max(0, (Number(doneNow) || 0) - submittedNow);
+    }
     if (isLV) {
       // LV: calculate only NEW (unsubmitted) inv_id selections
       const committed = lvCommittedInvIds || new Set();
@@ -13019,19 +13345,17 @@ export default function BaseModule({
     }
     
     return newPolygonIds.size;
-  }, [isMVF, isDATP, isMVFT, isPTEP, isMC4, isLV, isDC, selectedPolygons, committedPolygons, mvfSelectedCableMeters, datpCompletedForSubmit, mvftCompletedForSubmit, ptepCompletedForSubmit, mc4Counts, lengthData, lvCompletedInvIds, lvCommittedInvIds]);
+  }, [isMVF, isDATP, isMVFT, isPTEP, isMC4, isLV, isDC, selectedPolygons, committedPolygons, mvfSelectedCableMeters, datpCompletedForSubmit, mvftCompletedForSubmit, ptepCompletedForSubmit, mc4Counts, mc4InvTerminationByInv, lengthData, lvCompletedInvIds, lvCommittedInvIds, mc4SelectionMode]);
 
-  const workAmount = isMVF 
-    ? mvfSelectedCableMeters 
-    : (isDATP
+  const workAmount = isMVF
+    ? mvfSelectedCableMeters
+    : isDATP
       ? datpCompletedForSubmit
-      : (isMVFT
+      : isMVFT
         ? mvftCompletedForSubmit
-        : (isPTEP
+        : isPTEP
           ? ptepCompletedForSubmit
-          : (isMC4 
-            ? (mc4Counts?.mc4Completed || 0) 
-            : newWorkAmount)))); // Use newWorkAmount for DC and similar modules
+          : newWorkAmount; // Use newWorkAmount for DC and similar modules (including MC4)
 
   const [dwgUrl, setDwgUrl] = useState('');
   useEffect(() => {
@@ -13048,23 +13372,129 @@ export default function BaseModule({
     (isMC4 && mc4Counts ? (
       <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start">
         {(() => {
-          const total = Number(mc4Counts.totalEnds) || 0; // expected: 9056 * 2 = 18112
+          const total = Number(mc4Counts.totalEnds) || 0; // Spec override (9517) is applied upstream.
           const mc4Done = Number(mc4Counts.mc4Completed) || 0;
-          const termDone = Number(mc4Counts.terminatedCompleted) || 0;
+          const panelTermDone = Number(mc4Counts.terminatedCompleted) || 0;
+
+          // Inv-side termination: completed count comes from inverter popup values.
+          const invTotal = 9517;
+          const invDone = (() => {
+            const byInv = mc4InvTerminationByInv || {};
+            let sum = 0;
+            for (const [k, v] of Object.entries(byInv)) {
+              const invNorm = normalizeId(k);
+              const max = Math.max(0, Number(mc4InvMaxByInvRef.current?.[invNorm] ?? 0) || 0);
+              const n = Math.max(0, Number(v) || 0);
+              sum += max > 0 ? Math.min(max, n) : n;
+            }
+            return sum;
+          })();
+
           const mc4Rem = Math.max(0, total - mc4Done);
-          const termRem = Math.max(0, total - termDone);
+          const panelTermRem = Math.max(0, total - panelTermDone);
+          const invRem = Math.max(0, invTotal - invDone);
+
           const mc4Pct = total > 0 ? ((mc4Done / total) * 100).toFixed(1) : '0.0';
-          const termPct = total > 0 ? ((termDone / total) * 100).toFixed(1) : '0.0';
-          const isMc4Mode = mc4SelectionMode === 'mc4';
-          const isTermMode = mc4SelectionMode === 'termination';
-          const canTerminate = mc4Done > 0;
+          const panelTermPct = total > 0 ? ((panelTermDone / total) * 100).toFixed(1) : '0.0';
+          const invPct = invTotal > 0 ? ((invDone / invTotal) * 100).toFixed(1) : '0.0';
+
+          const mode = String(mc4SelectionMode || 'mc4');
+          const isMc4Mode = mode === 'mc4';
+          const isPanelTermMode = mode === 'termination_panel';
+          const isInvTermMode = mode === 'termination_inv';
+          const isTermMode = isPanelTermMode || isInvTermMode;
+
           const mc4DoneLabelCls = isMc4Mode ? 'text-xs font-bold text-blue-400' : 'text-xs font-bold text-slate-500';
           const mc4DoneValueCls = isMc4Mode ? 'text-xs font-bold text-blue-400 tabular-nums' : 'text-xs font-bold text-slate-500 tabular-nums';
-          const termDoneLabelCls = isTermMode ? COUNTER_DONE_LABEL : 'text-xs font-bold text-slate-500';
-          const termDoneValueCls = isTermMode ? COUNTER_DONE_VALUE : 'text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap';
+
+          // In LVTT termination mode, both rows are visually active. Match that here.
+          const panelTermDoneLabelCls = isTermMode ? COUNTER_DONE_LABEL : 'text-xs font-bold text-slate-500';
+          const panelTermDoneValueCls = isTermMode ? COUNTER_DONE_VALUE : 'text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap';
+
+          const invDoneLabelCls = isTermMode ? 'text-xs font-bold text-amber-400' : 'text-xs font-bold text-slate-500';
+          const invDoneValueCls = isTermMode ? 'text-xs font-bold text-amber-400 tabular-nums whitespace-nowrap' : 'text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap';
           return (
-            <div className="min-w-[800px] border-2 border-slate-700 bg-slate-900/40 py-3 px-3">
+            <div className="min-w-[920px] border-2 border-slate-700 bg-slate-900/40 py-3 px-3">
               <div className="flex flex-col gap-2">
+                {/* Cable Termination (Panel Side + Inv. Side) with a single selector centered between the two rows */}
+                <div className="grid grid-cols-[24px_170px_repeat(3,max-content)] items-center gap-x-3 gap-y-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isTermMode) return;
+                      const next = mc4LastTerminationModeRef.current || 'termination_panel';
+                      setMc4SelectionMode(next);
+                    }}
+                    className={`row-span-2 w-5 h-5 border-2 rounded flex items-center justify-center transition-colors justify-self-start self-center ${
+                      isTermMode
+                        ? 'border-emerald-500 bg-emerald-500 text-white'
+                        : 'border-slate-500 bg-slate-800 hover:border-emerald-400'
+                    }`}
+                    title="Select Cable Termination"
+                    aria-pressed={isTermMode}
+                  >
+                    {isTermMode && <span className="text-xs font-bold">✓</span>}
+                  </button>
+
+                  {/* Panel Side row */}
+                  <div
+                    className={`text-xs font-bold cursor-pointer ${isTermMode ? 'text-emerald-300' : 'text-emerald-400/60'}`}
+                    onClick={() => {
+                      if (!isPanelTermMode) setMc4SelectionMode('termination_panel');
+                    }}
+                    title="Focus Panel Side termination"
+                  >
+                    Cable Termination Panel Side:
+                  </div>
+                  <div className={COUNTER_BOX} onClick={() => { if (!isPanelTermMode) setMc4SelectionMode('termination_panel'); }} role="button" tabIndex={0}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_LABEL}>Total</span>
+                      <span className={COUNTER_VALUE}>{total}</span>
+                    </div>
+                  </div>
+                  <div className={COUNTER_BOX} onClick={() => { if (!isPanelTermMode) setMc4SelectionMode('termination_panel'); }} role="button" tabIndex={0}>
+                    <div className={COUNTER_GRID}>
+                      <span className={panelTermDoneLabelCls}>Done</span>
+                      <span className={panelTermDoneValueCls}>{panelTermDone} ({panelTermPct}%)</span>
+                    </div>
+                  </div>
+                  <div className={COUNTER_BOX} onClick={() => { if (!isPanelTermMode) setMc4SelectionMode('termination_panel'); }} role="button" tabIndex={0}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_LABEL}>Remaining</span>
+                      <span className={COUNTER_VALUE}>{panelTermRem}</span>
+                    </div>
+                  </div>
+
+                  {/* Inv. Side row */}
+                  <div
+                    className={`text-xs font-bold cursor-pointer ${isTermMode ? 'text-amber-300' : 'text-amber-400/60'}`}
+                    onClick={() => {
+                      if (!isInvTermMode) setMc4SelectionMode('termination_inv');
+                    }}
+                    title="Focus Inv. Side termination"
+                  >
+                    Cable Termination Inv. Side:
+                  </div>
+                  <div className={COUNTER_BOX} onClick={() => { if (!isInvTermMode) setMc4SelectionMode('termination_inv'); }} role="button" tabIndex={0}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_LABEL}>Total</span>
+                      <span className={COUNTER_VALUE}>{invTotal}</span>
+                    </div>
+                  </div>
+                  <div className={COUNTER_BOX} onClick={() => { if (!isInvTermMode) setMc4SelectionMode('termination_inv'); }} role="button" tabIndex={0}>
+                    <div className={COUNTER_GRID}>
+                      <span className={invDoneLabelCls}>Done</span>
+                      <span className={invDoneValueCls}>{invDone} ({invPct}%)</span>
+                    </div>
+                  </div>
+                  <div className={COUNTER_BOX} onClick={() => { if (!isInvTermMode) setMc4SelectionMode('termination_inv'); }} role="button" tabIndex={0}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_LABEL}>Remaining</span>
+                      <span className={COUNTER_VALUE}>{invRem}</span>
+                    </div>
+                  </div>
+                </div>
+
                 {/* MC4 Install row with checkbox */}
                 <div
                   className="grid grid-cols-[24px_170px_repeat(3,max-content)] items-center gap-x-3 gap-y-2 cursor-pointer"
@@ -13079,8 +13509,8 @@ export default function BaseModule({
                       if (!isMc4Mode) setMc4SelectionMode('mc4');
                     }}
                     className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
-                      isMc4Mode 
-                        ? 'border-blue-500 bg-blue-500 text-white' 
+                      isMc4Mode
+                        ? 'border-blue-500 bg-blue-500 text-white'
                         : 'border-slate-500 bg-slate-800 hover:border-blue-400'
                     }`}
                     title="Select MC4 Installation mode"
@@ -13104,61 +13534,6 @@ export default function BaseModule({
                     <div className={COUNTER_GRID}>
                       <span className={COUNTER_LABEL}>Remaining</span>
                       <span className={COUNTER_VALUE}>{mc4Rem}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Cable Termination row with checkbox */}
-                <div
-                  className="grid grid-cols-[24px_170px_repeat(3,max-content)] items-center gap-x-3 gap-y-2 cursor-pointer"
-                  onClick={() => {
-                    if (!canTerminate) {
-                      if (!isMc4Mode) setMc4SelectionMode('mc4');
-                      return;
-                    }
-                    if (!isTermMode) setMc4SelectionMode('termination');
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (!canTerminate) {
-                        // No MC4 (blue) ends yet; termination cannot be selected.
-                        if (mc4SelectionMode !== 'mc4') setMc4SelectionMode('mc4');
-                        return;
-                      }
-                      if (!isTermMode) setMc4SelectionMode('termination');
-                    }}
-                    disabled={!canTerminate}
-                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
-                      (!canTerminate)
-                        ? 'border-slate-600 bg-slate-900/40 opacity-60 cursor-not-allowed'
-                        : isTermMode 
-                        ? 'border-emerald-500 bg-emerald-500 text-white' 
-                        : 'border-slate-500 bg-slate-800 hover:border-emerald-400'
-                    }`}
-                    title={canTerminate ? 'Select Cable Termination mode' : 'Select MC4 Install first (no blue ends yet)'}
-                  >
-                    {isTermMode && <span className="text-xs font-bold">✓</span>}
-                  </button>
-                  <div className={`text-xs font-bold ${isTermMode ? 'text-emerald-300' : 'text-emerald-400/60'}`}>Cable Termination:</div>
-                  <div className={COUNTER_BOX}>
-                    <div className={COUNTER_GRID}>
-                      <span className={COUNTER_LABEL}>Total</span>
-                      <span className={COUNTER_VALUE}>{total}</span>
-                    </div>
-                  </div>
-                  <div className={COUNTER_BOX}>
-                    <div className={COUNTER_GRID}>
-                      <span className={termDoneLabelCls}>Done</span>
-                      <span className={termDoneValueCls}>{termDone} ({termPct}%)</span>
-                    </div>
-                  </div>
-                  <div className={COUNTER_BOX}>
-                    <div className={COUNTER_GRID}>
-                      <span className={COUNTER_LABEL}>Remaining</span>
-                      <span className={COUNTER_VALUE}>{termRem}</span>
                     </div>
                   </div>
                 </div>
@@ -13511,7 +13886,7 @@ export default function BaseModule({
                   </div>
 
                   {/* Inv. Side row (driven by SS/SUB progress) */}
-                  <div className={`text-[11px] font-bold ${isTermMode ? 'text-amber-300' : 'text-amber-400/60'}`}>LV Termination Inv. Side:</div>
+                  <div className={`text-[11px] font-bold ${isTermMode ? 'text-amber-300' : 'text-amber-400/60'}`}>LV Termination Subs. Side:</div>
                   <div className={COUNTER_BOX}>
                     <div className={COUNTER_GRID}>
                       <span className={COUNTER_LABEL}>Total</span>
@@ -14439,7 +14814,7 @@ export default function BaseModule({
                       : (isLVTT && String(lvttSubMode || 'termination') === 'testing'
                         ? (lvttTestResultsDirty ? 'Submit (save) LV test results' : 'No changes to submit')
                         : (isMC4 && !mc4SelectionMode
-                          ? 'Select MC4 Install or Cable Termination first'
+                          ? 'Select MC4 Install / Cable Termination Panel Side / Cable Termination Inv. Side first'
                           : 'Submit Work'))
                   }
                   aria-label={
@@ -14552,7 +14927,11 @@ export default function BaseModule({
                       onClick={() => {
                         const exportModuleKey = String(
                           isMC4
-                            ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST')
+                            ? (mc4SelectionMode === 'termination_panel'
+                              ? 'MC4_TERM_PANEL'
+                              : (mc4SelectionMode === 'termination_inv'
+                                ? 'MC4_TERM_INV'
+                                : 'MC4_INST'))
                             : (isDATP
                               ? 'DATP'
                               : (isMVFT
@@ -14573,7 +14952,11 @@ export default function BaseModule({
                         exportToExcel(exportLog, {
                           moduleKey: exportModuleKey,
                           moduleLabel: isMC4
-                            ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
+                            ? (mc4SelectionMode === 'termination_panel'
+                              ? 'Cable Termination Panel Side'
+                              : (mc4SelectionMode === 'termination_inv'
+                                ? 'Cable Termination Inv. Side'
+                                : 'MC4 Installation'))
                             : (isDATP
                               ? 'DC&AC Trench'
                               : (isMVFT
@@ -15549,6 +15932,112 @@ export default function BaseModule({
         </div>
       ) : null}
 
+      {/* MC4: inverter termination popup (click inv_id in Cable Termination Inv. Side mode) */}
+      {isMC4 && mc4InvPopup ? (
+        <div
+          style={{
+            position: 'fixed',
+            left: Math.min(window.innerWidth - 320, Math.max(8, (mc4InvPopup.x || 0) + 10)),
+            top: Math.min(window.innerHeight - 260, Math.max(8, (mc4InvPopup.y || 0) + 10)),
+            zIndex: 1400,
+          }}
+          className="w-[300px] border-2 border-slate-700 bg-slate-900 px-3 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.55)]"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] font-black uppercase tracking-wide text-white">DC Cable Termination</div>
+              <div className="mt-1 text-sm font-extrabold text-slate-100 truncate">{mc4InvPopup.invId || 'Inverter'}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMc4InvPopup(null)}
+              className="inline-flex h-6 w-6 items-center justify-center border-2 border-slate-700 bg-slate-800 text-xs font-black text-white hover:bg-slate-700"
+              title="Close"
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+
+          {(() => {
+            const invNorm = normalizeId(mc4InvPopup.invIdNorm || '');
+            const max = Math.max(0, Number(mc4InvPopup.max ?? 0) || 0);
+            const stored = Math.max(0, Number(mc4InvTerminationByInv?.[invNorm] ?? 0) || 0);
+            const draft = Math.max(0, Math.min(max > 0 ? max : 999999, Number(mc4InvPopup.draft ?? stored) || 0));
+            const complete = max > 0 && draft >= max;
+
+            const setDraft = (v) => setMc4InvPopup((p) => (p ? { ...p, draft: Math.max(0, Math.min(max > 0 ? max : 999999, Number(v) || 0)) } : p));
+
+            const applyDraft = (valueToApply) => {
+              if (!invNorm) return;
+              const nextVal = Math.max(0, Math.min(max > 0 ? max : 999999, Number(valueToApply ?? 0) || 0));
+              setMc4InvTerminationByInv((prev) => {
+                const base = prev && typeof prev === 'object' ? { ...prev } : {};
+                base[invNorm] = nextVal;
+                return base;
+              });
+            };
+
+            return (
+              <div className="mt-3">
+                <div className="border border-slate-700 bg-slate-800 px-2 py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black uppercase tracking-wide text-slate-300">Progress</span>
+                    <span className={`text-[11px] font-black uppercase tracking-wide ${complete ? 'text-emerald-300' : 'text-red-300'}`}>{draft}/{max || '—'}</span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-end gap-2">
+                    <input
+                      ref={mc4InvInputRef}
+                      type="number"
+                      min={0}
+                      max={max || undefined}
+                      step={1}
+                      value={draft}
+                      onFocus={(e) => {
+                        try { e.target.select?.(); } catch (_e) { void _e; }
+                      }}
+                      onClick={(e) => {
+                        try { e.target.select?.(); } catch (_e) { void _e; }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter') return;
+                        try { e.preventDefault(); e.stopPropagation(); } catch (_e) { void _e; }
+                        applyDraft(draft);
+                        setMc4InvPopup(null);
+                      }}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === '') return;
+                        const n = parseInt(v, 10);
+                        if (!Number.isFinite(n)) return;
+                        setDraft(n);
+                      }}
+                      className={`w-24 h-8 border-2 bg-slate-900 px-2 text-center text-[13px] font-black tabular-nums outline-none ${
+                        complete ? 'border-emerald-700 text-emerald-200' : 'border-red-700 text-red-200'
+                      }`}
+                      title={max > 0 ? `Enter 0..${max}` : 'Max not found in dc_strings.csv'}
+                    />
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      applyDraft(draft);
+                      setMc4InvPopup(null);
+                    }}
+                    className="flex-1 h-8 border-2 border-emerald-700 bg-emerald-950/30 text-[11px] font-extrabold uppercase tracking-wide text-emerald-200 hover:bg-emerald-950/40"
+                    title="Apply"
+                  >
+                    OK
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      ) : null}
+
       {isMVT && String(mvtSubMode || 'termination') === 'termination' && mvtTermPopup ? (
         <div
           style={{
@@ -15581,6 +16070,7 @@ export default function BaseModule({
             const stored = clampMvtTerminationCount(stationNorm, mvtTerminationByStation?.[stationNorm] ?? 0);
             const draft = clampMvtTerminationCount(stationNorm, mvtTermPopup.draft ?? stored);
             const locked = Boolean(max) && stored === max;
+            const complete = Boolean(max) && draft >= max;
             const setDraft = (v) => setMvtTermPopup((p) => (p ? { ...p, draft: clampMvtTerminationCount(stationNorm, v) } : p));
 
             const applyDraft = (valueToApply) => {
@@ -15647,7 +16137,12 @@ export default function BaseModule({
                     </div>
                   ) : null}
 
-                  <div className="mt-0 flex items-center justify-end gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black uppercase tracking-wide text-slate-300">Progress</span>
+                    <span className={`text-[11px] font-black uppercase tracking-wide tabular-nums ${complete ? 'text-emerald-300' : 'text-slate-200'}`}>{draft}/{max}</span>
+                  </div>
+
+                  <div className="mt-2 flex items-center justify-end gap-2">
                     <div className="flex items-center gap-1">
                       <input
                         type="number"
@@ -16793,18 +17288,54 @@ export default function BaseModule({
           if (isMC4) {
             const currentStates = mc4PanelStatesRef.current || {};
             const mode = mc4SelectionModeRef.current || 'mc4';
-            const keys = Object.keys(currentStates).filter((k) => {
+
+            const invKeys = Object.keys(mc4InvTerminationByInvRef.current || {}).filter((k) => {
+              const n = Number(mc4InvTerminationByInvRef.current?.[k] ?? 0) || 0;
+              return n > 0;
+            });
+
+            const panelKeys = Object.keys(currentStates).filter((k) => {
               const st = currentStates[k];
-              if (mode === 'termination') {
+              if (mode === 'termination_panel') {
                 return st?.left === MC4_PANEL_STATES.TERMINATED || st?.right === MC4_PANEL_STATES.TERMINATED;
               }
               return st?.left === MC4_PANEL_STATES.MC4 || st?.right === MC4_PANEL_STATES.MC4 || st?.left === MC4_PANEL_STATES.TERMINATED || st?.right === MC4_PANEL_STATES.TERMINATED;
             });
 
+            // Persist per-day submitted totals so Submit Daily Work is not cumulative.
+            try {
+              const invDoneNow = (() => {
+                const byInv = mc4InvTerminationByInvRef.current || {};
+                let sum = 0;
+                for (const [k, v] of Object.entries(byInv)) {
+                  const invNorm = normalizeId(k);
+                  const max = Math.max(0, Number(mc4InvMaxByInvRef.current?.[invNorm] ?? 0) || 0);
+                  const n = Math.max(0, Number(v) || 0);
+                  sum += max > 0 ? Math.min(max, n) : n;
+                }
+                return sum;
+              })();
+
+              const doneNow = mode === 'termination_panel'
+                ? (Number(mc4Counts?.terminatedCompleted) || 0)
+                : mode === 'termination_inv'
+                  ? invDoneNow
+                  : (Number(mc4Counts?.mc4Completed) || 0);
+
+              const prev = mc4SubmittedCountsRef.current || { mc4: 0, termination_panel: 0, termination_inv: 0 };
+              const key = mode === 'termination_panel' ? 'termination_panel' : mode === 'termination_inv' ? 'termination_inv' : 'mc4';
+              const nextSubmitted = { ...prev, [key]: doneNow };
+              localStorage.setItem(mc4SubmittedStorageKey, JSON.stringify(nextSubmitted));
+              setMc4SubmittedCounts(nextSubmitted);
+              mc4SubmittedCountsRef.current = nextSubmitted;
+            } catch (_e) {
+              void _e;
+            }
+
             const recordWithSelections = {
               ...record,
               notes: notesOnDate,
-              selectedPolygonIds: keys, // MC4 uses string keys
+              selectedPolygonIds: mode === 'termination_inv' ? invKeys : panelKeys, // MC4 uses string keys
             };
             addRecord(recordWithSelections);
             alert('Work submitted successfully!');
@@ -17022,7 +17553,11 @@ export default function BaseModule({
           alert('Work submitted successfully!');
         }}
         moduleKey={isMC4
-          ? (mc4SelectionMode === 'termination' ? 'MC4_TERM' : 'MC4_INST')
+          ? (mc4SelectionMode === 'termination_panel'
+            ? 'MC4_TERM_PANEL'
+            : (mc4SelectionMode === 'termination_inv'
+              ? 'MC4_TERM_INV'
+              : 'MC4_INST'))
           : (isDATP
             ? 'DATP'
             : (isMVFT
@@ -17035,7 +17570,11 @@ export default function BaseModule({
                     ? 'LVTT_TERM'
                     : (activeMode?.key || '')))))}
         moduleLabel={isMC4
-          ? (mc4SelectionMode === 'termination' ? 'Cable Termination' : 'MC4 Installation')
+          ? (mc4SelectionMode === 'termination_panel'
+            ? 'Cable Termination Panel Side'
+            : (mc4SelectionMode === 'termination_inv'
+              ? 'Cable Termination Inv. Side'
+              : 'MC4 Installation'))
           : (isDATP
             ? 'DC&AC Trench'
             : (isMVFT
@@ -17047,25 +17586,21 @@ export default function BaseModule({
                   : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
                     ? 'Cable Termination'
                     : moduleName))))}
-        workAmount={isMC4
-          ? mc4SelectionMode === 'termination'
-            ? mc4Counts?.terminatedCompleted || 0
-            : mc4Counts?.mc4Completed || 0
-          : isDATP
-            ? datpCompletedForSubmit
-            : isMVFT
-              ? mvftCompletedForSubmit
-              : isPTEP
-                ? ptepCompletedForSubmit
-                : isMVT
-                  ? mvtCompletedForSubmit
-                  : isLVTT && String(lvttSubMode || 'termination') === 'termination'
-                    ? lvttCompletedForSubmit
-                    : workAmount
+        workAmount={isDATP
+          ? datpCompletedForSubmit
+          : isMVFT
+            ? mvftCompletedForSubmit
+            : isPTEP
+              ? ptepCompletedForSubmit
+              : isMVT
+                ? mvtCompletedForSubmit
+                : isLVTT && String(lvttSubMode || 'termination') === 'termination'
+                  ? lvttCompletedForSubmit
+                  : workAmount
         }
         workUnit={
           isMC4
-            ? (mc4SelectionMode === 'termination' ? 'cables terminated' : 'mc4')
+            ? (mc4SelectionMode === 'termination_panel' || mc4SelectionMode === 'termination_inv' ? 'cables terminated' : 'mc4')
             : isDATP
               ? datpWorkUnit
               : isMVFT

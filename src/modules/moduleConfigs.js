@@ -226,6 +226,9 @@ export const MC4_MODULE_CONFIG = {
   csvFormat: 'mc4_strings',
   csvPath: '/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/dc_strings.csv',
   linkPath: '/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/link',
+  // Spec override: MC4 totals must show 9517 in both sub-modes.
+  // (This represents the UI total used in counters; source files may differ.)
+  mc4TotalEnds: 9517,
   // Spec: CSV contains 9056 strings -> total endpoints = 9056 * 2 = 18112
   mc4DefaultStrings: 9056,
   // Render inv_id points as LV-style text plates (visual only; not clickable completion).
