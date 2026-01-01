@@ -325,6 +325,86 @@ export default function BaseModule({
   const activeMode = moduleConfig || {};
   const moduleName = name || activeMode?.label || activeMode?.key || 'Module';
 
+  // Optional: auto-discover GeoJSON files from a public folder (via generated manifest).
+  const [geojsonFilesOverride, setGeojsonFilesOverride] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    const folder = String(activeMode?.autoGeojsonFolder || '').trim();
+    if (!folder) {
+      setGeojsonFilesOverride(null);
+      return;
+    }
+
+    (async () => {
+      try {
+        const res = await fetch('/cew_public_manifest.json', { cache: 'no-store' });
+        if (!res.ok) return;
+        const manifest = await res.json();
+        const files = manifest?.folders?.[folder]?.geojson;
+        if (!Array.isArray(files) || files.length === 0) return;
+
+        const pickName = (fname) => {
+          const low = String(fname || '').toLowerCase();
+          if (!low.endsWith('.geojson')) return null;
+          if (low.includes('string_text')) return 'string_text';
+          if (low.includes('inv_id')) return 'inv_id';
+          if (low.includes('lv_box')) return 'lv_box';
+          if (low.includes('inv_box')) return 'lv_box'; // many datasets use inv_box as the box layer
+          if (low.includes('boundry') || low.includes('boundary')) return 'boundry';
+          if (low.startsWith('full')) return 'full';
+          return low.replace(/\.geojson$/i, '');
+        };
+
+        const mkStyle = (name) => {
+          if (name === 'boundry') {
+            return {
+              color: 'rgba(239, 68, 68, 0.7)',
+              fillColor: 'transparent',
+              weight: 1.2,
+              fillOpacity: 0,
+              interactive: false,
+            };
+          }
+          if (name === 'lv_box') {
+            return {
+              color: '#eab308',
+              fillColor: '#facc15',
+              weight: 3,
+              fillOpacity: 0.6,
+            };
+          }
+          if (name === 'string_text') {
+            return { color: '#dc2626', fillColor: '#ef4444' };
+          }
+          if (name === 'inv_id') {
+            return { color: '#16a34a', fillColor: '#22c55e' };
+          }
+          // Default table/line styling
+          return { color: 'rgba(255,255,255,0.55)', fillColor: 'transparent' };
+        };
+
+        const out = files
+          .map((fname) => {
+            const name = pickName(fname);
+            if (!name) return null;
+            const url = `/${encodeURIComponent(folder)}/${encodeURIComponent(fname)}`;
+            return { url, name, ...mkStyle(name) };
+          })
+          .filter(Boolean);
+
+        if (!cancelled && out.length > 0) setGeojsonFilesOverride(out);
+      } catch (_e) {
+        void _e;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeMode?.autoGeojsonFolder]);
+
+  const activeGeojsonFiles = geojsonFilesOverride || activeMode?.geojsonFiles || [];
+
   // Whether to show counter UI in header
   const showCounters = counters;
 
@@ -358,6 +438,12 @@ export default function BaseModule({
   const isDATP = String(activeMode?.key || '').toUpperCase() === 'DATP';
   // MV&FIBRE TRENCH PROGRESS mode
   const isMVFT = String(activeMode?.key || '').toUpperCase() === 'MVFT';
+  // DC TERMINATION & TESTING PROGRESS mode
+  const isDCTT = String(activeMode?.key || '').toUpperCase() === 'DCTT';
+  const isDCTTRef = useRef(isDCTT);
+  useEffect(() => {
+    isDCTTRef.current = isDCTT;
+  }, [isDCTT]);
 
   // ─────────────────────────────────────────────────────────────
   // GENERIC POLYGON SELECTION (shared across many modules)
@@ -380,12 +466,12 @@ export default function BaseModule({
   const [lengthData, setLengthData] = useState(() => ({}));
 
   const datpTrenchLineColor = isDATP
-    ? (activeMode?.geojsonFiles || []).find((f) => String(f?.name || '').toLowerCase() === 'trench')?.color || '#3b82f6'
+    ? (activeGeojsonFiles || []).find((f) => String(f?.name || '').toLowerCase() === 'trench')?.color || '#3b82f6'
     : '#3b82f6';
 
   // MVFT trench line color (blue like DATP)
   const mvftTrenchLineColor = isMVFT
-    ? (activeMode?.geojsonFiles || []).find((f) => String(f?.name || '').toLowerCase() === 'trench')?.color || '#3b82f6'
+    ? (activeGeojsonFiles || []).find((f) => String(f?.name || '').toLowerCase() === 'trench')?.color || '#3b82f6'
     : '#3b82f6';
 
   const datpCompletedLineColor = '#22c55e';
@@ -1794,6 +1880,8 @@ export default function BaseModule({
   const lvAllBoxLayersRef = useRef([]); // L.Layer[] (all lv_box layers for reset)
   const prevHistoryInvHighlightRef = useRef(new Set()); // invIdNorms highlighted by history selection
   const prevHistoryMc4InvHighlightRef = useRef(new Set()); // invIdNorms highlighted by history selection (MC4)
+  const prevHistoryDcttInvHighlightRef = useRef(new Set()); // invIdNorms highlighted by history selection (DCTT)
+  const prevHistoryDcttPanelHighlightRef = useRef(new Set()); // panelIds highlighted by history selection (DCTT)
 
   // LVTT: history selection highlight (orange) for SS/SUB labels
   const lvttHistoryHighlightSubSetRef = useRef(new Set()); // Set<subNorm>
@@ -2493,50 +2581,589 @@ export default function BaseModule({
     mc4InvTerminationByInvRef.current = mc4InvTerminationByInv;
   }, [mc4InvTerminationByInv]);
 
+  // ─────────────────────────────────────────────────────────────
+  // DCTT: DC TERMINATION & TESTING PROGRESS - state + storage
+  // Three sub-modes: 
+  //   - 'termination': Cable Termination (Panel Side + Inv. Side)
+  //   - 'testing': DC Testing (DCCT-style testing sub-mode)
+  // ─────────────────────────────────────────────────────────────
+  // DCTT main sub-mode selector
+  const [dcttSubMode, setDcttSubMode] = useState(() => {
+    try {
+      const raw = localStorage.getItem('cew:dctt:submode');
+      const v = String(raw || '').toLowerCase();
+      return v === 'testing' ? 'testing' : 'termination';
+    } catch (_e) {
+      void _e;
+      return 'termination';
+    }
+  }); // 'termination' | 'testing'
+  const dcttSubModeRef = useRef(dcttSubMode);
+  useEffect(() => {
+    dcttSubModeRef.current = dcttSubMode;
+    try {
+      localStorage.setItem('cew:dctt:submode', String(dcttSubMode || 'termination'));
+    } catch (_e) {
+      void _e;
+    }
+  }, [dcttSubMode]);
+
+  // DCTT selection mode (within termination sub-mode):
+  // - 'termination_panel': Cable termination (panel side) via panel ends
+  // - 'termination_inv': Cable termination (inv. side) via inverter popup counts
+  // Default to 'termination_panel' (first sub-mode).
+  const [dcttSelectionMode, setDcttSelectionMode] = useState('termination_panel'); // 'termination_panel' | 'termination_inv'
+  const dcttSelectionModeRef = useRef(dcttSelectionMode);
+  useEffect(() => {
+    dcttSelectionModeRef.current = dcttSelectionMode;
+  }, [dcttSelectionMode]);
+
+  const [dcttToast, setDcttToast] = useState('');
+  const dcttToastTimerRef = useRef(null);
+  const showDcttToast = useCallback((msg) => {
+    if (!msg) return;
+    setDcttToast(msg);
+    try {
+      if (dcttToastTimerRef.current) clearTimeout(dcttToastTimerRef.current);
+    } catch (_e) {
+      void _e;
+    }
+    dcttToastTimerRef.current = setTimeout(() => setDcttToast(''), 2200);
+  }, []);
+
+  const dcttTodayYmd = getTodayYmd();
+  const dcttPanelStatesStorageKey = `cew:dctt:panel_states:${dcttTodayYmd}`;
+  const dcttSubmittedStorageKey = `cew:dctt:submitted_counts:${dcttTodayYmd}`;
+  const dcttInvTerminationStorageKey = `cew:dctt:inv_termination:${dcttTodayYmd}`;
+  const [dcttPanelStates, setDcttPanelStates] = useState(() => ({})); // { [panelId]: { left, right } }
+  const dcttPanelStatesRef = useRef(dcttPanelStates);
+  const [dcttTotalStringsCsv, setDcttTotalStringsCsv] = useState(null); // number | null
+  const [dcttSubmittedCounts, setDcttSubmittedCounts] = useState(() => ({ termination_panel: 0, termination_inv: 0 }));
+  const dcttSubmittedCountsRef = useRef(dcttSubmittedCounts);
+  const dcttInvMaxByInvRef = useRef({}); // invIdNorm -> max STR number
+  const [dcttInvTerminationByInv, setDcttInvTerminationByInv] = useState(() => ({})); // invIdNorm -> count
+  const dcttInvTerminationByInvRef = useRef(dcttInvTerminationByInv);
+  const [dcttInvPopup, setDcttInvPopup] = useState(null); // { invId, invIdNorm, draft, max, x, y } | null
+  const dcttInvInputRef = useRef(null);
+  const dcttHistoryRef = useRef({ actions: [], index: -1 });
+  const [dcttHistoryTick, setDcttHistoryTick] = useState(0);
+  const dcttEndsLayerRef = useRef(null); // L.LayerGroup
+  const dcttInvLabelByIdRef = useRef({}); // invIdNorm -> L.TextLabel (for color updates)
+  const dcttCommittedPanelIdsRef = useRef(new Set()); // panelIds submitted today (lock against right-click erase)
+
+  // DCTT Testing sub-mode state (reuses DCCT logic)
+  const [dcttTestData, setDcttTestData] = useState(() => ({})); // { [normalizedId]: 'passed' | 'failed' }
+  const dcttTestDataRef = useRef(dcttTestData);
+  useEffect(() => {
+    dcttTestDataRef.current = dcttTestData || {};
+  }, [dcttTestData]);
+  const dcttTestRisoByIdRef = useRef({}); // CSV values per ID
+  const dcttTestRowsRef = useRef([]); // original CSV rows for export parity
+  const [dcttTestMapIds, setDcttTestMapIds] = useState(() => new Set());
+  const dcttTestMapIdsRef = useRef(dcttTestMapIds);
+  useEffect(() => {
+    dcttTestMapIdsRef.current = dcttTestMapIds || new Set();
+  }, [dcttTestMapIds]);
+  const [dcttTestFilter, setDcttTestFilter] = useState(null); // 'passed' | 'failed' | 'not_tested' | null
+  const dcttTestFilterRef = useRef(dcttTestFilter);
+  useEffect(() => {
+    dcttTestFilterRef.current = dcttTestFilter;
+  }, [dcttTestFilter]);
+  const [dcttTestCsvTotals, setDcttTestCsvTotals] = useState(() => ({ total: 0, passed: 0, failed: 0 }));
+  const [dcttTestResultsDirty, setDcttTestResultsDirty] = useState(false);
+  const dcttTestResultsSubmittedRef = useRef(null);
+  const dcttTestImportFileInputRef = useRef(null);
+  const [dcttTestPopup, setDcttTestPopup] = useState(null); // { idNorm, displayId, draftPlus, draftMinus, draftStatus, x, y } | null
+  const dcttTestPopupRef = useRef(dcttTestPopup);
+  useEffect(() => {
+    dcttTestPopupRef.current = dcttTestPopup;
+  }, [dcttTestPopup]);
+  const dcttTestOverlayLayerRef = useRef(null); // L.LayerGroup
+  const dcttTestOverlayLabelsByIdRef = useRef({});
+
+  useEffect(() => {
+    dcttPanelStatesRef.current = dcttPanelStates;
+  }, [dcttPanelStates]);
+
+  useEffect(() => {
+    dcttSubmittedCountsRef.current = dcttSubmittedCounts;
+  }, [dcttSubmittedCounts]);
+
+  useEffect(() => {
+    dcttInvTerminationByInvRef.current = dcttInvTerminationByInv;
+  }, [dcttInvTerminationByInv]);
+
+  // DCTT Testing: helper functions (same logic as DCCT)
+  const dcttTestClearOverlays = useCallback(() => {
+    try {
+      const layer = dcttTestOverlayLayerRef.current;
+      if (layer) layer.clearLayers();
+    } catch (_e) {
+      void _e;
+    }
+    dcttTestOverlayLabelsByIdRef.current = {};
+  }, []);
+
+  const dcttTestNormalizeStatus = (raw) => {
+    const v = String(raw || '').trim().toLowerCase();
+    if (v === 'passed' || v === 'pass') return 'passed';
+    if (v === 'failed' || v === 'fail') return 'failed';
+    return null;
+  };
+
+  const dcttTestNormalizeId = useCallback((raw) => {
+    const rawText = String(raw ?? '').replace(/^\uFEFF/, '').trim();
+    if (!rawText) return '';
+    const compact = rawText.replace(/\s+/g, '').replace(/^['\"]+|['\"]+$/g, '');
+    const low = compact.toLowerCase();
+    const m = low.match(/^tx(\d+)[_\-]?inv(\d+)[_\-]?str(\d+)$/i) || low.match(/tx(\d+).*inv(\d+).*str(\d+)/i);
+    if (m) return `tx${m[1]}-inv${m[2]}-str${m[3]}`;
+    return normalizeId(rawText);
+  }, []);
+
+  const dcttTestFormatDisplayId = (idNorm, recOriginalId) => {
+    const original = String(recOriginalId || '').trim();
+    if (original) return original;
+    return String(idNorm || '')
+      .toUpperCase()
+      .replace(/TX(\d+)INV(\d+)STR(\d+)/i, 'TX$1-INV$2-STR$3');
+  };
+
+  const dcttTestImportFromText = useCallback((text, source = 'import') => {
+    try {
+      setDcttTestFilter(null);
+      dcttTestClearOverlays();
+
+      const cleaned = String(text || '').replace(/^\uFEFF/, '');
+      const parsed = Papa.parse(cleaned, {
+        header: false,
+        skipEmptyLines: true,
+        delimiter: '',
+      });
+      if (!parsed.data || parsed.data.length < 2) {
+        console.warn('DCTT Testing CSV has no data rows');
+        setDcttTestData({});
+        dcttTestRisoByIdRef.current = {};
+        dcttTestRowsRef.current = [];
+        // Treat manual import as an editable change-set; default CSV load should keep baseline clean.
+        if (String(source || '') !== 'csv_load') {
+          setDcttTestResultsDirty(true);
+          dcttTestResultsSubmittedRef.current = null;
+          try { localStorage.removeItem('cew:dctt:test_results_submitted'); } catch (_e) { void _e; }
+          setDcttTestPopup(null);
+          setStringMatchVersion((v) => v + 1);
+        }
+        return;
+      }
+
+      const headerRow = parsed.data[0] || [];
+      const hNorm = headerRow.map((h) => String(h || '').trim().toLowerCase().replace(/[_\s\-]+/g, ''));
+      const idxId = hNorm.findIndex((h) => h === 'id' || h === 'stringid' || h === 'string');
+      const idxMinus = hNorm.findIndex((h) => h.includes('insulationresistance') && (h.includes('-') || h.includes('minus') || h.includes('(')));
+      const idxPlus = hNorm.findIndex((h) => h.includes('insulationresistance') && (h.includes('+') || h.includes('plus') || h.includes('(')));
+      const idxRemark = hNorm.findIndex((h) => h === 'remark' || h === 'remarks' || h === 'status' || h === 'result');
+      const idxPlusFallback = hNorm.length > idxMinus && idxMinus >= 0 ? idxMinus + 1 : -1;
+
+      const useIdxMinus = idxMinus >= 0 ? idxMinus : 1;
+      const useIdxPlus = idxPlus >= 0 ? idxPlus : (idxPlusFallback >= 0 ? idxPlusFallback : 2);
+      const useIdxRemark = idxRemark >= 0 ? idxRemark : 3;
+      const useIdxId = idxId >= 0 ? idxId : 0;
+
+      const risoById = {}; // normalizedId -> { plus, minus, status, remarkRaw, originalId }
+      const rows = []; // preserve duplicates + original order
+
+      for (let i = 1; i < parsed.data.length; i++) {
+        const row = parsed.data[i];
+        if (!row) continue;
+        const rawId = String(row[useIdxId] ?? '').trim();
+        if (!rawId) continue;
+
+        const idNorm = dcttTestNormalizeId(rawId);
+        if (!idNorm) continue;
+
+        rows.push({ originalId: rawId, idNorm });
+
+        const remarkRaw = String(row[useIdxRemark] ?? '').trim();
+        const minus = String(row[useIdxMinus] ?? '').trim();
+        const plus = String(row[useIdxPlus] ?? '').trim();
+        let status = dcttTestNormalizeStatus(remarkRaw);
+        if (!status) {
+          const minusNum = parseFloat(minus);
+          const plusNum = parseFloat(plus);
+          if (Number.isFinite(minusNum) && Number.isFinite(plusNum)) {
+            status = (minusNum > 0 && plusNum > 0) ? 'passed' : 'failed';
+          }
+        }
+
+        const prev = risoById[idNorm];
+        if (!prev) {
+          risoById[idNorm] = {
+            originalId: rawId,
+            plus,
+            minus,
+            status,
+            remarkRaw,
+          };
+        } else {
+          // Prefer first originalId, but fill missing values if needed.
+          risoById[idNorm] = {
+            ...prev,
+            plus: prev.plus && String(prev.plus).trim() !== '' ? prev.plus : plus,
+            minus: prev.minus && String(prev.minus).trim() !== '' ? prev.minus : minus,
+            status: prev.status != null ? prev.status : status,
+            remarkRaw: prev.remarkRaw && String(prev.remarkRaw).trim() !== '' ? prev.remarkRaw : remarkRaw,
+          };
+        }
+      }
+
+      const testResults = {}; // normalizedId -> 'passed' | 'failed'
+      let passed = 0;
+      let failed = 0;
+      Object.keys(risoById || {}).forEach((id) => {
+        const st = dcttTestNormalizeStatus(risoById[id]?.status || risoById[id]?.remarkRaw);
+        if (st === 'passed') {
+          testResults[id] = 'passed';
+          passed++;
+        } else if (st === 'failed') {
+          testResults[id] = 'failed';
+          failed++;
+        }
+      });
+
+      setDcttTestData(testResults);
+      dcttTestRisoByIdRef.current = risoById;
+      dcttTestRowsRef.current = rows;
+
+      setDcttTestCsvTotals({ total: Object.keys(risoById || {}).length, passed, failed });
+      setDcttTestPopup(null);
+      setStringMatchVersion((v) => v + 1);
+
+      // User import should require Submit before Export (DCCT parity).
+      if (String(source || '') !== 'csv_load') {
+        setDcttTestResultsDirty(true);
+        dcttTestResultsSubmittedRef.current = null;
+        try { localStorage.removeItem('cew:dctt:test_results_submitted'); } catch (_e) { void _e; }
+      }
+    } catch (err) {
+      console.error('Error parsing DCTT Testing CSV:', err);
+    }
+  }, [dcttTestClearOverlays, dcttTestNormalizeId]);
+
+  const dcttTestSubmitResults = useCallback(() => {
+    if (!isDCTT) return;
+    if (String(dcttSubModeRef.current || 'termination') !== 'testing') return;
+    if (!dcttTestResultsDirty) return;
+    const payload = {
+      risoById: { ...(dcttTestRisoByIdRef.current || {}) },
+      rows: Array.isArray(dcttTestRowsRef.current) ? dcttTestRowsRef.current : [],
+      updatedAt: Date.now(),
+      source: 'submit',
+    };
+    dcttTestResultsSubmittedRef.current = payload;
+    try {
+      localStorage.setItem('cew:dctt:test_results_submitted', JSON.stringify(payload));
+    } catch (_e) {
+      void _e;
+    }
+    setDcttTestResultsDirty(false);
+  }, [isDCTT, dcttTestResultsDirty]);
+
+  const dcttTestExportCsv = useCallback(() => {
+    try {
+      if (dcttTestResultsDirty) return;
+      let submitted = dcttTestResultsSubmittedRef.current;
+      if (!submitted) {
+        try {
+          const raw = localStorage.getItem('cew:dctt:test_results_submitted');
+          if (raw) submitted = JSON.parse(raw);
+        } catch (_e) {
+          void _e;
+        }
+      }
+      // If user never pressed Submit, we still export the currently loaded default dc_riso.csv.
+      const fallbackRiso = dcttTestRisoByIdRef.current || {};
+      const fallbackRows = Array.isArray(dcttTestRowsRef.current) ? dcttTestRowsRef.current : [];
+      const risoData = (submitted && typeof submitted === 'object' && submitted.risoById && typeof submitted.risoById === 'object') ? (submitted.risoById || {}) : fallbackRiso;
+      const submittedRows = (submitted && typeof submitted === 'object' && Array.isArray(submitted.rows) && submitted.rows.length > 0) ? submitted.rows : fallbackRows;
+      const mapIds = dcttTestMapIdsRef.current || new Set();
+
+      const header = 'ID,Insulation Resistance (-),Insulation Resistance (+),remark';
+      const rows = [header];
+
+      const pushed = new Set();
+      if (submittedRows.length > 0) {
+        for (const row of submittedRows) {
+          const originalId = String(row?.originalId || '').trim();
+          const idNorm = row?.idNorm ? String(row.idNorm) : dcttTestNormalizeId(originalId);
+          if (!idNorm) continue;
+          pushed.add(idNorm);
+
+          const rec = risoData[idNorm] || {};
+          const displayId = originalId || dcttTestFormatDisplayId(idNorm, rec.originalId);
+          const minus = (rec.minus != null && String(rec.minus).trim() !== '') ? String(rec.minus).trim() : '0';
+          const plus = (rec.plus != null && String(rec.plus).trim() !== '') ? String(rec.plus).trim() : '0';
+          const status = dcttTestNormalizeStatus(rec.status || rec.remarkRaw);
+          const remark = status === 'passed' ? 'PASSED' : status === 'failed' ? 'FAILED' : '';
+          rows.push(`${displayId},${minus},${plus},${remark}`);
+        }
+      }
+
+      const allIds = new Set([...Object.keys(risoData), ...mapIds]);
+      const remaining = Array.from(allIds).filter((id) => !pushed.has(id));
+      const sortedRemaining = remaining.sort((a, b) => {
+        const parseId = (id) => {
+          const match = String(id).match(/tx(\d+)-inv(\d+)-str(\d+)/i);
+          if (match) return [parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3], 10)];
+          return [0, 0, 0];
+        };
+        const [aTx, aInv, aStr] = parseId(a);
+        const [bTx, bInv, bStr] = parseId(b);
+        if (aTx !== bTx) return aTx - bTx;
+        if (aInv !== bInv) return aInv - bInv;
+        return aStr - bStr;
+      });
+      for (const idNorm of sortedRemaining) {
+        const rec = risoData[idNorm] || {};
+        const displayId = dcttTestFormatDisplayId(idNorm, rec.originalId);
+        const minus = (rec.minus != null && String(rec.minus).trim() !== '') ? String(rec.minus).trim() : '0';
+        const plus = (rec.plus != null && String(rec.plus).trim() !== '') ? String(rec.plus).trim() : '0';
+        const status = dcttTestNormalizeStatus(rec.status || rec.remarkRaw);
+        const remark = status === 'passed' ? 'PASSED' : status === 'failed' ? 'FAILED' : '';
+        rows.push(`${displayId},${minus},${plus},${remark}`);
+      }
+
+      const csvContent = rows.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `dctt_test_export_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error exporting DCTT Testing CSV:', err);
+    }
+  }, [dcttTestResultsDirty, dcttTestNormalizeId]);
+
+  // DCTT Testing: load CSV on mount/mode change
+  useEffect(() => {
+    if (!isDCTT) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        // Prefer previously submitted snapshot when available (DCCT parity).
+        try {
+          const rawSubmitted = localStorage.getItem('cew:dctt:test_results_submitted');
+          if (rawSubmitted) {
+            const parsed = JSON.parse(rawSubmitted);
+            const rawRiso = parsed?.risoById && typeof parsed.risoById === 'object' ? parsed.risoById : {};
+            const normalizedRisoById = {};
+            Object.keys(rawRiso || {}).forEach((k) => {
+              const rec = rawRiso[k] || {};
+              const idNorm = dcttTestNormalizeId(rec?.originalId || k);
+              if (!idNorm) return;
+              normalizedRisoById[idNorm] = {
+                ...rec,
+                originalId: rec?.originalId != null ? rec.originalId : String(k || '').trim(),
+              };
+            });
+
+            const rawRows = Array.isArray(parsed?.rows) ? parsed.rows : [];
+            const normalizedRows = rawRows
+              .map((r) => {
+                const originalId = String(r?.originalId || '').trim();
+                const idNorm = dcttTestNormalizeId(originalId || r?.idNorm);
+                return idNorm ? { originalId, idNorm } : null;
+              })
+              .filter(Boolean);
+
+            const testResults = {};
+            let passedCount = 0;
+            let failedCount = 0;
+            Object.keys(normalizedRisoById || {}).forEach((id) => {
+              const st = dcttTestNormalizeStatus(normalizedRisoById[id]?.status || normalizedRisoById[id]?.remarkRaw);
+              if (st === 'passed') { testResults[id] = 'passed'; passedCount++; }
+              else if (st === 'failed') { testResults[id] = 'failed'; failedCount++; }
+            });
+
+            dcttTestRisoByIdRef.current = normalizedRisoById;
+            dcttTestRowsRef.current = normalizedRows;
+            setDcttTestData(testResults);
+            setDcttTestCsvTotals({ total: Object.keys(normalizedRisoById || {}).length, passed: passedCount, failed: failedCount });
+
+            const normalizedPayload = {
+              ...(parsed && typeof parsed === 'object' ? parsed : {}),
+              risoById: normalizedRisoById,
+              rows: normalizedRows,
+            };
+            dcttTestResultsSubmittedRef.current = normalizedPayload;
+            try {
+              localStorage.setItem('cew:dctt:test_results_submitted', JSON.stringify(normalizedPayload));
+            } catch (_e) {
+              void _e;
+            }
+
+            setDcttTestResultsDirty(false);
+            setDcttTestPopup(null);
+            setStringMatchVersion((v) => v + 1);
+            return;
+          }
+        } catch (_e) {
+          void _e;
+        }
+
+        // Load dc_riso.csv from DCTT folder
+        const csvPath = '/DC_TERMINATION_and_TESTING PROGRESS/dc_riso.csv';
+        const response = await fetch(csvPath);
+        if (cancelled) return;
+        if (!response.ok) {
+          dcttTestRisoByIdRef.current = {};
+          dcttTestRowsRef.current = [];
+          setDcttTestData({});
+          setDcttTestCsvTotals({ total: 0, passed: 0, failed: 0 });
+          return;
+        }
+        const text = await response.text();
+        if (cancelled) return;
+        dcttTestImportFromText(text, 'csv_load');
+
+        // Seed a baseline submitted snapshot from the shipped dc_riso.csv so Export
+        // returns the default file output when the user hasn't submitted anything yet.
+        const risoById = dcttTestRisoByIdRef.current || {};
+        const baseRows = Array.isArray(dcttTestRowsRef.current) ? dcttTestRowsRef.current : [];
+        const payload = {
+          risoById: { ...(risoById || {}) },
+          rows: baseRows,
+          updatedAt: Date.now(),
+          source: 'default',
+        };
+        dcttTestResultsSubmittedRef.current = payload;
+        try {
+          localStorage.setItem('cew:dctt:test_results_submitted', JSON.stringify(payload));
+        } catch (_e) {
+          void _e;
+        }
+
+        setDcttTestResultsDirty(false);
+      } catch (_e) {
+        console.error('Error loading DCTT Testing CSV:', _e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isDCTT, dcttTestImportFromText]);
+
+  // DCTT Testing: persist dirty state warning
+  useEffect(() => {
+    if (!isDCTT) return;
+    if (String(dcttSubModeRef.current || 'termination') !== 'testing') return;
+    const handler = (e) => {
+      if (dcttTestResultsDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isDCTT, dcttTestResultsDirty]);
+
+  const dcttGetPanelState = useCallback((panelId) => {
+    const s = dcttPanelStatesRef.current?.[panelId];
+    return s && typeof s === 'object' ? { left: s.left ?? null, right: s.right ?? null } : { left: null, right: null };
+  }, []);
+
+  // DCTT: cycle through states based on current selection mode
+  // In DCTT, termination does NOT require MC4 state first - can directly mark as terminated
+  const DCTT_PANEL_STATES = {
+    NONE: null,
+    TERMINATED: 'terminated',
+  };
+
+  const dcttCycle = useCallback((cur) => {
+    // Termination (panel side): toggle between NONE and TERMINATED (no MC4 prerequisite)
+    if (cur == null) return DCTT_PANEL_STATES.TERMINATED;
+    if (cur === DCTT_PANEL_STATES.TERMINATED) return DCTT_PANEL_STATES.NONE;
+    return cur;
+  }, []);
+
+  // dcttForwardOnly: for box selection - only advance state, never go back
+  const dcttForwardOnly = useCallback((cur) => {
+    // Set to TERMINATED if not already
+    if (cur == null) return DCTT_PANEL_STATES.TERMINATED;
+    if (cur === DCTT_PANEL_STATES.TERMINATED) return DCTT_PANEL_STATES.TERMINATED;
+    return cur;
+  }, []);
+
+  const dcttApplyAction = useCallback((action, direction) => {
+    if (!action?.changes?.length) return;
+    setDcttPanelStates((prev) => {
+      const out = { ...(prev || {}) };
+      action.changes.forEach((c) => {
+        if (!c?.id) return;
+        // DCTT lock: once submitted, tables can ONLY be removed via History delete.
+        // Block undo/redo from clearing or changing committed tables.
+        const committed = dcttCommittedPanelIdsRef.current || new Set();
+        if (committed.has(String(c.id))) return;
+        const v = direction === 'undo' ? c.prev : c.next;
+        if (!v || (v.left == null && v.right == null)) delete out[c.id];
+        else out[c.id] = { left: v.left ?? null, right: v.right ?? null };
+      });
+      return out;
+    });
+  }, []);
+
+  const dcttPushHistory = useCallback((changes) => {
+    if (!changes?.length) return;
+    const h = dcttHistoryRef.current;
+    const nextActions = h.actions.slice(0, h.index + 1);
+    nextActions.push({ changes, ts: Date.now() });
+    h.actions = nextActions.slice(-80);
+    h.index = h.actions.length - 1;
+    setDcttHistoryTick((t) => t + 1);
+  }, []);
+
+  const dcttCanUndo = isDCTT && dcttHistoryRef.current.index >= 0;
+  const dcttCanRedo = isDCTT && dcttHistoryRef.current.index < (dcttHistoryRef.current.actions.length - 1);
+  const dcttUndo = useCallback(() => {
+    const h = dcttHistoryRef.current;
+    if (h.index < 0) return;
+    const action = h.actions[h.index];
+    dcttApplyAction(action, 'undo');
+    h.index -= 1;
+    setDcttHistoryTick((t) => t + 1);
+  }, [dcttApplyAction]);
+
+  const dcttRedo = useCallback(() => {
+    const h = dcttHistoryRef.current;
+    if (h.index >= h.actions.length - 1) return;
+    const action = h.actions[h.index + 1];
+    dcttApplyAction(action, 'redo');
+    h.index += 1;
+    setDcttHistoryTick((t) => t + 1);
+  }, [dcttApplyAction]);
+
   const mc4GetPanelState = useCallback((panelId) => {
     const s = mc4PanelStatesRef.current?.[panelId];
     return s && typeof s === 'object' ? { left: s.left ?? null, right: s.right ?? null } : { left: null, right: null };
   }, []);
 
-  // mc4Cycle: cycle through states based on current selection mode
+  // mc4Cycle: cycle through states - MC4 only has mc4 install mode now
+  // (termination modes moved to DCTT module)
   const mc4Cycle = useCallback((cur) => {
-    if (mc4SelectionMode === 'mc4') {
-      // MC4 mode: toggle between NONE and MC4 (blue)
-      if (cur == null) return MC4_PANEL_STATES.MC4;
-      if (cur === MC4_PANEL_STATES.MC4) return MC4_PANEL_STATES.NONE;
-      // If already terminated, can't change in MC4 mode
-      return cur;
-    } else if (mc4SelectionMode === 'termination_panel' || mc4SelectionMode === 'termination_inv') {
-      // Termination (panel side): MC4 -> TERMINATED, or toggle TERMINATED off
-      if (cur === MC4_PANEL_STATES.MC4) return MC4_PANEL_STATES.TERMINATED;
-      if (cur === MC4_PANEL_STATES.TERMINATED) return MC4_PANEL_STATES.MC4; // back to MC4, not NONE
-      // Can't terminate if not MC4 first
-      return cur;
-    }
-    // No mode selected - default cycle
+    // MC4 mode: toggle between NONE and MC4 (blue)
     if (cur == null) return MC4_PANEL_STATES.MC4;
-    if (cur === MC4_PANEL_STATES.MC4) return MC4_PANEL_STATES.TERMINATED;
-    return MC4_PANEL_STATES.NONE;
-  }, [mc4SelectionMode]);
+    if (cur === MC4_PANEL_STATES.MC4) return MC4_PANEL_STATES.NONE;
+    // If already terminated, can't change in MC4 mode
+    return cur;
+  }, []);
 
   // mc4ForwardOnly: for box selection - only advance state, never go back
   const mc4ForwardOnly = useCallback((cur) => {
-    if (mc4SelectionMode === 'mc4') {
-      // MC4 mode: set to MC4 (blue) if not already
-      if (cur == null) return MC4_PANEL_STATES.MC4;
-      return cur; // Don't change if already MC4 or TERMINATED
-    } else if (mc4SelectionMode === 'termination_panel' || mc4SelectionMode === 'termination_inv') {
-      // Termination (panel side): advance to TERMINATED if currently MC4
-      if (cur === MC4_PANEL_STATES.MC4) return MC4_PANEL_STATES.TERMINATED;
-      if (cur === MC4_PANEL_STATES.TERMINATED) return MC4_PANEL_STATES.TERMINATED;
-      // Can't terminate if not MC4 first - leave as is
-      return cur;
-    }
-    // No mode selected - default forward
+    // MC4 mode: set to MC4 (blue) if not already
     if (cur == null) return MC4_PANEL_STATES.MC4;
-    if (cur === MC4_PANEL_STATES.MC4) return MC4_PANEL_STATES.TERMINATED;
-    return MC4_PANEL_STATES.TERMINATED;
-  }, [mc4SelectionMode]);
+    return cur; // Don't change if already MC4 or TERMINATED
+  }, []);
 
   const mc4ApplyAction = useCallback((action, direction) => {
     if (!action?.changes?.length) return;
@@ -2601,6 +3228,9 @@ export default function BaseModule({
 
     mvtTermHistoryRef.current = { actions: [], index: -1 };
     setMvtTermHistoryTick((t) => t + 1);
+
+    dcttHistoryRef.current = { actions: [], index: -1 };
+    setDcttHistoryTick((t) => t + 1);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeMode?.key]);
 
@@ -2920,30 +3550,33 @@ export default function BaseModule({
 
   const globalCanUndo = noteMode
     ? canUndoNotes
-    : (isMC4 ? mc4CanUndo
-      : isLVTT ? lvttCanUndo
-        : isMVT ? mvtCanUndo
-          : isDATP ? datpCanUndo
-            : isMVFT ? mvftCanUndo
-              : isPTEP ? (ptepSubMode === 'tabletotable' ? ptepTTCanUndo : ptepParamCanUndo)
-                : isLV ? lvInvCanUndo
-                : isMVF ? mvfPartsCanUndo
-                  : selectionCanUndo);
+    : (isDCTT ? dcttCanUndo
+      : isMC4 ? mc4CanUndo
+        : isLVTT ? lvttCanUndo
+          : isMVT ? mvtCanUndo
+            : isDATP ? datpCanUndo
+              : isMVFT ? mvftCanUndo
+                : isPTEP ? (ptepSubMode === 'tabletotable' ? ptepTTCanUndo : ptepParamCanUndo)
+                  : isLV ? lvInvCanUndo
+                  : isMVF ? mvfPartsCanUndo
+                    : selectionCanUndo);
 
   const globalCanRedo = noteMode
     ? canRedoNotes
-    : (isMC4 ? mc4CanRedo
-      : isLVTT ? lvttCanRedo
-        : isMVT ? mvtCanRedo
-          : isDATP ? datpCanRedo
-            : isMVFT ? mvftCanRedo
-              : isPTEP ? (ptepSubMode === 'tabletotable' ? ptepTTCanRedo : ptepParamCanRedo)
-              : isLV ? lvInvCanRedo
-                : isMVF ? mvfPartsCanRedo
-                  : selectionCanRedo);
+    : (isDCTT ? dcttCanRedo
+      : isMC4 ? mc4CanRedo
+        : isLVTT ? lvttCanRedo
+          : isMVT ? mvtCanRedo
+            : isDATP ? datpCanRedo
+              : isMVFT ? mvftCanRedo
+                : isPTEP ? (ptepSubMode === 'tabletotable' ? ptepTTCanRedo : ptepParamCanRedo)
+                : isLV ? lvInvCanRedo
+                  : isMVF ? mvfPartsCanRedo
+                    : selectionCanRedo);
 
   const globalUndo = useCallback(() => {
     if (noteMode) return void undoNotes();
+    if (isDCTT) return void dcttUndo();
     if (isMC4) return void mc4Undo();
     if (isLVTT) return void lvttUndo();
     if (isMVT) return void mvtUndo();
@@ -2953,10 +3586,11 @@ export default function BaseModule({
     if (isLV) return void lvInvUndo();
     if (isMVF) return void mvfPartsUndo();
     return void selectionUndo();
-  }, [noteMode, undoNotes, isMC4, mc4Undo, isLVTT, lvttUndo, isMVT, mvtUndo, isDATP, datpUndo, isMVFT, mvftUndo, isPTEP, ptepTTUndo, ptepParamUndo, isLV, lvInvUndo, isMVF, mvfPartsUndo, selectionUndo]);
+  }, [noteMode, undoNotes, isDCTT, dcttUndo, isMC4, mc4Undo, isLVTT, lvttUndo, isMVT, mvtUndo, isDATP, datpUndo, isMVFT, mvftUndo, isPTEP, ptepTTUndo, ptepParamUndo, isLV, lvInvUndo, isMVF, mvfPartsUndo, selectionUndo]);
 
   const globalRedo = useCallback(() => {
     if (noteMode) return void redoNotes();
+    if (isDCTT) return void dcttRedo();
     if (isMC4) return void mc4Redo();
     if (isLVTT) return void lvttRedo();
     if (isMVT) return void mvtRedo();
@@ -2966,7 +3600,7 @@ export default function BaseModule({
     if (isLV) return void lvInvRedo();
     if (isMVF) return void mvfPartsRedo();
     return void selectionRedo();
-  }, [noteMode, redoNotes, isMC4, mc4Redo, isLVTT, lvttRedo, isMVT, mvtRedo, isDATP, datpRedo, isMVFT, mvftRedo, isPTEP, ptepTTRedo, ptepParamRedo, isLV, lvInvRedo, isMVF, mvfPartsRedo, selectionRedo]);
+  }, [noteMode, redoNotes, isDCTT, dcttRedo, isMC4, mc4Redo, isLVTT, lvttRedo, isMVT, mvtRedo, isDATP, datpRedo, isMVFT, mvftRedo, isPTEP, ptepTTRedo, ptepParamRedo, isLV, lvInvRedo, isMVF, mvfPartsRedo, selectionRedo]);
 
   useEffect(() => {
     if (!isMC4) return;
@@ -3040,6 +3674,80 @@ export default function BaseModule({
       void _e;
     }
   }, [isMC4, mc4PanelStatesStorageKey, mc4PanelStates]);
+
+  // ─────────────────────────────────────────────────────────────
+  // DCTT: localStorage load/save effects
+  // ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!isDCTT) return;
+    try {
+      const raw = localStorage.getItem(dcttPanelStatesStorageKey);
+      const obj = raw ? JSON.parse(raw) : {};
+      if (obj && typeof obj === 'object') setDcttPanelStates(obj);
+      else setDcttPanelStates({});
+    } catch (_e) {
+      void _e;
+      setDcttPanelStates({});
+    }
+    dcttHistoryRef.current = { actions: [], index: -1 };
+    setDcttHistoryTick((t) => t + 1);
+  }, [isDCTT, dcttPanelStatesStorageKey]);
+
+  useEffect(() => {
+    if (!isDCTT) return;
+    try {
+      const raw = localStorage.getItem(dcttSubmittedStorageKey);
+      const obj = raw ? JSON.parse(raw) : null;
+      const next = {
+        termination_panel: Math.max(0, Number(obj?.termination_panel ?? 0) || 0),
+        termination_inv: Math.max(0, Number(obj?.termination_inv ?? 0) || 0),
+      };
+      setDcttSubmittedCounts(next);
+      dcttSubmittedCountsRef.current = next;
+    } catch (_e) {
+      void _e;
+      const next = { termination_panel: 0, termination_inv: 0 };
+      setDcttSubmittedCounts(next);
+      dcttSubmittedCountsRef.current = next;
+    }
+  }, [isDCTT, dcttSubmittedStorageKey]);
+
+  useEffect(() => {
+    if (!isDCTT) return;
+    try {
+      const raw = localStorage.getItem(dcttInvTerminationStorageKey);
+      const obj = raw ? JSON.parse(raw) : {};
+      if (obj && typeof obj === 'object') {
+        setDcttInvTerminationByInv(obj);
+        dcttInvTerminationByInvRef.current = obj;
+      } else {
+        setDcttInvTerminationByInv({});
+        dcttInvTerminationByInvRef.current = {};
+      }
+    } catch (_e) {
+      void _e;
+      setDcttInvTerminationByInv({});
+      dcttInvTerminationByInvRef.current = {};
+    }
+  }, [isDCTT, dcttInvTerminationStorageKey]);
+
+  useEffect(() => {
+    if (!isDCTT) return;
+    try {
+      localStorage.setItem(dcttInvTerminationStorageKey, JSON.stringify(dcttInvTerminationByInv || {}));
+    } catch (_e) {
+      void _e;
+    }
+  }, [isDCTT, dcttInvTerminationStorageKey, dcttInvTerminationByInv]);
+
+  useEffect(() => {
+    if (!isDCTT) return;
+    try {
+      localStorage.setItem(dcttPanelStatesStorageKey, JSON.stringify(dcttPanelStates || {}));
+    } catch (_e) {
+      void _e;
+    }
+  }, [isDCTT, dcttPanelStatesStorageKey, dcttPanelStates]);
 
   // MVF: daily completion tracking for segments (click in panel to mark completed)
   const mvfTodayYmd = getTodayYmd();
@@ -3288,6 +3996,211 @@ export default function BaseModule({
     return () => { map.off('zoomend', onZoom); };
   }, [isMC4]);
 
+  // DCTT: render green dot markers at panel ends for terminated panels
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!isDCTT || dcttSelectionMode !== 'termination_panel') {
+      if (dcttEndsLayerRef.current) {
+        try { dcttEndsLayerRef.current.remove(); } catch (_e) { void _e; }
+      }
+      dcttEndsLayerRef.current = null;
+      return;
+    }
+
+    let layer = dcttEndsLayerRef.current;
+    if (!layer) {
+      // Create a custom pane for DCTT markers that doesn't capture mouse events
+      if (!map.getPane('dcttmarkers')) {
+        const pane = map.createPane('dcttmarkers');
+        pane.style.pointerEvents = 'none';
+        pane.style.zIndex = '650'; // Above polygons but below popups
+      }
+      layer = L.layerGroup({ pane: 'dcttmarkers' });
+      dcttEndsLayerRef.current = layer;
+      layer.addTo(map);
+    }
+    layer.clearLayers();
+
+    const states = dcttPanelStatesRef.current || {};
+    const panels = polygonById.current || {};
+    
+    // Zoom-based radius: scale markers based on zoom level
+    const zoom = map.getZoom();
+    const baseRadius = 4;
+    const radius = Math.max(1.5, Math.min(8, baseRadius * Math.pow(1.2, zoom - 20)));
+    
+    const mk = (pos, st) => {
+      const isTerm = st === 'terminated';
+      if (!isTerm) return null;
+      const fill = '#00aa00'; // green for terminated
+      const stroke = '#007700';
+      return L.circleMarker(pos, {
+        radius: radius,
+        color: stroke,
+        weight: 1.5,
+        fillColor: fill,
+        fillOpacity: 0.9,
+        opacity: 1,
+        interactive: false,
+        pane: 'dcttmarkers',
+      });
+    };
+
+    Object.keys(panels).forEach((id) => {
+      const panel = panels[id];
+      // Lazy compute mc4Ends if not yet calculated
+      if (!panel.mc4Ends && typeof panel.computeEnds === 'function') {
+        try {
+          const ends = panel.computeEnds();
+          if (ends) panel.mc4Ends = ends;
+        } catch (_e) {
+          // Map still not ready, skip
+        }
+      }
+      const ends = panel.mc4Ends;
+      if (!ends?.leftPos || !ends?.rightPos) return;
+      const st = states[id] || { left: null, right: null };
+      if (st.left) {
+        const m = mk(ends.leftPos, st.left);
+        if (m) { layer.addLayer(m); }
+      }
+      if (st.right) {
+        const m = mk(ends.rightPos, st.right);
+        if (m) { layer.addLayer(m); }
+      }
+    });
+  }, [isDCTT, dcttSelectionMode, dcttHistoryTick, dcttPanelStates]);
+
+  // DCTT: update markers on zoom change
+  useEffect(() => {
+    if (!isDCTT || dcttSelectionMode !== 'termination_panel') return;
+    const map = mapRef.current;
+    if (!map) return;
+    const onZoom = () => {
+      setDcttHistoryTick((t) => t + 0.001);
+    };
+    map.on('zoomend', onZoom);
+    return () => { map.off('zoomend', onZoom); };
+  }, [isDCTT, dcttSelectionMode]);
+
+  // DCTT: keep panel polygon styles in sync with termination state
+  // (so selected/terminated tables show as green, not only as green end-dots)
+  useEffect(() => {
+    if (!isDCTT) return;
+    const panels = polygonById.current || {};
+    const states = dcttPanelStatesRef.current || {};
+    const unselectedColor = FULL_GEOJSON_BASE_COLOR;
+    const unselectedWeight = FULL_GEOJSON_BASE_WEIGHT;
+
+    const highlighted = historySelectedRecordId
+      ? new Set(editingPolygonIds)
+      : null;
+
+    Object.keys(panels).forEach((panelId) => {
+      if (highlighted && highlighted.has(panelId)) return; // let history highlight effect own styling
+      const info = panels[panelId];
+      const layer = info?.layer;
+      if (!layer || typeof layer.setStyle !== 'function') return;
+      const st = states[panelId];
+      const isTerminated = st?.left === DCTT_PANEL_STATES.TERMINATED || st?.right === DCTT_PANEL_STATES.TERMINATED;
+      try {
+        layer.setStyle(
+          isTerminated
+            ? { color: '#22c55e', weight: 1.5, fill: false, fillOpacity: 0 }
+            : { color: unselectedColor, weight: unselectedWeight, fill: false, fillOpacity: 0 }
+        );
+      } catch (_e) {
+        void _e;
+      }
+    });
+  }, [isDCTT, dcttPanelStates, dcttHistoryTick, historySelectedRecordId, editingPolygonIds]);
+
+  // DCTT: fallback single-click handler (map-level hit test)
+  // Some environments/layers can miss per-polygon click events while box selection still works.
+  // This ensures a normal click behaves like box selection in termination_panel mode.
+  useEffect(() => {
+    if (!isDCTT) return;
+    if (String(dcttSelectionMode || 'termination_panel') !== 'termination_panel') return;
+    if (noteMode) return;
+    const map = mapRef.current;
+    if (!map) return;
+
+    const pointInPoly = (pt, poly) => {
+      let inside = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const xi = poly[i].x, yi = poly[i].y;
+        const xj = poly[j].x, yj = poly[j].y;
+        const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+          (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi + 1e-12) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    };
+
+    const ringToPoints = (layer) => {
+      if (!layer || typeof layer.getLatLngs !== 'function') return null;
+      let ll = layer.getLatLngs();
+      while (Array.isArray(ll) && ll.length && Array.isArray(ll[0])) ll = ll[0];
+      while (Array.isArray(ll) && ll.length && Array.isArray(ll[0])) ll = ll[0];
+      const ring = Array.isArray(ll) ? ll : null;
+      if (!ring || ring.length < 3) return null;
+      const pts = ring.map((p) => map.latLngToLayerPoint(p)).filter(Boolean);
+      if (pts.length < 3) return null;
+      const a = pts[0];
+      const z = pts[pts.length - 1];
+      if (a && z && a.x === z.x && a.y === z.y) pts.pop();
+      return pts;
+    };
+
+    const onMapClick = (evt) => {
+      try {
+        // Do not interfere with history editing mode.
+        if (window.__historySelectedRecordId) return;
+      } catch (_e) {
+        void _e;
+      }
+
+      // Re-check live mode at click time.
+      if (!isDCTTRef.current) return;
+      if (String(dcttSubModeRef.current || 'termination') === 'testing') return;
+      if (dcttSelectionModeRef.current !== 'termination_panel') return;
+      const latlng = evt?.latlng;
+      if (!latlng) return;
+
+      const clickPt = map.latLngToLayerPoint(latlng);
+      const panels = polygonById.current || {};
+
+      // Hit-test only panel polygons (full.geojson tables use the "polygon_" prefix).
+      for (const [panelId, info] of Object.entries(panels)) {
+        if (!String(panelId).startsWith('polygon_')) continue;
+        const layer = info?.layer;
+        if (!layer || typeof layer.getBounds !== 'function') continue;
+        try {
+          const b = layer.getBounds();
+          if (!b || !b.isValid?.() || !b.contains(latlng)) continue;
+        } catch (_e) {
+          void _e;
+          continue;
+        }
+        const poly = ringToPoints(layer);
+        if (!poly) continue;
+        if (!pointInPoly(clickPt, poly)) continue;
+
+        const prev = dcttGetPanelState(panelId);
+        const next = { left: DCTT_PANEL_STATES.TERMINATED, right: DCTT_PANEL_STATES.TERMINATED };
+        setDcttPanelStates((s) => ({ ...(s || {}), [panelId]: next }));
+        dcttPushHistory([{ id: panelId, prev, next }]);
+        return;
+      }
+    };
+
+    map.on('click', onMapClick);
+    return () => {
+      map.off('click', onMapClick);
+    };
+  }, [isDCTT, dcttSelectionMode, noteMode]);
+
   // LV: keep inv_id label colors in sync with completion state without reloading GeoJSON.
   useEffect(() => {
     if (!isLV) return;
@@ -3340,11 +4253,71 @@ export default function BaseModule({
     activeMode?.invIdDoneBgStrokeWidth,
   ]);
 
+  // DCTT: compute completed inverter IDs (for inv_id label coloring + history highlighting)
+  // NOTE: Must be declared before any hook deps that reference it (avoid TDZ).
+  const dcttCompletedInvIds = useMemo(() => {
+    if (!isDCTT) return new Set();
+    const byInv = dcttInvTerminationByInv || {};
+    const maxByInv = dcttInvMaxByInvRef.current || {};
+    const completed = new Set();
+    for (const [invNorm, count] of Object.entries(byInv)) {
+      const max = Math.max(0, Number(maxByInv[invNorm] ?? 0) || 0);
+      const n = Math.max(0, Number(count) || 0);
+      if (max > 0 && n >= max) {
+        completed.add(invNorm);
+      }
+    }
+    return completed;
+  }, [isDCTT, dcttInvTerminationByInv]);
+
+  // DCTT: keep inv_id label colors in sync with completion state (when termination count reaches max)
+  useEffect(() => {
+    if (!isDCTT) return;
+    const labels = dcttInvLabelByIdRef.current || {};
+    // Use same styling as LV for green completed state
+    const invDoneTextColor = 'rgba(11,18,32,0.98)';
+    const invDoneBgColor = 'rgba(34,197,94,0.92)';
+    const invDoneBgStrokeColor = 'rgba(255,255,255,0.70)';
+    const invDoneBgStrokeWidth = 2;
+    const invDoneBgPaddingX = 4;
+    const invDoneBgPaddingY = 2;
+    const invDoneBgCornerRadius = 3;
+    
+    Object.keys(labels).forEach((invIdNorm) => {
+      const lbl = labels[invIdNorm];
+      if (!lbl) return;
+      const done = dcttCompletedInvIds.has(invIdNorm);
+      
+      let changed = false;
+      if (done) {
+        // Green background styling for completed
+        if (lbl.options.textColor !== invDoneTextColor) { lbl.options.textColor = invDoneTextColor; changed = true; }
+        if (lbl.options.bgColor !== invDoneBgColor) { lbl.options.bgColor = invDoneBgColor; changed = true; }
+        if (lbl.options.bgStrokeColor !== invDoneBgStrokeColor) { lbl.options.bgStrokeColor = invDoneBgStrokeColor; changed = true; }
+        if (lbl.options.bgStrokeWidth !== invDoneBgStrokeWidth) { lbl.options.bgStrokeWidth = invDoneBgStrokeWidth; changed = true; }
+        if (lbl.options.bgPaddingX !== invDoneBgPaddingX) { lbl.options.bgPaddingX = invDoneBgPaddingX; changed = true; }
+        if (lbl.options.bgPaddingY !== invDoneBgPaddingY) { lbl.options.bgPaddingY = invDoneBgPaddingY; changed = true; }
+        if (lbl.options.bgCornerRadius !== invDoneBgCornerRadius) { lbl.options.bgCornerRadius = invDoneBgCornerRadius; changed = true; }
+      } else {
+        // Default white text, no background
+        if (lbl.options.textColor !== 'rgba(255,255,255,0.98)') { lbl.options.textColor = 'rgba(255,255,255,0.98)'; changed = true; }
+        if (lbl.options.bgColor != null) { lbl.options.bgColor = null; changed = true; }
+        if (lbl.options.bgStrokeColor != null) { lbl.options.bgStrokeColor = null; changed = true; }
+        if (lbl.options.bgStrokeWidth !== 0) { lbl.options.bgStrokeWidth = 0; changed = true; }
+        if (lbl.options.bgPaddingX !== 0) { lbl.options.bgPaddingX = 0; changed = true; }
+        if (lbl.options.bgPaddingY !== 0) { lbl.options.bgPaddingY = 0; changed = true; }
+        if (lbl.options.bgCornerRadius !== 0) { lbl.options.bgCornerRadius = 0; changed = true; }
+      }
+
+      if (changed) lbl.redraw?.();
+    });
+  }, [isDCTT, dcttCompletedInvIds]);
+
   // LV: When an inv_id is selected (done), also color its nearest LV box geometry green.
   useEffect(() => {
     if (!isLV) return;
-    const boxDefaultColor = activeMode?.geojsonFiles?.find?.((f) => f?.name === 'lv_box')?.color || 'rgba(250,204,21,0.7)';
-    const boxDefaultWeight = Number(activeMode?.geojsonFiles?.find?.((f) => f?.name === 'lv_box')?.weight) || 2;
+    const boxDefaultColor = activeGeojsonFiles?.find?.((f) => f?.name === 'lv_box')?.color || 'rgba(250,204,21,0.7)';
+    const boxDefaultWeight = Number(activeGeojsonFiles?.find?.((f) => f?.name === 'lv_box')?.weight) || 2;
 
     const doneColor = 'rgba(34,197,94,0.95)';
     const doneWeight = Math.max(2.2, boxDefaultWeight);
@@ -3724,11 +4697,39 @@ export default function BaseModule({
           } else if (status === 'failed') {
             nextTextColor = 'rgba(239,68,68,0.98)'; // Red
           } else {
-            nextTextColor = 'rgba(148,163,184,0.98)'; // Gray (not tested)
+            nextTextColor = 'rgba(255,255,255,0.98)'; // White (not tested)
           }
           
           // Apply filter: dim labels that don't match the active filter
           // NOTE: In DCCT we keep other labels stable; counter click only highlights the counter itself.
+        }
+
+        // DCTT Testing Mode: Color labels based on CSV existence + remark (PASSED/FAILED)
+        // Spec:
+        // - Passed: CSV remark PASSED
+        // - Failed: CSV remark FAILED
+        // - Not Tested: string_text ID exists on map but is missing in CSV entirely
+        if (isDCTT && String(dcttSubModeRef.current || 'termination') === 'testing') {
+          const norm = pt.stringId || dcttTestNormalizeId(pt.text);
+          const rec = (dcttTestRisoByIdRef.current || {})?.[norm] || null;
+          const st = rec ? (dcttTestNormalizeStatus(rec.status || rec.remarkRaw) || null) : null;
+
+          const status = st === 'passed' ? 'passed' : st === 'failed' ? 'failed' : 'not_tested';
+
+          if (status === 'passed') nextTextColor = 'rgba(5,150,105,0.96)';
+          else if (status === 'failed') nextTextColor = 'rgba(239,68,68,0.98)';
+          else nextTextColor = 'rgba(255,255,255,0.98)';
+
+          const dcttActiveFilter = dcttTestFilterRef.current;
+          if (dcttActiveFilter) {
+            if (status === dcttActiveFilter) {
+              nextOpacity = 1.0;
+            } else {
+              // Match Failed/Passed filter behavior: non-matching labels dim to a single neutral dark tone.
+              nextTextColor = 'rgba(148,163,184,0.18)';
+              nextOpacity = 0.18;
+            }
+          }
         }
 
         // LVTT: SS/SUB labels show completion by color (GREEN=done/max, RED=not complete)
@@ -3759,6 +4760,9 @@ export default function BaseModule({
           }
         }
 
+        // DCTT Testing: check if in testing mode
+        const isDcttTestingMode = isDCTT && String(dcttSubModeRef.current || 'termination') === 'testing';
+
         // Create once, then reuse
         let label = pool[count];
         if (!label) {
@@ -3774,9 +4778,9 @@ export default function BaseModule({
             minFontSize: stringTextMinFontSizeCfg,
             maxFontSize: stringTextMaxFontSizeCfg,
             rotation: pt.angle || 0,
-            // MVT: SS labels clickable; LVTT: SS/SUB labels clickable (editing sub completion)
-            interactive: isMVT || isLVTT,
-            radius: (isMVT || isLVTT) ? 22 : 0,
+            // MVT: SS labels clickable; LVTT: SS/SUB labels clickable; DCTT testing: string labels clickable
+            interactive: isMVT || isLVTT || isDcttTestingMode,
+            radius: (isMVT || isLVTT || isDcttTestingMode) ? 22 : 0,
             bubblingMouseEvents: false,
           });
           pool[count] = label;
@@ -4139,6 +5143,113 @@ export default function BaseModule({
             if (label.options.bgCornerRadius !== 0) { label.options.bgCornerRadius = 0; needsRedraw = true; }
           }
         }
+
+        // DCTT Testing Mode: setup string text label click handler
+        if (isDCTT && String(dcttSubModeRef.current || 'termination') === 'testing') {
+          const rawText = String(pt.text || '').trim();
+          const stringIdNorm = pt.stringId || dcttTestNormalizeId(rawText);
+          const selectedIdNorm = String(dcttTestPopupRef.current?.idNorm || '');
+          const isSelected = Boolean(selectedIdNorm) && selectedIdNorm === String(stringIdNorm || '');
+
+          // Bind click handler if not already bound
+          if (!label._dcttTestHandlersBound) {
+            label.on('click', (evt) => {
+              try {
+                if (evt?.originalEvent) {
+                  evt.originalEvent.stopImmediatePropagation?.();
+                  L.DomEvent.stopPropagation(evt.originalEvent);
+                  L.DomEvent.preventDefault(evt.originalEvent);
+                }
+              } catch (_e) { void _e; }
+
+              // Only active in testing mode
+              if (String(dcttSubModeRef.current || 'termination') !== 'testing') return;
+
+              const idNorm = label._dcttStringIdNorm;
+              if (!idNorm) return;
+
+              const oe = evt?.originalEvent;
+              const x = oe?.clientX ?? 0;
+              const y = oe?.clientY ?? 0;
+
+              // Get existing riso data
+              const rec = dcttTestRisoByIdRef.current?.[idNorm] || null;
+              const isInCsv = rec !== null;
+              const plus = rec?.plus != null ? String(rec.plus).trim() : '';
+              const minus = rec?.minus != null ? String(rec.minus).trim() : '';
+              const plusVal = plus || (isInCsv ? '999' : '0');
+              const minusVal = minus || (isInCsv ? '999' : '0');
+              const st = dcttTestNormalizeStatus(rec?.status || rec?.remarkRaw) || null;
+              const displayId = dcttTestFormatDisplayId(idNorm, rec?.originalId);
+
+              setDcttTestPopup((prev) => {
+                if (prev && prev.idNorm === idNorm) return null;
+                return {
+                  idNorm,
+                  displayId,
+                  draftPlus: plusVal,
+                  draftMinus: minusVal,
+                  draftStatus: st,
+                  x,
+                  y,
+                };
+              });
+            });
+
+            label.on('mouseover', () => {
+              try { map.getContainer().style.cursor = 'pointer'; } catch (_e) { void _e; }
+            });
+            label.on('mouseout', () => {
+              try { map.getContainer().style.cursor = ''; } catch (_e) { void _e; }
+            });
+
+            label._dcttTestHandlersBound = true;
+          }
+
+          // Store metadata for click handler
+          label._dcttStringIdNorm = stringIdNorm;
+          label._dcttDisplayId = rawText;
+
+          // Update label styling for testing mode
+          if (label.options.interactive !== true) { label.options.interactive = true; needsRedraw = true; }
+          if (label.options.radius !== 22) { label.options.radius = 22; needsRedraw = true; }
+          if (label.options.underline !== true) { label.options.underline = true; needsRedraw = true; }
+          if (label.options.underlineColor !== label.options.textColor) { label.options.underlineColor = label.options.textColor; needsRedraw = true; }
+          // Make the clicked/active string label more visually distinct.
+          if (label.options.underlineWidthFactor !== (isSelected ? 1.8 : 1)) { label.options.underlineWidthFactor = isSelected ? 1.8 : 1; needsRedraw = true; }
+          if (isSelected) {
+            if (label.options.bgColor !== 'rgba(11,18,32,0.85)') { label.options.bgColor = 'rgba(11,18,32,0.85)'; needsRedraw = true; }
+            if (label.options.bgPaddingX !== 4) { label.options.bgPaddingX = 4; needsRedraw = true; }
+            if (label.options.bgPaddingY !== 2) { label.options.bgPaddingY = 2; needsRedraw = true; }
+            if (label.options.bgCornerRadius !== 3) { label.options.bgCornerRadius = 3; needsRedraw = true; }
+            const desiredStrokeFactor = Math.max(0.5, Number(stringTextStrokeWidthFactorCfg) || 1) * 1.35;
+            if (label.options.textStrokeWidthFactor !== desiredStrokeFactor) { label.options.textStrokeWidthFactor = desiredStrokeFactor; needsRedraw = true; }
+          } else {
+            if (label.options.bgColor != null) { label.options.bgColor = null; needsRedraw = true; }
+            if (label.options.bgPaddingX !== 0) { label.options.bgPaddingX = 0; needsRedraw = true; }
+            if (label.options.bgPaddingY !== 0) { label.options.bgPaddingY = 0; needsRedraw = true; }
+            if (label.options.bgCornerRadius !== 0) { label.options.bgCornerRadius = 0; needsRedraw = true; }
+            const desiredStrokeFactor = Math.max(0.5, Number(stringTextStrokeWidthFactorCfg) || 1);
+            if (label.options.textStrokeWidthFactor !== desiredStrokeFactor) { label.options.textStrokeWidthFactor = desiredStrokeFactor; needsRedraw = true; }
+          }
+        } else if (isDCTT) {
+          // Not in testing mode - reset interactive state
+          label._dcttStringIdNorm = '';
+          label._dcttDisplayId = '';
+          if (label.options.underline) { label.options.underline = false; needsRedraw = true; }
+          if (label.options.underlineColor) { label.options.underlineColor = null; needsRedraw = true; }
+          if (label.options.underlineWidthFactor !== 1) { label.options.underlineWidthFactor = 1; needsRedraw = true; }
+          if (label.options.interactive !== false) { label.options.interactive = false; needsRedraw = true; }
+          if (label.options.radius !== 0) { label.options.radius = 0; needsRedraw = true; }
+          // Clear selection highlight styles when leaving testing mode.
+          if (label.options.bgColor != null) { label.options.bgColor = null; needsRedraw = true; }
+          if (label.options.bgPaddingX !== 0) { label.options.bgPaddingX = 0; needsRedraw = true; }
+          if (label.options.bgPaddingY !== 0) { label.options.bgPaddingY = 0; needsRedraw = true; }
+          if (label.options.bgCornerRadius !== 0) { label.options.bgCornerRadius = 0; needsRedraw = true; }
+          const desiredStrokeFactor = Math.max(0.5, Number(stringTextStrokeWidthFactorCfg) || 1);
+          if (label.options.textStrokeWidthFactor !== desiredStrokeFactor) { label.options.textStrokeWidthFactor = desiredStrokeFactor; needsRedraw = true; }
+        }
+
         const nextRot = pt.angle || 0;
         if (label.options.rotation !== nextRot) {
           label.options.rotation = nextRot;
@@ -4230,6 +5341,23 @@ export default function BaseModule({
     lastStringLabelKeyRef.current = '';
     scheduleStringTextLabelUpdate();
   }, [isDCCT, dcctFilter, dcctTestData, dcctMapIds, scheduleStringTextLabelUpdate]);
+
+  // DCTT Testing: refresh labels when test data, filter, or submode changes
+  useEffect(() => {
+    if (!isDCTT) return;
+    if (!mapRef.current || !stringTextLayerRef.current) return;
+    lastStringLabelKeyRef.current = '';
+    scheduleStringTextLabelUpdate();
+  }, [isDCTT, dcttSubMode, dcttTestData, dcttTestFilter, dcttTestMapIds, scheduleStringTextLabelUpdate]);
+
+  // DCTT Testing: refresh labels when popup selection changes (clicked label highlight)
+  useEffect(() => {
+    if (!isDCTT) return;
+    if (String(dcttSubMode || 'termination') !== 'testing') return;
+    if (!mapRef.current || !stringTextLayerRef.current) return;
+    lastStringLabelKeyRef.current = '';
+    scheduleStringTextLabelUpdate();
+  }, [isDCTT, dcttSubMode, dcttTestPopup, scheduleStringTextLabelUpdate]);
 
   // MVT: close popups when leaving the mode.
   useEffect(() => {
@@ -5587,6 +6715,28 @@ export default function BaseModule({
   // Hooks for daily log and export
   const { dailyLog, addRecord, updateRecord, deleteRecord } = useDailyLog(activeMode?.key || 'DC');
   const { exportToExcel } = useChartExport();
+
+  // DCTT: panel-side submitted/committed set (derived from history for "delete-only-via-history")
+  const dcttCommittedPanelIds = useMemo(() => {
+    if (!isDCTT) return new Set();
+    const out = new Set();
+    const today = String(dcttTodayYmd || '');
+    (dailyLog || []).forEach((r) => {
+      if (!r) return;
+      if (String(r.date || '') !== today) return;
+      const ids = r.selectedPolygonIds;
+      if (!Array.isArray(ids) || ids.length === 0) return;
+      ids.forEach((id) => {
+        const s = String(id || '');
+        if (s) out.add(s);
+      });
+    });
+    return out;
+  }, [dailyLog, isDCTT, dcttTodayYmd]);
+
+  useEffect(() => {
+    dcttCommittedPanelIdsRef.current = dcttCommittedPanelIds;
+  }, [dcttCommittedPanelIds]);
   
   // Initialize editing state when a history record is selected
   useEffect(() => {
@@ -5878,6 +7028,106 @@ export default function BaseModule({
           return;
         }
       }
+
+    // DCTT: highlight inv_id labels (for termination_inv mode) OR panel polygons (for termination_panel mode)
+    if (isDCTT) {
+      const labels = dcttInvLabelByIdRef.current || {};
+      const panels = polygonById.current || {};
+      const looksLikeInvId = (id) => {
+        const s = String(id || '').toLowerCase();
+        if (!s) return false;
+        return /tx\s*\d+/.test(s) && /inv\s*\d+/.test(s);
+      };
+
+      // Determine what kind of IDs are in the history record
+      const invIdsToHighlight = historySelectedRecordId
+        ? new Set(editingPolygonIds.map(normalizeId).filter(looksLikeInvId))
+        : new Set();
+      const panelIdsToHighlight = historySelectedRecordId
+        ? new Set(editingPolygonIds.filter((id) => !looksLikeInvId(id)))
+        : new Set();
+
+      // Default styling from config
+      const invBgColor = activeMode?.invIdTextBgColor || null;
+      const invBgStrokeColor = activeMode?.invIdTextBgStrokeColor || null;
+      const invBgStrokeWidth = typeof activeMode?.invIdTextBgStrokeWidth === 'number' ? activeMode.invIdTextBgStrokeWidth : 0;
+
+      // Cleanup previous inv_id highlights (restore to normal/done state)
+      prevHistoryDcttInvHighlightRef.current.forEach((invIdNorm) => {
+        if (invIdsToHighlight.has(invIdNorm)) return;
+        const lbl = labels[invIdNorm];
+        if (!lbl) return;
+        const done = dcttCompletedInvIds?.has(invIdNorm);
+        lbl.options.textColor = done ? (activeMode?.invIdDoneTextColor || 'rgba(34,197,94,1)') : 'rgba(255,255,255,0.98)';
+        lbl.options.textColorNoBg = done ? (activeMode?.invIdDoneTextColorNoBg || null) : null;
+        lbl.options.bgColor = done ? (activeMode?.invIdDoneBgColor || null) : invBgColor;
+        lbl.options.bgStrokeColor = done ? (activeMode?.invIdDoneBgStrokeColor || null) : invBgStrokeColor;
+        lbl.options.bgStrokeWidth = done ? (activeMode?.invIdDoneBgStrokeWidth || 0) : invBgStrokeWidth;
+        lbl.redraw?.();
+      });
+
+      // Cleanup previous panel highlights (restore to terminated or unselected style)
+      const unselectedColor = FULL_GEOJSON_BASE_COLOR;
+      const unselectedWeight = FULL_GEOJSON_BASE_WEIGHT;
+      prevHistoryDcttPanelHighlightRef.current.forEach((panelId) => {
+        if (panelIdsToHighlight.has(panelId)) return;
+        const polygonInfo = panels[panelId];
+        if (polygonInfo && polygonInfo.layer && polygonInfo.layer.setStyle) {
+          const st = dcttPanelStatesRef.current?.[panelId];
+          const isTerminated = st?.left === DCTT_PANEL_STATES.TERMINATED || st?.right === DCTT_PANEL_STATES.TERMINATED;
+          polygonInfo.layer.setStyle(
+            isTerminated
+              ? { color: '#22c55e', weight: 1.5, fill: false, fillOpacity: 0 }
+              : { color: unselectedColor, weight: unselectedWeight, fill: false, fillOpacity: 0 }
+          );
+        }
+      });
+
+      // If no record selected, cleanup is done
+      if (!historySelectedRecordId) {
+        prevHistoryDcttInvHighlightRef.current = new Set();
+        prevHistoryDcttPanelHighlightRef.current = new Set();
+        return;
+      }
+
+      // Apply orange highlight to inv_id labels
+      if (invIdsToHighlight.size > 0) {
+        const highlightTextColor = activeMode?.invIdHighlightTextColor || 'rgba(255,255,255,0.98)';
+        const highlightBgColor = activeMode?.invIdHighlightBgColor || 'rgba(249, 115, 22, 1)';
+        const highlightBgStrokeColor = activeMode?.invIdHighlightBgStrokeColor || 'rgba(255,255,255,0.9)';
+        const highlightBgStrokeWidth = activeMode?.invIdHighlightBgStrokeWidth || 2.5;
+
+        invIdsToHighlight.forEach((invIdNorm) => {
+          const lbl = labels[invIdNorm];
+          if (!lbl) return;
+          lbl.options.textColor = highlightTextColor;
+          lbl.options.textColorNoBg = null;
+          lbl.options.bgColor = highlightBgColor;
+          lbl.options.bgStrokeColor = highlightBgStrokeColor;
+          lbl.options.bgStrokeWidth = highlightBgStrokeWidth;
+          lbl.redraw?.();
+        });
+      }
+
+      // Apply orange highlight to panel polygons
+      if (panelIdsToHighlight.size > 0) {
+        panelIdsToHighlight.forEach((panelId) => {
+          const polygonInfo = panels[panelId];
+          if (polygonInfo && polygonInfo.layer && polygonInfo.layer.setStyle) {
+            polygonInfo.layer.setStyle({
+              color: '#f97316',
+              weight: 1.8,
+              fill: false,
+              fillOpacity: 0,
+            });
+          }
+        });
+      }
+
+      prevHistoryDcttInvHighlightRef.current = invIdsToHighlight;
+      prevHistoryDcttPanelHighlightRef.current = panelIdsToHighlight;
+      return;
+    }
     
     // LV: highlight inv_id labels (orange)
     if (isLV) {
@@ -6034,7 +7284,7 @@ export default function BaseModule({
     });
 
     prevHistoryHighlightRef.current = polygonIdsToHighlight;
-  }, [historySelectedRecordId, editingPolygonIds, committedPolygons, isLV, isMC4, isMVF, isMVFT, dailyLog, activeMode, lvCompletedInvIds, mvftCommittedTrenchParts]);
+  }, [historySelectedRecordId, editingPolygonIds, committedPolygons, isLV, isMC4, isDCTT, isMVF, isMVFT, dailyLog, activeMode, lvCompletedInvIds, mvftCommittedTrenchParts, dcttCompletedInvIds, dcttPanelStates]);
   
   // Save notes to localStorage
   useEffect(() => {
@@ -6637,7 +7887,8 @@ export default function BaseModule({
           try {
             const lines = text.split(/\r?\n/).filter((l) => l && l.trim());
             if (lines.length <= 1) {
-              setMc4TotalStringsCsv(0);
+              if (isMC4) setMc4TotalStringsCsv(0);
+              if (isDCTT) setDcttTotalStringsCsv(0);
             } else {
               const header = (lines[0] || '').toLowerCase();
               const hasHeader = header.includes('id') && header.includes('length');
@@ -6645,7 +7896,8 @@ export default function BaseModule({
               // IMPORTANT: spec says "CSV contains 9056 strings" => count rows (not unique IDs).
               // (In the uploaded file each ID appears twice, so unique IDs would be 4528.)
               const rowCount = Math.max(0, lines.length - start);
-              setMc4TotalStringsCsv(rowCount);
+              if (isMC4) setMc4TotalStringsCsv(rowCount);
+              if (isDCTT) setDcttTotalStringsCsv(rowCount);
 
               // Build inverter max STR index map (TXn-INVn-STRk) -> max k
               const invMax = {};
@@ -6667,12 +7919,19 @@ export default function BaseModule({
                 const prev = Number(invMax[invNorm] || 0) || 0;
                 if (strNum > prev) invMax[invNorm] = strNum;
               }
-              mc4InvMaxByInvRef.current = invMax;
+              if (isMC4) mc4InvMaxByInvRef.current = invMax;
+              if (isDCTT) dcttInvMaxByInvRef.current = invMax;
             }
           } catch (_e) {
             void _e;
-            setMc4TotalStringsCsv(null);
-            mc4InvMaxByInvRef.current = {};
+            if (isMC4) {
+              setMc4TotalStringsCsv(null);
+              mc4InvMaxByInvRef.current = {};
+            }
+            if (isDCTT) {
+              setDcttTotalStringsCsv(null);
+              dcttInvMaxByInvRef.current = {};
+            }
           }
           // This mode doesn't use lengthData totals.
           setLengthData({});
@@ -7159,6 +8418,9 @@ export default function BaseModule({
             opacity = 1.0;
           } else {
             // Dim non-matching tables
+            // Important UX: when filtering, non-matching items should all dim to the same neutral tone
+            // (so Passed/Failed don't remain tinted when NOT TESTED is selected, and vice-versa).
+            color = defaultStyle.color;
             opacity = 0.12;
             weight = 0.5;
           }
@@ -7175,6 +8437,102 @@ export default function BaseModule({
       void _e;
     }
   }, [isDCCT, dcctTestData, dcctFilter, stringMatchVersion]);
+
+  // DCTT Testing: color full-table polygon outlines based on CSV test result (same as DCCT)
+  useEffect(() => {
+    if (!isDCTT) return;
+    if (String(dcttSubModeRef.current || 'termination') !== 'testing') return;
+
+    const results = dcttTestDataRef.current || {};
+    const panels = polygonById.current || {};
+
+    // DCTT Testing stroke tuning: same as DCCT
+    const defaultStyle = {
+      color: FULL_GEOJSON_BASE_COLOR,
+      weight: FULL_GEOJSON_BASE_WEIGHT,
+      fill: false,
+      fillOpacity: 0,
+    };
+
+    const activeFilter = dcttTestFilterRef.current;
+
+    try {
+      Object.keys(panels).forEach((pid) => {
+        const info = panels[pid];
+        const layer = info?.layer;
+        if (!layer || typeof layer.setStyle !== 'function') return;
+        const sid = normalizeId(info?.stringId);
+        const r = sid ? results[sid] : null;
+
+        // Determine status
+        const status = r === 'passed' ? 'passed' : r === 'failed' ? 'failed' : 'not_tested';
+
+        // Base colors
+        let color = defaultStyle.color;
+        let weight = defaultStyle.weight;
+        if (status === 'passed') {
+          color = 'rgba(5,150,105,0.96)';
+          weight = FULL_GEOJSON_BASE_WEIGHT;
+        } else if (status === 'failed') {
+          color = 'rgba(239,68,68,0.98)';
+          weight = FULL_GEOJSON_BASE_WEIGHT;
+        }
+
+        // Apply filter highlight/dim
+        let opacity = 1.0;
+        if (activeFilter) {
+          const matches = activeFilter === status;
+          if (matches) {
+            // Highlight matching tables
+            weight = 1.85;
+            opacity = 1.0;
+          } else {
+            // Dim non-matching tables
+            // Keep non-matching tables in a single neutral tone when filtering.
+            // This prevents PASSED/FAILED tables from remaining tinted when NOT TESTED is selected.
+            color = defaultStyle.color;
+            opacity = 0.12;
+            weight = 0.5;
+          }
+        }
+
+        layer.setStyle({
+          ...defaultStyle,
+          color,
+          weight,
+          opacity,
+        });
+      });
+    } catch (_e) {
+      void _e;
+    }
+  }, [isDCTT, dcttSubMode, dcttTestData, dcttTestFilter, stringMatchVersion]);
+
+  // DCTT: Restore default polygon styles when NOT in testing mode
+  useEffect(() => {
+    if (!isDCTT) return;
+    if (String(dcttSubModeRef.current || 'termination') === 'testing') return; // skip if in testing mode
+
+    const panels = polygonById.current || {};
+    const defaultStyle = {
+      color: FULL_GEOJSON_BASE_COLOR,
+      weight: FULL_GEOJSON_BASE_WEIGHT,
+      fill: false,
+      fillOpacity: 0,
+      opacity: 1.0,
+    };
+
+    try {
+      Object.keys(panels).forEach((pid) => {
+        const info = panels[pid];
+        const layer = info?.layer;
+        if (!layer || typeof layer.setStyle !== 'function') return;
+        layer.setStyle(defaultStyle);
+      });
+    } catch (_e) {
+      void _e;
+    }
+  }, [isDCTT, dcttSubMode]);
 
   const fetchAllGeoJson = async () => {
     if (!mapRef.current) return;
@@ -7257,7 +8615,7 @@ export default function BaseModule({
     // String text'leri topla (text konumları için)
     const stringTextMap = {}; // stringId -> {lat, lng, angle, text}
 
-    for (const file of activeMode.geojsonFiles) {
+    for (const file of activeGeojsonFiles) {
       try {
         const response = await fetch(file.url, { cache: 'no-store' });
         if (!response.ok) {
@@ -7350,7 +8708,11 @@ export default function BaseModule({
               
               const lat = coords[1];
               const lng = coords[0];
-              const stringId = isDCCT ? dcctNormalizeId(feature.properties.text) : normalizeId(feature.properties.text);
+              const stringId = isDCCT
+                ? dcctNormalizeId(feature.properties.text)
+                : isDCTT
+                ? dcttTestNormalizeId(feature.properties.text)
+                : normalizeId(feature.properties.text);
               
               // Save point info
               collectedPoints.push({ id: stringId, lat, lng });
@@ -7376,6 +8738,15 @@ export default function BaseModule({
               if (pt.stringId) mapIds.add(pt.stringId);
             });
             setDcctMapIds(mapIds);
+          }
+
+          // DCTT Testing: Collect all map IDs from string_text for Not Tested calculation
+          if (isDCTT) {
+            const mapIds = new Set();
+            stringTextPointsRef.current.forEach((pt) => {
+              if (pt.stringId) mapIds.add(pt.stringId);
+            });
+            setDcttTestMapIds(mapIds);
           }
           
           stringLayer.addTo(mapRef.current);
@@ -8205,8 +9576,8 @@ export default function BaseModule({
                 isSmallTable: false,
               };
 
-              // MC4 MODE: click/dblclick change left/right end states
-              if (isMC4 && isPoly) {
+              // MC4 / DCTT: click/dblclick change termination states on panel polygons
+              if ((isMC4 || isDCTT) && isPoly) {
                 const safeStop = (evt) => {
                   try {
                     const oe = evt?.originalEvent || evt;
@@ -8292,19 +9663,35 @@ export default function BaseModule({
                 featureLayer.on('click', (evt) => {
                   safeStop(evt);
                   if (noteMode) return;
+                  const isDcttPanel = isDCTTRef.current;
+                  const currentMode = isDcttPanel ? dcttSelectionModeRef.current : mc4SelectionModeRef.current;
+                  const showToast = isDcttPanel ? showDcttToast : showMc4Toast;
+                  const getState = isDcttPanel ? dcttGetPanelState : mc4GetPanelState;
+                  const setStates = isDcttPanel ? setDcttPanelStates : setMc4PanelStates;
+                  const pushHistory = isDcttPanel ? dcttPushHistory : mc4PushHistory;
+
                   // Require selection mode to be set
-                  const currentMode = mc4SelectionModeRef.current; // null | 'mc4' | 'termination_panel' | 'termination_inv'
                   if (!currentMode) {
-                    showMc4Toast('Please select a mode above.');
+                    showToast('Please select a mode above.');
                     return;
                   }
                   if (currentMode === 'termination_inv') {
-                    // Inv-side termination is driven by inverter popups, not panel-end clicks.
+                    // Inv-side termination is driven by inverter popups, not panel clicks.
                     return;
                   }
+
+                  const prev = getState(uniqueId);
+
+                  if (isDcttPanel) {
+                    // DCTT: selecting a table marks the table terminated (both ends)
+                    const next = { left: DCTT_PANEL_STATES.TERMINATED, right: DCTT_PANEL_STATES.TERMINATED };
+                    setStates((s) => ({ ...(s || {}), [uniqueId]: next }));
+                    pushHistory([{ id: uniqueId, prev, next }]);
+                    return;
+                  }
+
+                  // MC4: end-specific click behavior
                   const side = sideFromClick(evt);
-                  const prev = mc4GetPanelState(uniqueId);
-                  // Calculate next state based on current mode (using ref to get latest value)
                   let nextState = prev[side];
                   if (currentMode === 'mc4') {
                     // MC4 mode: set to MC4 (blue), but never downgrade TERMINATED (green)
@@ -8324,32 +9711,53 @@ export default function BaseModule({
                     return;
                   }
                   const next = { ...prev, [side]: nextState };
-                  setMc4PanelStates((s) => ({ ...(s || {}), [uniqueId]: next }));
-                  mc4PushHistory([{ id: uniqueId, prev, next }]);
+                  setStates((s) => ({ ...(s || {}), [uniqueId]: next }));
+                  pushHistory([{ id: uniqueId, prev, next }]);
                 });
 
                 featureLayer.on('dblclick', (evt) => {
                   safeStop(evt);
                   if (noteMode) return;
-                  if (mc4SelectionModeRef.current === 'termination_inv') return;
-                  const side = sideFromClick(evt);
-                  const prev = mc4GetPanelState(uniqueId);
-                  const next = { ...prev, [side]: MC4_PANEL_STATES.TERMINATED };
-                  setMc4PanelStates((s) => ({ ...(s || {}), [uniqueId]: next }));
-                  mc4PushHistory([{ id: uniqueId, prev, next }]);
+                  const isDcttPanel = isDCTTRef.current;
+                  const currentMode = isDcttPanel ? dcttSelectionModeRef.current : mc4SelectionModeRef.current;
+                  if (currentMode === 'termination_inv') return;
+
+                  const getState = isDcttPanel ? dcttGetPanelState : mc4GetPanelState;
+                  const setStates = isDcttPanel ? setDcttPanelStates : setMc4PanelStates;
+                  const pushHistory = isDcttPanel ? dcttPushHistory : mc4PushHistory;
+
+                  const prev = getState(uniqueId);
+                  const next = isDcttPanel
+                    ? { left: DCTT_PANEL_STATES.TERMINATED, right: DCTT_PANEL_STATES.TERMINATED }
+                    : { ...prev, [sideFromClick(evt)]: MC4_PANEL_STATES.TERMINATED };
+                  setStates((s) => ({ ...(s || {}), [uniqueId]: next }));
+                  pushHistory([{ id: uniqueId, prev, next }]);
                 });
 
                 featureLayer.on('contextmenu', (evt) => {
                   safeStop(evt);
                   if (noteMode) return;
-                  const prev = mc4GetPanelState(uniqueId);
+                  const isDcttPanel = isDCTTRef.current;
+                  const getState = isDcttPanel ? dcttGetPanelState : mc4GetPanelState;
+                  const setStates = isDcttPanel ? setDcttPanelStates : setMc4PanelStates;
+                  const pushHistory = isDcttPanel ? dcttPushHistory : mc4PushHistory;
+
+                  if (isDcttPanel && dcttSelectionModeRef.current === 'termination_panel') {
+                    const committed = dcttCommittedPanelIdsRef.current || new Set();
+                    if (committed.has(uniqueId)) {
+                      showDcttToast('Submitted tables can only be removed from History.');
+                      return;
+                    }
+                  }
+
+                  const prev = getState(uniqueId);
                   const next = { left: null, right: null };
-                  setMc4PanelStates((s) => {
+                  setStates((s) => {
                     const out = { ...(s || {}) };
                     delete out[uniqueId];
                     return out;
                   });
-                  mc4PushHistory([{ id: uniqueId, prev, next }]);
+                  pushHistory([{ id: uniqueId, prev, next }]);
                 });
 
                 return;
@@ -8414,6 +9822,12 @@ export default function BaseModule({
                 }
                 polygonClickedRef.current = true;
 
+                // DCTT: In DC_TESTING sub-mode, tables must NOT be selectable.
+                // The only interaction should be clicking string_id text labels to open the testing popup.
+                if (isDCTTRef.current && String(dcttSubModeRef.current || 'termination') === 'testing') {
+                  return;
+                }
+
                 // PUNCH_LIST MODE: clicking a table always opens isometric view
                 if (isPL) {
                   const tableId = featureLayer.feature?.properties?.tableId;
@@ -8426,6 +9840,21 @@ export default function BaseModule({
 
                 if (noteMode) return;
                 const polygonId = featureLayer._uniquePolygonId;
+
+                // DCTT: ensure single-click termination works even if layers were created under a different mode.
+                // Box selection already uses refs; mirror that behavior here.
+                if (
+                  polygonId &&
+                  isDCTTRef.current &&
+                  String(dcttSubModeRef.current || 'termination') !== 'testing' &&
+                  dcttSelectionModeRef.current === 'termination_panel'
+                ) {
+                  const prev = dcttGetPanelState(polygonId);
+                  const next = { left: DCTT_PANEL_STATES.TERMINATED, right: DCTT_PANEL_STATES.TERMINATED };
+                  setDcttPanelStates((s) => ({ ...(s || {}), [polygonId]: next }));
+                  dcttPushHistory([{ id: polygonId, prev, next }]);
+                  return;
+                }
                 if (polygonId) {
                   // HISTORY EDITING MODE: If a history record is selected, toggle polygon in editing set
                   const currentHistoryRecordId = window.__historySelectedRecordId;
@@ -9214,7 +10643,7 @@ export default function BaseModule({
                 underline: isLVTT ? true : undefined,
                 underlineColor: isLVTT ? textColor : undefined,
                 underlineWidthFactor: isLVTT ? 1 : undefined,
-                interactive: isLV || isLVTT || isMC4,
+                interactive: isLV || isLVTT || isMC4 || isDCTT,
                 radius
               });
 
@@ -9239,6 +10668,37 @@ export default function BaseModule({
                   const x = oe?.clientX ?? 0;
                   const y = oe?.clientY ?? 0;
                   setMc4InvPopup({
+                    invId: displayId,
+                    invIdNorm: invNorm2,
+                    draft: stored,
+                    max,
+                    x,
+                    y,
+                  });
+                });
+              }
+
+              // DCTT: inverter click popup in Cable Termination Inv. Side mode
+              if (isDCTT) {
+                label.on('click', (e) => {
+                  try {
+                    if (e?.originalEvent) {
+                      L.DomEvent.stopPropagation(e.originalEvent);
+                      L.DomEvent.preventDefault(e.originalEvent);
+                    }
+                  } catch (_e) {
+                    void _e;
+                  }
+                  const mode = String(dcttSelectionModeRef.current || 'termination_panel');
+                  if (mode !== 'termination_inv' && mode !== 'termination_panel') return;
+
+                  const invNorm2 = normalizeId(displayId);
+                  const max = Math.max(0, Number(dcttInvMaxByInvRef.current?.[invNorm2] ?? 0) || 0);
+                  const stored = Math.max(0, Math.min(max > 0 ? max : 999999, Number(dcttInvTerminationByInvRef.current?.[invNorm2] ?? 0) || 0));
+                  const oe = e?.originalEvent;
+                  const x = oe?.clientX ?? 0;
+                  const y = oe?.clientY ?? 0;
+                  setDcttInvPopup({
                     invId: displayId,
                     invIdNorm: invNorm2,
                     draft: stored,
@@ -9330,6 +10790,11 @@ export default function BaseModule({
                   raw,
                   displayId,
                 };
+              }
+
+              // DCTT: store label reference for color updates when termination is complete
+              if (isDCTT) {
+                dcttInvLabelByIdRef.current[invIdNorm] = label;
               }
 
               lvInvLabelByIdRef.current[invIdNorm] = label;
@@ -10616,6 +12081,12 @@ export default function BaseModule({
     
     const onMouseMove = (e) => {
       if (!draggingRef.current) return;
+
+      // DCTT: In DC_TESTING sub-mode we don't show the selection rectangle.
+      // (Tables should not be selectable; only string_id text click opens popup.)
+      if (isDCTT && !noteMode && String(dcttSubModeRef.current || 'termination') === 'testing') {
+        return;
+      }
       
       // Check if moved enough to be a drag
       const dx = e.clientX - draggingRef.current.startPoint.x;
@@ -10997,9 +12468,9 @@ export default function BaseModule({
 
             // MVF segment selections are mapped into trench PARTs now,
             // so partial erase/select via box works automatically (no separate segment-route unselect needed).
-          } else if (isMC4) {
-            // MC4 MODE: Box advance/reset panel-end states (both ends)
-            const ids = [];
+          } else if (isMC4 || (isDCTT && String(dcttSubModeRef.current || 'termination') !== 'testing')) {
+            // MC4 / DCTT: Box advance/reset panel states
+            let ids = [];
             const panels = polygonById.current || {};
             const map = mapRef.current;
 
@@ -11110,39 +12581,57 @@ export default function BaseModule({
               }
             });
             if (ids.length > 0) {
-              // Calculate next state based on current mode (using ref to get latest value)
-              const currentMode = mc4SelectionModeRef.current; // null | 'mc4' | 'termination_panel' | 'termination_inv'
+              const isDcttPanel = isDCTT;
+              const currentMode = isDcttPanel ? dcttSelectionModeRef.current : mc4SelectionModeRef.current; // null | 'mc4' | 'termination_panel' | 'termination_inv'
+              const showToast = isDcttPanel ? showDcttToast : showMc4Toast;
+              const getState = isDcttPanel ? dcttGetPanelState : mc4GetPanelState;
+              const setStates = isDcttPanel ? setDcttPanelStates : setMc4PanelStates;
+              const pushHistory = isDcttPanel ? dcttPushHistory : mc4PushHistory;
+
+              // DCTT lock: submitted tables cannot be erased via box right-click.
+              if (isDcttPanel && isRightClick) {
+                const committed = dcttCommittedPanelIdsRef.current || new Set();
+                ids = ids.filter((pid) => !committed.has(String(pid)));
+                if (ids.length === 0) {
+                  showDcttToast('Submitted tables can only be removed from History.');
+                }
+              }
+
               if (!currentMode) {
                 // Show warning, but DO NOT return early; onMouseUp must continue so the selection box closes.
-                showMc4Toast('Please select a mode above.');
+                showToast('Please select a mode above.');
               } else {
-                // Inv-side termination does not edit panel ends (left click); allow right-click erase.
+                // Inv-side termination does not edit panels via box select; allow right-click erase.
                 if (!isRightClick && currentMode === 'termination_inv') {
                   // no-op
                 } else {
-                  const advanceState = (cur) => {
-                    if (currentMode === 'mc4') {
-                      // MC4 mode: set to MC4 (blue), but never downgrade TERMINATED (green)
-                      if (cur === 'terminated') return 'terminated';
-                      return 'mc4';
-                    } else if (currentMode === 'termination_panel') {
-                      // Termination mode: ONLY MC4 (blue) -> TERMINATED (green)
-                      if (cur === 'mc4') return 'terminated';
-                      if (cur === 'terminated') return 'terminated';
-                      return cur;
-                    }
-                    return cur;
-                  };
                   const changes = ids.map((pid) => {
-                    const prev = mc4GetPanelState(pid);
+                    const prev = getState(pid);
                     const next = isRightClick
                       ? { left: null, right: null }
-                      : { left: advanceState(prev.left), right: advanceState(prev.right) };
+                      : (isDcttPanel
+                        ? { left: DCTT_PANEL_STATES.TERMINATED, right: DCTT_PANEL_STATES.TERMINATED }
+                        : (() => {
+                          const advanceState = (cur) => {
+                            if (currentMode === 'mc4') {
+                              // MC4 mode: set to MC4 (blue), but never downgrade TERMINATED (green)
+                              if (cur === 'terminated') return 'terminated';
+                              return 'mc4';
+                            } else if (currentMode === 'termination_panel') {
+                              // Termination mode: ONLY MC4 (blue) -> TERMINATED (green)
+                              if (cur === 'mc4') return 'terminated';
+                              if (cur === 'terminated') return 'terminated';
+                              return cur;
+                            }
+                            return cur;
+                          };
+                          return { left: advanceState(prev.left), right: advanceState(prev.right) };
+                        })());
                     return { id: pid, prev, next };
                   });
 
-                  // Warn if user is trying to terminate panels that are not MC4-installed (not blue)
-                  if (!isRightClick && currentMode === 'termination_panel') {
+                  // MC4-only: Warn if user is trying to terminate panels that are not MC4-installed (not blue)
+                  if (!isRightClick && !isDcttPanel && currentMode === 'termination_panel') {
                     let advanced = 0;
                     let blocked = 0;
                     changes.forEach((c) => {
@@ -11156,7 +12645,7 @@ export default function BaseModule({
                     if ((advanced === 0 && blocked > 0) || blocked > 0) showMc4Toast('Some tables were not MC4-installed yet');
                   }
 
-                  setMc4PanelStates((s) => {
+                  setStates((s) => {
                     const out = { ...(s || {}) };
                     changes.forEach((c) => {
                       if (!c?.id) return;
@@ -11165,7 +12654,7 @@ export default function BaseModule({
                     });
                     return out;
                   });
-                  mc4PushHistory(changes);
+                  pushHistory(changes);
                 }
               }
             }
@@ -11958,6 +13447,62 @@ export default function BaseModule({
         // SINGLE CLICK SELECTION MODE: Select individual items by clicking
         const clickPoint = map.latLngToLayerPoint(clickLatLng);
         const clickTolerance = 10; // pixels
+
+        // DCTT: DC_TESTING sub-mode uses string_id label clicks only (DCCT-style popup).
+        // Do NOT allow table selection here.
+        if (isDCTT && String(dcttSubModeRef.current || 'termination') === 'testing') {
+          try {
+            const pts = stringTextPointsRef.current || [];
+            let best = null;
+            let bestDist = Infinity;
+            const hitRadius = 120; // px (keeps it reliable even with canvas labels)
+            for (let i = 0; i < pts.length; i++) {
+              const p = pts[i];
+              if (!p) continue;
+              const ll = L.latLng(p.lat, p.lng);
+              const pt = map.latLngToLayerPoint(ll);
+              const dx = pt.x - clickPoint.x;
+              const dy = pt.y - clickPoint.y;
+              const d = Math.sqrt(dx * dx + dy * dy);
+              if (d < bestDist) {
+                bestDist = d;
+                best = p;
+              }
+            }
+            if (best && bestDist <= hitRadius) {
+              const rawText = String(best.text || '').trim();
+              const idNorm = String(best.stringId || dcttTestNormalizeId(rawText) || '');
+              if (idNorm) {
+                const rec = dcttTestRisoByIdRef.current?.[idNorm] || null;
+                const isInCsv = rec !== null;
+                const plus = rec?.plus != null ? String(rec.plus).trim() : '';
+                const minus = rec?.minus != null ? String(rec.minus).trim() : '';
+                const plusVal = plus || (isInCsv ? '999' : '0');
+                const minusVal = minus || (isInCsv ? '999' : '0');
+                const st = dcttTestNormalizeStatus(rec?.status || rec?.remarkRaw) || null;
+                const displayId = dcttTestFormatDisplayId(idNorm, rec?.originalId || rawText);
+
+                setDcttTestPopup((prev) => {
+                  if (prev && prev.idNorm === idNorm) return null;
+                  return {
+                    idNorm,
+                    displayId,
+                    draftPlus: plusVal,
+                    draftMinus: minusVal,
+                    draftStatus: st,
+                    x: e?.clientX ?? 0,
+                    y: e?.clientY ?? 0,
+                  };
+                });
+              }
+            }
+          } catch (_e) {
+            void _e;
+          }
+
+          draggingRef.current = null;
+          return;
+        }
 
         // PUNCH_LIST: if a polygon click handler already processed this click,
         // don't run the global fallback picker (avoids double-handling and hover glitches).
@@ -12913,7 +14458,7 @@ export default function BaseModule({
   useEffect(() => {
     if (!mapRef.current) return;
     fetchAllGeoJson();
-  }, [activeMode]);
+  }, [activeMode?.key, geojsonFilesOverride]);
 
   // LVIB: Update box styles when selection changes
   useEffect(() => {
@@ -13177,6 +14722,36 @@ export default function BaseModule({
     return { totalStrings, totalEnds, mc4Completed, terminatedCompleted };
   }, [isMC4, mc4PanelStates, mc4HistoryTick, mc4TotalStringsCsv]);
 
+  // DCTT counters (termination progress; same panel-end logic as MC4)
+  // DCTT only has termination modes (panel side + inv side), no MC4 install mode
+  const dcttCounts = useMemo(() => {
+    if (!isDCTT) return null;
+    // Spec override: totals must show 9517 (same as MC4)
+    const totalEnds = Math.max(0, Number(activeMode?.dcttTotalEnds ?? 9517) || 0);
+    const totalStrings =
+      typeof dcttTotalStringsCsv === 'number' && Number.isFinite(dcttTotalStringsCsv)
+        ? dcttTotalStringsCsv
+        : 0;
+
+    // Requested behavior: Panel-side counters should increment by 4 per table (masa) selection.
+    // Example: 10 tables selected -> Completed shows 40.
+    const terminatedTables = new Set();
+    const panels = polygonById.current || {};
+    Object.keys(dcttPanelStates || {}).forEach((id) => {
+      const st = dcttPanelStates[id] || { left: null, right: null };
+      if (st.left === DCTT_PANEL_STATES.TERMINATED || st.right === DCTT_PANEL_STATES.TERMINATED) {
+        const info = panels[id];
+        const key = String(info?.dedupeKey || id);
+        terminatedTables.add(key);
+      }
+    });
+
+    let terminatedCompleted = terminatedTables.size * 4;
+    terminatedCompleted = Math.min(terminatedCompleted, totalEnds);
+
+    return { totalStrings, totalEnds, terminatedCompleted };
+  }, [isDCTT, dcttPanelStates, dcttHistoryTick, dcttTotalStringsCsv]);
+
   const workSelectionCount = isLV 
     ? lvCompletedInvIds.size 
     : (isMVF 
@@ -13269,14 +14844,22 @@ export default function BaseModule({
     if (isMVFT) return mvftCompletedForSubmit;
     if (isPTEP) return ptepCompletedForSubmit;
     if (isMC4) {
-      const mode = String(mc4SelectionMode || mc4SelectionModeRef.current || 'mc4');
+      // MC4 only has mc4 install mode now (termination moved to DCTT)
+      const doneNow = mc4Counts?.mc4Completed || 0;
+      const submitted = mc4SubmittedCountsRef.current || { mc4: 0 };
+      const submittedNow = Number(submitted.mc4) || 0;
+      return Math.max(0, (Number(doneNow) || 0) - submittedNow);
+    }
+    if (isDCTT) {
+      // DCTT has termination modes (panel side + inv side)
+      const mode = String(dcttSelectionMode || dcttSelectionModeRef.current || 'termination_panel');
 
       const invDoneNow = (() => {
-        const byInv = mc4InvTerminationByInv || {};
+        const byInv = dcttInvTerminationByInv || {};
         let sum = 0;
         for (const [k, v] of Object.entries(byInv)) {
           const invNorm = normalizeId(k);
-          const max = Math.max(0, Number(mc4InvMaxByInvRef.current?.[invNorm] ?? 0) || 0);
+          const max = Math.max(0, Number(dcttInvMaxByInvRef.current?.[invNorm] ?? 0) || 0);
           const n = Math.max(0, Number(v) || 0);
           sum += max > 0 ? Math.min(max, n) : n;
         }
@@ -13284,17 +14867,13 @@ export default function BaseModule({
       })();
 
       const doneNow = mode === 'termination_panel'
-        ? (mc4Counts?.terminatedCompleted || 0)
-        : mode === 'termination_inv'
-          ? invDoneNow
-          : (mc4Counts?.mc4Completed || 0);
+        ? (dcttCounts?.terminatedCompleted || 0)
+        : invDoneNow;
 
-      const submitted = mc4SubmittedCountsRef.current || { mc4: 0, termination_panel: 0, termination_inv: 0 };
+      const submitted = dcttSubmittedCountsRef.current || { termination_panel: 0, termination_inv: 0 };
       const submittedNow = mode === 'termination_panel'
         ? (Number(submitted.termination_panel) || 0)
-        : mode === 'termination_inv'
-          ? (Number(submitted.termination_inv) || 0)
-          : (Number(submitted.mc4) || 0);
+        : (Number(submitted.termination_inv) || 0);
 
       return Math.max(0, (Number(doneNow) || 0) - submittedNow);
     }
@@ -13345,7 +14924,7 @@ export default function BaseModule({
     }
     
     return newPolygonIds.size;
-  }, [isMVF, isDATP, isMVFT, isPTEP, isMC4, isLV, isDC, selectedPolygons, committedPolygons, mvfSelectedCableMeters, datpCompletedForSubmit, mvftCompletedForSubmit, ptepCompletedForSubmit, mc4Counts, mc4InvTerminationByInv, lengthData, lvCompletedInvIds, lvCommittedInvIds, mc4SelectionMode]);
+  }, [isMVF, isDATP, isMVFT, isPTEP, isMC4, isDCTT, isLV, isDC, selectedPolygons, committedPolygons, mvfSelectedCableMeters, datpCompletedForSubmit, mvftCompletedForSubmit, ptepCompletedForSubmit, mc4Counts, dcttCounts, dcttInvTerminationByInv, dcttSelectionMode, lengthData, lvCompletedInvIds, lvCommittedInvIds]);
 
   const workAmount = isMVF
     ? mvfSelectedCableMeters
@@ -13372,65 +14951,136 @@ export default function BaseModule({
     (isMC4 && mc4Counts ? (
       <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start">
         {(() => {
-          const total = Number(mc4Counts.totalEnds) || 0; // Spec override (9517) is applied upstream.
+          const total = Number(mc4Counts.totalEnds) || 0;
           const mc4Done = Number(mc4Counts.mc4Completed) || 0;
-          const panelTermDone = Number(mc4Counts.terminatedCompleted) || 0;
+          const mc4Rem = Math.max(0, total - mc4Done);
+          const mc4Pct = total > 0 ? ((mc4Done / total) * 100).toFixed(1) : '0.0';
+
+          return (
+            <div className="min-w-[620px] border-2 border-slate-700 bg-slate-900/40 py-3 px-3">
+              <div className="flex flex-col gap-2">
+                {/* MC4 Install row - single mode (always active) */}
+                <div className="grid grid-cols-[170px_repeat(3,max-content)] items-center gap-x-3 gap-y-2">
+                  <div className="text-xs font-bold text-blue-300">MC4 Install:</div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_LABEL}>Total</span>
+                      <span className={COUNTER_VALUE}>{total}</span>
+                    </div>
+                  </div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className="text-xs font-bold text-blue-400">Done</span>
+                      <span className="text-xs font-bold text-blue-400 tabular-nums">{mc4Done} ({mc4Pct}%)</span>
+                    </div>
+                  </div>
+                  <div className={COUNTER_BOX}>
+                    <div className={COUNTER_GRID}>
+                      <span className={COUNTER_LABEL}>Remaining</span>
+                      <span className={COUNTER_VALUE}>{mc4Rem}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+    ) : null) ||
+    (isDCTT && dcttCounts ? (
+      <div className="flex min-w-0 items-stretch gap-3 overflow-x-auto pb-1 justify-self-start">
+        {(() => {
+          const total = Number(dcttCounts.totalEnds) || 0;
+          const panelTermDone = Number(dcttCounts.terminatedCompleted) || 0;
 
           // Inv-side termination: completed count comes from inverter popup values.
           const invTotal = 9517;
           const invDone = (() => {
-            const byInv = mc4InvTerminationByInv || {};
+            const byInv = dcttInvTerminationByInv || {};
             let sum = 0;
             for (const [k, v] of Object.entries(byInv)) {
               const invNorm = normalizeId(k);
-              const max = Math.max(0, Number(mc4InvMaxByInvRef.current?.[invNorm] ?? 0) || 0);
+              const max = Math.max(0, Number(dcttInvMaxByInvRef.current?.[invNorm] ?? 0) || 0);
               const n = Math.max(0, Number(v) || 0);
               sum += max > 0 ? Math.min(max, n) : n;
             }
             return sum;
           })();
 
-          const mc4Rem = Math.max(0, total - mc4Done);
           const panelTermRem = Math.max(0, total - panelTermDone);
           const invRem = Math.max(0, invTotal - invDone);
 
-          const mc4Pct = total > 0 ? ((mc4Done / total) * 100).toFixed(1) : '0.0';
           const panelTermPct = total > 0 ? ((panelTermDone / total) * 100).toFixed(1) : '0.0';
           const invPct = invTotal > 0 ? ((invDone / invTotal) * 100).toFixed(1) : '0.0';
 
-          const mode = String(mc4SelectionMode || 'mc4');
-          const isMc4Mode = mode === 'mc4';
+          const mainMode = String(dcttSubMode || 'termination');
+          const isTermMode = mainMode === 'termination';
+          const isTestMode = mainMode === 'testing';
+          
+          const mode = String(dcttSelectionMode || 'termination_panel');
           const isPanelTermMode = mode === 'termination_panel';
           const isInvTermMode = mode === 'termination_inv';
-          const isTermMode = isPanelTermMode || isInvTermMode;
 
-          const mc4DoneLabelCls = isMc4Mode ? 'text-xs font-bold text-blue-400' : 'text-xs font-bold text-slate-500';
-          const mc4DoneValueCls = isMc4Mode ? 'text-xs font-bold text-blue-400 tabular-nums' : 'text-xs font-bold text-slate-500 tabular-nums';
-
-          // In LVTT termination mode, both rows are visually active. Match that here.
           const panelTermDoneLabelCls = isTermMode ? COUNTER_DONE_LABEL : 'text-xs font-bold text-slate-500';
           const panelTermDoneValueCls = isTermMode ? COUNTER_DONE_VALUE : 'text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap';
 
           const invDoneLabelCls = isTermMode ? 'text-xs font-bold text-amber-400' : 'text-xs font-bold text-slate-500';
           const invDoneValueCls = isTermMode ? 'text-xs font-bold text-amber-400 tabular-nums whitespace-nowrap' : 'text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap';
+
+          // DC Testing counters (DCCT-style)
+          // - Passed: CSV remark PASSED
+          // - Failed: CSV remark FAILED
+          // - Not Tested: IDs that exist on the map (string_text) but are missing in CSV entirely
+          const csvRecs = dcttTestRisoByIdRef.current || {};
+          const mapIds = dcttTestMapIds || new Set();
+
+          // Total should reflect what's on the map (string_text), not what's in CSV.
+          const testTotal = mapIds.size;
+
+          let testPassed = 0;
+          let testFailed = 0;
+          let testNotTested = 0;
+
+          mapIds.forEach((id) => {
+            const rec = csvRecs?.[id] || null;
+            if (!rec) {
+              testNotTested++;
+              return;
+            }
+            const st = dcttTestNormalizeStatus(rec?.status || rec?.remarkRaw) || null;
+            if (st === 'passed') testPassed++;
+            else if (st === 'failed') testFailed++;
+          });
+
+          const testPassedPct = testTotal > 0 ? ((testPassed / testTotal) * 100).toFixed(1) : '0.0';
+
+          const activeFilter = isTestMode ? dcttTestFilter : null;
+          const filterActiveRing = 'ring-2 ring-offset-1 ring-offset-slate-900';
+
+          const passLabelCls = isTestMode ? 'text-xs font-bold text-emerald-400' : 'text-xs font-bold text-slate-500';
+          const passValueCls = isTestMode ? 'text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap' : 'text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap';
+          const failLabelCls = isTestMode ? 'text-xs font-bold text-red-400' : 'text-xs font-bold text-slate-500';
+          const failValueCls = isTestMode ? 'text-xs font-bold text-red-400 tabular-nums whitespace-nowrap' : 'text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap';
+
           return (
-            <div className="min-w-[920px] border-2 border-slate-700 bg-slate-900/40 py-3 px-3">
-              <div className="flex flex-col gap-2">
+            <div className="min-w-[820px] border-2 border-slate-700 bg-slate-900/40 py-2 px-3">
+              <div className="flex flex-col gap-1">
                 {/* Cable Termination (Panel Side + Inv. Side) with a single selector centered between the two rows */}
-                <div className="grid grid-cols-[24px_170px_repeat(3,max-content)] items-center gap-x-3 gap-y-2">
+                <div className="grid grid-cols-[24px_200px_repeat(3,max-content)] items-center gap-x-2 gap-y-1">
                   <button
                     type="button"
                     onClick={() => {
-                      if (isTermMode) return;
-                      const next = mc4LastTerminationModeRef.current || 'termination_panel';
-                      setMc4SelectionMode(next);
+                      if (!isTermMode) {
+                        setDcttSubMode('termination');
+                        setDcttTestFilter(null);
+                      }
                     }}
                     className={`row-span-2 w-5 h-5 border-2 rounded flex items-center justify-center transition-colors justify-self-start self-center ${
                       isTermMode
                         ? 'border-emerald-500 bg-emerald-500 text-white'
                         : 'border-slate-500 bg-slate-800 hover:border-emerald-400'
                     }`}
-                    title="Select Cable Termination"
+                    title="Select Cable Termination Mode"
                     aria-pressed={isTermMode}
                   >
                     {isTermMode && <span className="text-xs font-bold">✓</span>}
@@ -13438,27 +15088,28 @@ export default function BaseModule({
 
                   {/* Panel Side row */}
                   <div
-                    className={`text-xs font-bold cursor-pointer ${isTermMode ? 'text-emerald-300' : 'text-emerald-400/60'}`}
+                    className={`text-[11px] font-bold cursor-pointer ${isTermMode && isPanelTermMode ? 'text-emerald-300' : isTermMode ? 'text-emerald-400/60' : 'text-slate-500'}`}
                     onClick={() => {
-                      if (!isPanelTermMode) setMc4SelectionMode('termination_panel');
+                      if (!isTermMode) setDcttSubMode('termination');
+                      if (!isPanelTermMode) setDcttSelectionMode('termination_panel');
                     }}
                     title="Focus Panel Side termination"
                   >
                     Cable Termination Panel Side:
                   </div>
-                  <div className={COUNTER_BOX} onClick={() => { if (!isPanelTermMode) setMc4SelectionMode('termination_panel'); }} role="button" tabIndex={0}>
+                  <div className={COUNTER_BOX} onClick={() => { if (!isTermMode) setDcttSubMode('termination'); if (!isPanelTermMode) setDcttSelectionMode('termination_panel'); }} role="button" tabIndex={0}>
                     <div className={COUNTER_GRID}>
                       <span className={COUNTER_LABEL}>Total</span>
                       <span className={COUNTER_VALUE}>{total}</span>
                     </div>
                   </div>
-                  <div className={COUNTER_BOX} onClick={() => { if (!isPanelTermMode) setMc4SelectionMode('termination_panel'); }} role="button" tabIndex={0}>
+                  <div className={COUNTER_BOX} onClick={() => { if (!isTermMode) setDcttSubMode('termination'); if (!isPanelTermMode) setDcttSelectionMode('termination_panel'); }} role="button" tabIndex={0}>
                     <div className={COUNTER_GRID}>
                       <span className={panelTermDoneLabelCls}>Done</span>
                       <span className={panelTermDoneValueCls}>{panelTermDone} ({panelTermPct}%)</span>
                     </div>
                   </div>
-                  <div className={COUNTER_BOX} onClick={() => { if (!isPanelTermMode) setMc4SelectionMode('termination_panel'); }} role="button" tabIndex={0}>
+                  <div className={COUNTER_BOX} onClick={() => { if (!isTermMode) setDcttSubMode('termination'); if (!isPanelTermMode) setDcttSelectionMode('termination_panel'); }} role="button" tabIndex={0}>
                     <div className={COUNTER_GRID}>
                       <span className={COUNTER_LABEL}>Remaining</span>
                       <span className={COUNTER_VALUE}>{panelTermRem}</span>
@@ -13467,27 +15118,28 @@ export default function BaseModule({
 
                   {/* Inv. Side row */}
                   <div
-                    className={`text-xs font-bold cursor-pointer ${isTermMode ? 'text-amber-300' : 'text-amber-400/60'}`}
+                    className={`text-[11px] font-bold cursor-pointer ${isTermMode && isInvTermMode ? 'text-amber-300' : isTermMode ? 'text-amber-400/60' : 'text-slate-500'}`}
                     onClick={() => {
-                      if (!isInvTermMode) setMc4SelectionMode('termination_inv');
+                      if (!isTermMode) setDcttSubMode('termination');
+                      if (!isInvTermMode) setDcttSelectionMode('termination_inv');
                     }}
                     title="Focus Inv. Side termination"
                   >
                     Cable Termination Inv. Side:
                   </div>
-                  <div className={COUNTER_BOX} onClick={() => { if (!isInvTermMode) setMc4SelectionMode('termination_inv'); }} role="button" tabIndex={0}>
+                  <div className={COUNTER_BOX} onClick={() => { if (!isTermMode) setDcttSubMode('termination'); if (!isInvTermMode) setDcttSelectionMode('termination_inv'); }} role="button" tabIndex={0}>
                     <div className={COUNTER_GRID}>
                       <span className={COUNTER_LABEL}>Total</span>
                       <span className={COUNTER_VALUE}>{invTotal}</span>
                     </div>
                   </div>
-                  <div className={COUNTER_BOX} onClick={() => { if (!isInvTermMode) setMc4SelectionMode('termination_inv'); }} role="button" tabIndex={0}>
+                  <div className={COUNTER_BOX} onClick={() => { if (!isTermMode) setDcttSubMode('termination'); if (!isInvTermMode) setDcttSelectionMode('termination_inv'); }} role="button" tabIndex={0}>
                     <div className={COUNTER_GRID}>
                       <span className={invDoneLabelCls}>Done</span>
                       <span className={invDoneValueCls}>{invDone} ({invPct}%)</span>
                     </div>
                   </div>
-                  <div className={COUNTER_BOX} onClick={() => { if (!isInvTermMode) setMc4SelectionMode('termination_inv'); }} role="button" tabIndex={0}>
+                  <div className={COUNTER_BOX} onClick={() => { if (!isTermMode) setDcttSubMode('termination'); if (!isInvTermMode) setDcttSelectionMode('termination_inv'); }} role="button" tabIndex={0}>
                     <div className={COUNTER_GRID}>
                       <span className={COUNTER_LABEL}>Remaining</span>
                       <span className={COUNTER_VALUE}>{invRem}</span>
@@ -13495,45 +15147,121 @@ export default function BaseModule({
                   </div>
                 </div>
 
-                {/* MC4 Install row with checkbox */}
+                {/* DC Testing row */}
                 <div
-                  className="grid grid-cols-[24px_170px_repeat(3,max-content)] items-center gap-x-3 gap-y-2 cursor-pointer"
+                  className="grid grid-cols-[24px_200px_repeat(4,max-content)] items-center gap-x-2 gap-y-1 cursor-pointer"
                   onClick={() => {
-                    if (!isMc4Mode) setMc4SelectionMode('mc4');
+                    if (!isTestMode) {
+                      setDcttSubMode('testing');
+                    }
                   }}
                 >
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (!isMc4Mode) setMc4SelectionMode('mc4');
+                      if (!isTestMode) {
+                        setDcttSubMode('testing');
+                      }
                     }}
                     className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
-                      isMc4Mode
-                        ? 'border-blue-500 bg-blue-500 text-white'
-                        : 'border-slate-500 bg-slate-800 hover:border-blue-400'
+                      isTestMode
+                        ? 'border-sky-500 bg-sky-500 text-white'
+                        : 'border-slate-500 bg-slate-800 hover:border-sky-400'
                     }`}
-                    title="Select MC4 Installation mode"
+                    title="Select DC_TESTING"
+                    aria-pressed={isTestMode}
                   >
-                    {isMc4Mode && <span className="text-xs font-bold">✓</span>}
+                    {isTestMode && <span className="text-xs font-bold">✓</span>}
                   </button>
-                  <div className={`text-xs font-bold ${isMc4Mode ? 'text-blue-300' : 'text-blue-400/60'}`}>MC4 Install:</div>
+                  <div className={`text-[11px] font-bold ${isTestMode ? 'text-sky-300' : 'text-sky-400/60'}`}>DC_TESTING:</div>
                   <div className={COUNTER_BOX}>
                     <div className={COUNTER_GRID}>
                       <span className={COUNTER_LABEL}>Total</span>
-                      <span className={COUNTER_VALUE}>{total}</span>
+                      <span className={COUNTER_VALUE}>{testTotal}</span>
                     </div>
                   </div>
-                  <div className={COUNTER_BOX}>
+                  {/* Passed (clickable filter) */}
+                  <div
+                    className={`${COUNTER_BOX} transition-all ${
+                      activeFilter === 'passed'
+                        ? `border-emerald-500 bg-emerald-950/40 ${filterActiveRing} ring-emerald-500`
+                        : 'hover:border-emerald-600'
+                    }`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isTestMode) setDcttSubMode('testing');
+                      setDcttTestFilter(activeFilter === 'passed' ? null : 'passed');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return;
+                      e.stopPropagation();
+                      if (!isTestMode) setDcttSubMode('testing');
+                      setDcttTestFilter(activeFilter === 'passed' ? null : 'passed');
+                    }}
+                    aria-pressed={activeFilter === 'passed'}
+                  >
                     <div className={COUNTER_GRID}>
-                      <span className={mc4DoneLabelCls}>Done</span>
-                      <span className={mc4DoneValueCls}>{mc4Done} ({mc4Pct}%)</span>
+                      <span className={`${passLabelCls} underline decoration-1 underline-offset-2 hover:opacity-80 transition-opacity`}>Passed</span>
+                      <span className={passValueCls}>{testPassed} ({testPassedPct}%)</span>
                     </div>
                   </div>
-                  <div className={COUNTER_BOX}>
+
+                  {/* Failed (clickable filter) */}
+                  <div
+                    className={`${COUNTER_BOX} transition-all ${
+                      activeFilter === 'failed'
+                        ? `border-red-500 bg-red-950/40 ${filterActiveRing} ring-red-500`
+                        : 'hover:border-red-600'
+                    }`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isTestMode) setDcttSubMode('testing');
+                      setDcttTestFilter(activeFilter === 'failed' ? null : 'failed');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return;
+                      e.stopPropagation();
+                      if (!isTestMode) setDcttSubMode('testing');
+                      setDcttTestFilter(activeFilter === 'failed' ? null : 'failed');
+                    }}
+                    aria-pressed={activeFilter === 'failed'}
+                  >
                     <div className={COUNTER_GRID}>
-                      <span className={COUNTER_LABEL}>Remaining</span>
-                      <span className={COUNTER_VALUE}>{mc4Rem}</span>
+                      <span className={`${failLabelCls} underline decoration-1 underline-offset-2 hover:opacity-80 transition-opacity`}>Failed</span>
+                      <span className={failValueCls}>{testFailed}</span>
+                    </div>
+                  </div>
+
+                  {/* Not Tested (clickable filter) */}
+                  <div
+                    className={`${COUNTER_BOX} transition-all ${
+                      activeFilter === 'not_tested'
+                        ? `border-white bg-slate-700/40 ${filterActiveRing} ring-white`
+                        : 'hover:border-slate-500'
+                    }`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isTestMode) setDcttSubMode('testing');
+                      setDcttTestFilter(activeFilter === 'not_tested' ? null : 'not_tested');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return;
+                      e.stopPropagation();
+                      if (!isTestMode) setDcttSubMode('testing');
+                      setDcttTestFilter(activeFilter === 'not_tested' ? null : 'not_tested');
+                    }}
+                    aria-pressed={activeFilter === 'not_tested'}
+                  >
+                    <div className={COUNTER_GRID}>
+                      <span className={`${isTestMode ? 'text-xs font-bold text-white' : 'text-xs font-bold text-slate-500'} underline decoration-1 underline-offset-2 hover:opacity-80 transition-opacity`}>Not Tested</span>
+                      <span className={isTestMode ? 'text-xs font-bold text-white tabular-nums whitespace-nowrap' : 'text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap'}>{testNotTested}</span>
                     </div>
                   </div>
                 </div>
@@ -14155,7 +15883,7 @@ export default function BaseModule({
               <div 
                 className={`min-w-[140px] border-2 py-3 px-3 transition-all ${
                   activeFilter === 'not_tested' 
-                    ? 'border-slate-400 bg-slate-700/40 ' + filterActiveRing + ' ring-slate-400' 
+                    ? 'border-white bg-slate-700/40 ' + filterActiveRing + ' ring-white' 
                     : 'border-slate-700 bg-slate-800 hover:border-slate-500'
                 }`}
                 role="button"
@@ -14166,7 +15894,7 @@ export default function BaseModule({
               >
                 <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
                   <span 
-                    className={`text-xs font-bold text-slate-400 ${filterLinkBase}`}
+                    className={`text-xs font-bold text-white ${filterLinkBase}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       setDcctFilter(activeFilter === 'not_tested' ? null : 'not_tested');
@@ -14176,7 +15904,7 @@ export default function BaseModule({
                   >
                     Not Tested
                   </span>
-                  <span className="text-xs font-bold text-slate-400 tabular-nums">{notTestedCount}</span>
+                  <span className="text-xs font-bold text-white tabular-nums">{notTestedCount}</span>
                 </div>
               </div>
 
@@ -14778,34 +16506,47 @@ export default function BaseModule({
                       lvttSubmitTestResults();
                       return;
                     }
+                    if (isDCTT && String(dcttSubMode || 'termination') === 'testing') {
+                      dcttTestSubmitResults();
+                      return;
+                    }
                     setModalOpen(true);
                   }}
                   disabled={
-                    noteMode ||
-                    (isMVT && String(mvtSubMode || 'termination') === 'testing'
-                      ? !mvtTestResultsDirty
-                      : false) ||
-                    (isLVTT && String(lvttSubMode || 'termination') === 'testing'
-                      ? !lvttTestResultsDirty
-                      : false) ||
-                    (isMC4 && !mc4SelectionMode) ||
-                    (isMVF
-                      ? (mvfSelectedTrenchParts.length === 0 && mvfActiveSegmentKeys.size === 0)
-                      : (isDATP
-                      ? datpCompletedForSubmit === 0
-                        : (isMVFT
-                        ? mvftCompletedForSubmit === 0
-                          : isPTEP
-                            ? (ptepSubMode === 'tabletotable'
-                              ? ptepCompletedTableToTable.size === 0
-                            : ptepCompletedParameterMeters === 0)
-                          : isLVTT
-                          ? (String(lvttSubMode || 'termination') === 'testing' ? false : lvttCompletedForSubmit === 0)
-                            : isMVT
-                              ? (String(mvtSubMode || 'termination') === 'testing' ? false : mvtCompletedForSubmit === 0)
-                              : isLV
-                                ? workAmount === 0
-                                : workSelectionCount === 0)))
+                    (isDCTT && String(dcttSubMode || 'termination') === 'testing')
+                      ? (noteMode || !dcttTestResultsDirty)
+                      : (
+                        noteMode ||
+                        (isMVT && String(mvtSubMode || 'termination') === 'testing'
+                          ? !mvtTestResultsDirty
+                          : false) ||
+                        (isLVTT && String(lvttSubMode || 'termination') === 'testing'
+                          ? !lvttTestResultsDirty
+                          : false) ||
+                        (isMC4 && !mc4SelectionMode) ||
+                        (isDCTT && String(dcttSubMode || 'termination') !== 'testing' && !dcttSelectionMode) ||
+                        (isDCTT && String(dcttSubMode || 'termination') !== 'testing'
+                          ? (dcttSelectionMode === 'termination_panel'
+                            ? (dcttCounts?.terminatedCompleted || 0) === 0
+                            : Object.keys(dcttInvTerminationByInv || {}).filter((k) => Number(dcttInvTerminationByInv[k]) > 0).length === 0)
+                          : (isMVF
+                            ? (mvfSelectedTrenchParts.length === 0 && mvfActiveSegmentKeys.size === 0)
+                            : (isDATP
+                              ? datpCompletedForSubmit === 0
+                              : (isMVFT
+                                ? mvftCompletedForSubmit === 0
+                                : isPTEP
+                                  ? (ptepSubMode === 'tabletotable'
+                                    ? ptepCompletedTableToTable.size === 0
+                                    : ptepCompletedParameterMeters === 0)
+                                  : isLVTT
+                                    ? (String(lvttSubMode || 'termination') === 'testing' ? false : lvttCompletedForSubmit === 0)
+                                    : isMVT
+                                      ? (String(mvtSubMode || 'termination') === 'testing' ? false : mvtCompletedForSubmit === 0)
+                                      : isLV
+                                        ? workAmount === 0
+                                        : workSelectionCount === 0))))
+                      )
                   }
                   className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
                   title={
@@ -14813,16 +16554,20 @@ export default function BaseModule({
                       ? (mvtTestResultsDirty ? 'Submit (save) MV test results' : 'No changes to submit')
                       : (isLVTT && String(lvttSubMode || 'termination') === 'testing'
                         ? (lvttTestResultsDirty ? 'Submit (save) LV test results' : 'No changes to submit')
-                        : (isMC4 && !mc4SelectionMode
-                          ? 'Select MC4 Install / Cable Termination Panel Side / Cable Termination Inv. Side first'
-                          : 'Submit Work'))
+                        : (isDCTT && String(dcttSubMode || 'termination') === 'testing'
+                          ? (dcttTestResultsDirty ? 'Submit (save) DC test results' : 'No changes to submit')
+                          : (isMC4 && !mc4SelectionMode
+                            ? 'Select MC4 Install / Cable Termination Panel Side / Cable Termination Inv. Side first'
+                            : 'Submit Work')))
                   }
                   aria-label={
                     isMVT && String(mvtSubMode || 'termination') === 'testing'
                       ? 'Submit Test Results'
                       : (isLVTT && String(lvttSubMode || 'termination') === 'testing'
                         ? 'Submit Test Results'
-                        : 'Submit Work')
+                        : (isDCTT && String(dcttSubMode || 'termination') === 'testing'
+                          ? 'Submit Test Results'
+                          : 'Submit Work'))
                   }
                 >
                   Submit
@@ -14863,6 +16608,49 @@ export default function BaseModule({
                       aria-label="Export Test Results"
                     >
                       Export Test Results
+                    </button>
+                  </>
+                ) : (isDCTT && String(dcttSubMode || 'termination') === 'testing') ? (
+                  <>
+                    <input
+                      ref={dcttTestImportFileInputRef}
+                      type="file"
+                      accept=".csv"
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const file = e.target?.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            const text = String(reader.result || '');
+                            dcttTestImportFromText(text, 'import');
+                          };
+                          reader.readAsText(file);
+                        }
+                        if (e.target) e.target.value = '';
+                      }}
+                    />
+                    <button
+                      onClick={() => dcttTestImportFileInputRef.current?.click()}
+                      className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                      title="Import Test Results (CSV)"
+                      aria-label="Import Test Results"
+                    >
+                      <span className="flex flex-col items-center leading-[1.05]">
+                        <span>Import</span>
+                        <span>Test Results</span>
+                      </span>
+                    </button>
+                    <button
+                      onClick={dcttTestExportCsv}
+                      className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                      title={dcttTestResultsDirty ? 'Submit first, then export' : 'Export submitted test results (CSV)'}
+                      aria-label="Export Test Results"
+                    >
+                      <span className="flex flex-col items-center leading-[1.05]">
+                        <span>Export</span>
+                        <span>Test Results</span>
+                      </span>
                     </button>
                   </>
                 ) : (isLVTT && String(lvttSubMode || 'termination') === 'testing') ? (
@@ -15174,10 +16962,6 @@ export default function BaseModule({
                     <span className="h-3 w-3 rounded-full border-2 border-blue-700 bg-blue-500" aria-hidden="true" />
                     <span className="text-[11px] font-bold uppercase tracking-wide text-blue-400">Completed MC4</span>
                   </div>
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="h-3 w-3 rounded-full border-2 border-emerald-700 bg-emerald-500" aria-hidden="true" />
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-400">Completed Termination</span>
-                  </div>
                 </>
               ) : isPTEP ? (
                 <>
@@ -15248,9 +17032,50 @@ export default function BaseModule({
                     <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">FAILED</span>
                   </div>
                   <div className="mt-2 flex items-center gap-2">
-                    <span className="h-3 w-3 border-2 border-slate-600 bg-slate-500" aria-hidden="true" />
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-slate-300">NOT TESTED</span>
+                    <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-white">NOT TESTED</span>
                   </div>
+                </>
+              ) : isDCTT ? (
+                <>
+                  {String(dcttSubMode || 'termination') === 'testing' ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-emerald-900 bg-emerald-500" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">PASSED</span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-red-900 bg-red-500" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">FAILED</span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-white">NOT TESTED</span>
+                      </div>
+                    </>
+                  ) : dcttSelectionMode === 'termination_panel' ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-white">Uncompleted</span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="h-3 w-3 rounded-full border-2 border-emerald-700 bg-emerald-500" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-400">Completed</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-white">Uncompleted</span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Completed</span>
+                      </div>
+                    </>
+                  )}
                 </>
               ) : (
                 <>
@@ -15278,8 +17103,8 @@ export default function BaseModule({
                             <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">FAILED</span>
                           </div>
                           <div className="mt-2 flex items-center gap-2">
-                            <span className="h-3 w-3 border-2 border-slate-600 bg-slate-500" aria-hidden="true" />
-                            <span className="text-[11px] font-bold uppercase tracking-wide text-slate-300">NOT TESTED</span>
+                            <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-white">NOT TESTED</span>
                           </div>
                         </>
                       )}
@@ -15919,7 +17744,131 @@ export default function BaseModule({
                 className={`h-7 w-[140px] border border-slate-700 bg-slate-900 px-2 text-[11px] font-black uppercase tracking-wide outline-none focus:border-amber-400 ${
                   dcctPopup.draftStatus === 'passed'
                     ? 'text-emerald-300'
-                    : (dcctPopup.draftStatus === 'failed' ? 'text-red-300' : 'text-slate-300')
+                    : (dcctPopup.draftStatus === 'failed' ? 'text-red-300' : 'text-white')
+                }`}
+                aria-label="Status"
+              >
+                <option value="">NOT TESTED</option>
+                <option value="PASSED">PASSED</option>
+                <option value="FAILED">FAILED</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* DCTT Testing: click-position popup (same as DCCT) */}
+      {isDCTT && dcttTestPopup ? (
+        <div
+          style={{
+            position: 'fixed',
+            left: Math.min(window.innerWidth - 300, Math.max(8, (dcttTestPopup.x || 0) + 10)),
+            top: Math.min(window.innerHeight - 240, Math.max(8, (dcttTestPopup.y || 0) + 10)),
+            zIndex: 1400,
+          }}
+          className="w-[280px] border-2 border-slate-700 bg-slate-900 px-3 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.55)]"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] font-black uppercase tracking-wide text-white">DC Cable Testing</div>
+              <div className="mt-1 text-sm font-extrabold text-slate-100 truncate">{dcttTestPopup.displayId || dcttTestPopup.idNorm}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDcttTestPopup(null)}
+              className="inline-flex h-6 w-6 items-center justify-center border-2 border-slate-700 bg-slate-800 text-xs font-black text-white hover:bg-slate-700"
+              title="Close"
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            {([
+              { key: 'plus', label: 'Ins. Res (+)' },
+              { key: 'minus', label: 'Ins. Res (-)' },
+            ]).map((row) => {
+              const val = row.key === 'plus' ? String(dcttTestPopup.draftPlus ?? '') : String(dcttTestPopup.draftMinus ?? '');
+              return (
+                <div key={row.key} className="flex items-center justify-between border border-slate-700 bg-slate-800 px-2 py-1.5">
+                  <span className="text-[11px] font-black uppercase tracking-wide text-slate-200">{row.label}</span>
+                  <input
+                    type="text"
+                    value={val}
+                    onChange={(e) => {
+                      const nextVal = e.target.value;
+                      setDcttTestPopup((p) => {
+                        if (!p) return p;
+                        return row.key === 'plus'
+                          ? { ...p, draftPlus: nextVal }
+                          : { ...p, draftMinus: nextVal };
+                      });
+                      const idNorm = String(dcttTestPopup.idNorm || '');
+                      if (!idNorm) return;
+                      const riso = dcttTestRisoByIdRef.current || {};
+                      const prev = riso[idNorm] || {};
+                      riso[idNorm] = {
+                        ...prev,
+                        plus: row.key === 'plus' ? nextVal : (prev.plus ?? '0'),
+                        minus: row.key === 'minus' ? nextVal : (prev.minus ?? '0'),
+                        status: dcttTestNormalizeStatus(prev.status || prev.remarkRaw) || null,
+                        remarkRaw: prev.remarkRaw || '',
+                        originalId: prev.originalId || dcttTestFormatDisplayId(idNorm, ''),
+                      };
+                      dcttTestRisoByIdRef.current = riso;
+                      setDcttTestResultsDirty(true);
+                      dcttTestResultsSubmittedRef.current = null;
+                      try { localStorage.removeItem('cew:dctt:test_results_submitted'); } catch (_e) { void _e; }
+                    }}
+                    className="h-7 w-[110px] border border-slate-700 bg-slate-900 px-2 text-[12px] font-extrabold tabular-nums text-slate-200 outline-none focus:border-amber-400"
+                    placeholder="Value"
+                  />
+                </div>
+              );
+            })}
+
+            <div className="flex items-center justify-between border border-slate-700 bg-slate-800 px-2 py-1.5">
+              <span className="text-[11px] font-black uppercase tracking-wide text-slate-200">Status</span>
+              <select
+                value={dcttTestPopup.draftStatus === 'passed' ? 'PASSED' : dcttTestPopup.draftStatus === 'failed' ? 'FAILED' : ''}
+                onChange={(e) => {
+                  const raw = String(e.target.value || '');
+                  const next = raw === 'PASSED' ? 'passed' : raw === 'FAILED' ? 'failed' : null;
+                  const idNorm = String(dcttTestPopup.idNorm || '');
+                  if (!idNorm) return;
+
+                  setDcttTestPopup((p) => (p ? { ...p, draftStatus: next } : p));
+
+                  const riso = dcttTestRisoByIdRef.current || {};
+                  const prev = riso[idNorm] || {};
+                  riso[idNorm] = {
+                    ...prev,
+                    plus: prev.plus ?? '0',
+                    minus: prev.minus ?? '0',
+                    status: next,
+                    remarkRaw: next === 'passed' ? 'PASSED' : next === 'failed' ? 'FAILED' : '',
+                    originalId: prev.originalId || dcttTestFormatDisplayId(idNorm, ''),
+                  };
+                  dcttTestRisoByIdRef.current = riso;
+
+                  setDcttTestData((prevTest) => {
+                    const out = { ...(prevTest || {}) };
+                    if (next === 'passed') out[idNorm] = 'passed';
+                    else if (next === 'failed') out[idNorm] = 'failed';
+                    else delete out[idNorm];
+                    return out;
+                  });
+
+                  setDcttTestResultsDirty(true);
+                  dcttTestResultsSubmittedRef.current = null;
+                  try { localStorage.removeItem('cew:dctt:test_results_submitted'); } catch (_e) { void _e; }
+                  setStringMatchVersion((v) => v + 1);
+                }}
+                className={`h-7 w-[140px] border border-slate-700 bg-slate-900 px-2 text-[11px] font-black uppercase tracking-wide outline-none focus:border-amber-400 ${
+                  dcttTestPopup.draftStatus === 'passed'
+                    ? 'text-emerald-300'
+                    : (dcttTestPopup.draftStatus === 'failed' ? 'text-red-300' : 'text-white')
                 }`}
                 aria-label="Status"
               >
@@ -16025,6 +17974,112 @@ export default function BaseModule({
                     onClick={() => {
                       applyDraft(draft);
                       setMc4InvPopup(null);
+                    }}
+                    className="flex-1 h-8 border-2 border-emerald-700 bg-emerald-950/30 text-[11px] font-extrabold uppercase tracking-wide text-emerald-200 hover:bg-emerald-950/40"
+                    title="Apply"
+                  >
+                    OK
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      ) : null}
+
+      {/* DCTT: inverter termination popup (click inv_id in Cable Termination Inv. Side mode) */}
+      {isDCTT && dcttInvPopup ? (
+        <div
+          style={{
+            position: 'fixed',
+            left: Math.min(window.innerWidth - 320, Math.max(8, (dcttInvPopup.x || 0) + 10)),
+            top: Math.min(window.innerHeight - 260, Math.max(8, (dcttInvPopup.y || 0) + 10)),
+            zIndex: 1400,
+          }}
+          className="w-[300px] border-2 border-slate-700 bg-slate-900 px-3 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.55)]"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] font-black uppercase tracking-wide text-white">DC Cable Termination</div>
+              <div className="mt-1 text-sm font-extrabold text-slate-100 truncate">{dcttInvPopup.invId || 'Inverter'}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDcttInvPopup(null)}
+              className="inline-flex h-6 w-6 items-center justify-center border-2 border-slate-700 bg-slate-800 text-xs font-black text-white hover:bg-slate-700"
+              title="Close"
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+
+          {(() => {
+            const invNorm = normalizeId(dcttInvPopup.invIdNorm || '');
+            const max = Math.max(0, Number(dcttInvPopup.max ?? 0) || 0);
+            const stored = Math.max(0, Number(dcttInvTerminationByInv?.[invNorm] ?? 0) || 0);
+            const draft = Math.max(0, Math.min(max > 0 ? max : 999999, Number(dcttInvPopup.draft ?? stored) || 0));
+            const complete = max > 0 && draft >= max;
+
+            const setDraft = (v) => setDcttInvPopup((p) => (p ? { ...p, draft: Math.max(0, Math.min(max > 0 ? max : 999999, Number(v) || 0)) } : p));
+
+            const applyDraft = (valueToApply) => {
+              if (!invNorm) return;
+              const nextVal = Math.max(0, Math.min(max > 0 ? max : 999999, Number(valueToApply ?? 0) || 0));
+              setDcttInvTerminationByInv((prev) => {
+                const base = prev && typeof prev === 'object' ? { ...prev } : {};
+                base[invNorm] = nextVal;
+                return base;
+              });
+            };
+
+            return (
+              <div className="mt-3">
+                <div className="border border-slate-700 bg-slate-800 px-2 py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black uppercase tracking-wide text-slate-300">Progress</span>
+                    <span className={`text-[11px] font-black uppercase tracking-wide ${complete ? 'text-emerald-300' : 'text-red-300'}`}>{draft}/{max || '—'}</span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-end gap-2">
+                    <input
+                      ref={dcttInvInputRef}
+                      type="number"
+                      min={0}
+                      max={max || undefined}
+                      step={1}
+                      value={draft}
+                      onFocus={(e) => {
+                        try { e.target.select?.(); } catch (_e) { void _e; }
+                      }}
+                      onClick={(e) => {
+                        try { e.target.select?.(); } catch (_e) { void _e; }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter') return;
+                        try { e.preventDefault(); e.stopPropagation(); } catch (_e) { void _e; }
+                        applyDraft(draft);
+                        setDcttInvPopup(null);
+                      }}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === '') return;
+                        const n = parseInt(v, 10);
+                        if (!Number.isFinite(n)) return;
+                        setDraft(n);
+                      }}
+                      className={`w-24 h-8 border-2 bg-slate-900 px-2 text-center text-[13px] font-black tabular-nums outline-none ${
+                        complete ? 'border-emerald-700 text-emerald-200' : 'border-red-700 text-red-200'
+                      }`}
+                      title={max > 0 ? `Enter 0..${max}` : 'Max not found in CSV'}
+                    />
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      applyDraft(draft);
+                      setDcttInvPopup(null);
                     }}
                     className="flex-1 h-8 border-2 border-emerald-700 bg-emerald-950/30 text-[11px] font-extrabold uppercase tracking-wide text-emerald-200 hover:bg-emerald-950/40"
                     title="Apply"
@@ -17342,6 +19397,66 @@ export default function BaseModule({
             return;
           }
 
+          // DCTT: Submit panel termination states or inv termination counts
+          if (isDCTT) {
+            const currentStates = dcttPanelStatesRef.current || {};
+            const mode = dcttSelectionModeRef.current || 'termination_panel';
+
+            const invKeys = Object.keys(dcttInvTerminationByInvRef.current || {}).filter((k) => {
+              const n = Number(dcttInvTerminationByInvRef.current?.[k] ?? 0) || 0;
+              return n > 0;
+            });
+
+            const panelKeys = Object.keys(currentStates).filter((k) => {
+              const st = currentStates[k];
+              return st?.left === DCTT_PANEL_STATES.TERMINATED || st?.right === DCTT_PANEL_STATES.TERMINATED;
+            });
+
+            // Persist per-day submitted totals so Submit Daily Work is not cumulative.
+            try {
+              const invDoneNow = (() => {
+                const byInv = dcttInvTerminationByInvRef.current || {};
+                let sum = 0;
+                for (const [k, v] of Object.entries(byInv)) {
+                  const invNorm = normalizeId(k);
+                  const max = Math.max(0, Number(dcttInvMaxByInvRef.current?.[invNorm] ?? 0) || 0);
+                  const n = Math.max(0, Number(v) || 0);
+                  sum += max > 0 ? Math.min(max, n) : n;
+                }
+                return sum;
+              })();
+
+              const doneNow = mode === 'termination_panel'
+                ? (Number(dcttCounts?.terminatedCompleted) || 0)
+                : invDoneNow;
+
+              const prev = dcttSubmittedCountsRef.current || { termination_panel: 0, termination_inv: 0 };
+              const key = mode === 'termination_panel' ? 'termination_panel' : 'termination_inv';
+              const nextSubmitted = { ...prev, [key]: doneNow };
+              localStorage.setItem(dcttSubmittedStorageKey, JSON.stringify(nextSubmitted));
+              setDcttSubmittedCounts(nextSubmitted);
+              dcttSubmittedCountsRef.current = nextSubmitted;
+            } catch (_e) {
+              void _e;
+            }
+
+            const recordWithSelections = {
+              ...record,
+              notes: notesOnDate,
+              selectedPolygonIds: mode === 'termination_inv' ? invKeys : panelKeys,
+            };
+            addRecord(recordWithSelections);
+
+            // Lock submitted panel selections against right-click erase immediately.
+            if (mode === 'termination_panel' && Array.isArray(panelKeys) && panelKeys.length > 0) {
+              const nextCommitted = new Set(dcttCommittedPanelIdsRef.current || []);
+              panelKeys.forEach((id) => nextCommitted.add(String(id)));
+              dcttCommittedPanelIdsRef.current = nextCommitted;
+            }
+            alert('Work submitted successfully!');
+            return;
+          }
+
           // DATP: Submit trench part selections
           if (isDATP) {
             const parts = datpSelectedTrenchPartsRef.current || [];
@@ -17558,6 +19673,8 @@ export default function BaseModule({
             : (mc4SelectionMode === 'termination_inv'
               ? 'MC4_TERM_INV'
               : 'MC4_INST'))
+          : (isDCTT
+            ? (dcttSelectionMode === 'termination_panel' ? 'DCTT_TERM_PANEL' : 'DCTT_TERM_INV')
           : (isDATP
             ? 'DATP'
             : (isMVFT
@@ -17568,13 +19685,15 @@ export default function BaseModule({
                   ? 'MVT_TERM'
                   : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
                     ? 'LVTT_TERM'
-                    : (activeMode?.key || '')))))}
+                    : (activeMode?.key || ''))))))}
         moduleLabel={isMC4
           ? (mc4SelectionMode === 'termination_panel'
             ? 'Cable Termination Panel Side'
             : (mc4SelectionMode === 'termination_inv'
               ? 'Cable Termination Inv. Side'
               : 'MC4 Installation'))
+          : (isDCTT
+            ? (dcttSelectionMode === 'termination_panel' ? 'DC Termination Panel Side' : 'DC Termination Inv. Side')
           : (isDATP
             ? 'DC&AC Trench'
             : (isMVFT
@@ -17585,8 +19704,12 @@ export default function BaseModule({
                   ? 'Cable Termination'
                   : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
                     ? 'Cable Termination'
-                    : moduleName))))}
-        workAmount={isDATP
+                    : moduleName)))))}
+        workAmount={isDCTT
+          ? (dcttSelectionMode === 'termination_panel'
+            ? (dcttCounts?.terminatedCompleted || 0)
+            : Object.values(dcttInvTerminationByInv || {}).reduce((sum, v) => sum + (Number(v) || 0), 0))
+          : isDATP
           ? datpCompletedForSubmit
           : isMVFT
             ? mvftCompletedForSubmit
@@ -17601,6 +19724,8 @@ export default function BaseModule({
         workUnit={
           isMC4
             ? (mc4SelectionMode === 'termination_panel' || mc4SelectionMode === 'termination_inv' ? 'cables terminated' : 'mc4')
+            : isDCTT
+              ? 'mc4 terminated'
             : isDATP
               ? datpWorkUnit
               : isMVFT
@@ -17837,6 +19962,26 @@ export default function BaseModule({
                                     mvftCommittedTrenchPartsRef.current = (mvftCommittedTrenchPartsRef.current || []).filter(
                                       (p) => !recordPolygonIds.map(String).includes(String(p?.id || ''))
                                     );
+                                  } else if (isDCTT) {
+                                    // DCTT: allow removal ONLY via History by clearing panel states for polygon IDs.
+                                    const idsToRemove = recordPolygonIds
+                                      .map((id) => String(id || ''))
+                                      .filter((id) => Boolean(id) && Boolean(polygonById.current?.[id]));
+
+                                    if (idsToRemove.length > 0) {
+                                      setDcttPanelStates((prev) => {
+                                        const out = { ...(prev || {}) };
+                                        idsToRemove.forEach((id) => {
+                                          delete out[id];
+                                        });
+                                        return out;
+                                      });
+
+                                      // Keep committed ref in sync immediately.
+                                      const nextCommitted = new Set(dcttCommittedPanelIdsRef.current || []);
+                                      idsToRemove.forEach((id) => nextCommitted.delete(id));
+                                      dcttCommittedPanelIdsRef.current = nextCommitted;
+                                    }
                                   } else {
                                     // Remove from committedPolygons
                                     setCommittedPolygons((prev) => {

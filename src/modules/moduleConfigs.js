@@ -221,7 +221,7 @@ export const FIBRE_MODULE_CONFIG = {
 
 export const MC4_MODULE_CONFIG = {
   key: 'MC4',
-  label: 'MC4 INSTALLATION & DC TERMINATION PROGRESS',
+  label: 'MC4 Installation',
   // Files live in: public/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/
   csvFormat: 'mc4_strings',
   csvPath: '/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/dc_strings.csv',
@@ -306,6 +306,96 @@ export const MC4_MODULE_CONFIG = {
     {
       // Boundary: render + style must match DC CABLE PULLING PROGRESS TRACKING
       url: '/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/boundry.geojson',
+      name: 'boundry',
+      color: 'rgba(239, 68, 68, 0.7)',
+      fillColor: 'transparent',
+      weight: 1.2,
+      fillOpacity: 0,
+      interactive: false,
+    },
+  ],
+};
+
+export const DC_TERMINATION_AND_TESTING_PROGRESS_MODULE_CONFIG = {
+  key: 'DCTT',
+  label: 'DC TERMINATION & TESTING PROGRESS',
+  // Files live in: public/DC_TERMINATION_and_TESTING PROGRESS/
+  // Uses dc_strings.csv from MC4 folder for inv_id max values (same format)
+  csvFormat: 'mc4_strings',
+  csvPath: '/MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING/dc_strings.csv',
+  linkPath: '/DC_TERMINATION_and_TESTING PROGRESS/link',
+  // DCTT spec: show 9517 total endpoints (same as MC4)
+  dcttTotalEnds: 9517,
+  // Render inv_id points as text plates (clickable for termination inv. side)
+  invIdLabelMode: true,
+  // Match MC4 / LV CABLE PULLING PROGRESS TRACKING inv_id appearance
+  invIdTextScale: 0.8,
+  invIdTextBaseSize: 12,
+  invIdTextStyle: '600',
+  invIdTextMinFontSize: 7,
+  invIdTextMaxFontSize: 14,
+  invIdTextRefZoom: 20,
+  invIdTextStrokeColor: 'rgba(0,0,0,0.8)',
+  invIdTextStrokeWidthFactor: 1.0,
+  invIdTextBgColor: null,
+  invIdTextBgPaddingX: 0,
+  invIdTextBgPaddingY: 0,
+  invIdTextBgStrokeColor: null,
+  invIdTextBgStrokeWidth: 0,
+  invIdTextBgCornerRadius: 0,
+  invIdDoneTextColor: 'rgba(34,197,94,1)',
+  invIdDoneTextColorNoBg: 'rgba(34,197,94,1)',
+  invIdDoneBgColor: null,
+  invIdDoneBgStrokeColor: null,
+  invIdDoneBgStrokeWidth: 0,
+  invIdHighlightTextColor: 'rgba(249,115,22,1)',
+  invIdHighlightBgColor: null,
+  invIdHighlightBgStrokeColor: null,
+  invIdHighlightBgStrokeWidth: 0,
+  invIdTextMinTextZoom: 17,
+  invIdTextMinBgZoom: 99,
+  // String text styling - same as DC Cable Testing for testing mode
+  stringTextVisibility: 'always',
+  stringTextToggle: false,
+  stringTextDefaultOn: true,
+  stringTextColor: 'rgba(255,255,255,0.92)',
+  stringTextBaseSize: 11,
+  stringTextStyle: '300',
+  stringTextStrokeColor: 'rgba(0,0,0,0.6)',
+  stringTextStrokeWidthFactor: 1,
+  stringTextMinZoom: 18,
+  stringTextMinFontSize: null,
+  stringTextMaxFontSize: null,
+  stringTextRefZoom: 20,
+  geojsonFiles: [
+    {
+      url: '/DC_TERMINATION_and_TESTING PROGRESS/full_line.geojson',
+      name: 'full',
+      color: '#2563eb',
+      fillColor: '#3b82f6',
+    },
+    {
+      url: '/DC_TERMINATION_and_TESTING PROGRESS/string_text.geojson',
+      name: 'string_text',
+      color: '#dc2626',
+      fillColor: '#ef4444',
+    },
+    {
+      url: '/DC_TERMINATION_and_TESTING PROGRESS/inv_id.geojson',
+      name: 'inv_id',
+      color: '#16a34a',
+      fillColor: '#22c55e',
+    },
+    {
+      url: '/DC_TERMINATION_and_TESTING PROGRESS/inv_box.geojson',
+      name: 'lv_box',
+      color: '#eab308',
+      fillColor: '#facc15',
+      weight: 3,
+      fillOpacity: 0.6,
+    },
+    {
+      url: '/DC_TERMINATION_and_TESTING PROGRESS/boundry.geojson',
       name: 'boundry',
       color: 'rgba(239, 68, 68, 0.7)',
       fillColor: 'transparent',

@@ -8,6 +8,7 @@ import MC4Module from './modules/MC4Module.jsx';
 import MVTerminationModule from './modules/MVTerminationModule.jsx';
 import LVTerminationTestingModule from './modules/LVTerminationTestingModule.jsx';
 import DCCableTestingProgressModule from './modules/DCCableTestingProgressModule.jsx';
+import DCTerminationTestingProgressModule from './modules/DCTerminationTestingProgressModule.jsx';
 import ModuleInstallationProgressTrackingModule from './modules/ModuleInstallationProgressTrackingModule.jsx';
 import TableInstallationProgressModule from './modules/TableInstallationProgressModule.jsx';
 import LVBoxInvBoxModule from './modules/LVBoxInvBoxModule.jsx';
@@ -22,10 +23,11 @@ const MODULES = {
   MVF: { key: 'MVF', label: 'MV Cable Pulling Progress', Component: MVFiberModule },
   MVFT: { key: 'MVFT', label: 'MV&Fibre Trench Progress', Component: MVFiberTrenchProgressTrackingModule },
   FIB: { key: 'FIB', label: 'Fibre Pulling Progress', Component: FibreModule },
-  MC4: { key: 'MC4', label: 'MC4 Installation & DC Termination Progress', Component: MC4Module },
+  MC4: { key: 'MC4', label: 'MC4 Installation', Component: MC4Module },
   MVT: { key: 'MVT', label: 'MV Termination & Testing Progress', Component: MVTerminationModule },
   LVTT: { key: 'LVTT', label: 'LV Termination & Testing Progress', Component: LVTerminationTestingModule },
   DCCT: { key: 'DCCT', label: 'DC Cable Testing Progress', Component: DCCableTestingProgressModule },
+  DCTT: { key: 'DCTT', label: 'DC Termination & Testing Progress', Component: DCTerminationTestingProgressModule },
   MIPT: { key: 'MIPT', label: 'Module Installation Progress', Component: ModuleInstallationProgressTrackingModule },
   TIP: { key: 'TIP', label: 'Table Installation Progress', Component: TableInstallationProgressModule },
   LVIB: { key: 'LVIB', label: 'LV Box & Inv Box Installation', Component: LVBoxInvBoxModule },
