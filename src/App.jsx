@@ -2,25 +2,92 @@ import { useEffect, useRef, useState } from 'react';
 import DCModule from './modules/DCModule.jsx';
 import LVModule from './modules/LVModule.jsx';
 import MVFiberModule from './modules/MVFiberModule.jsx';
+import MVFiberTrenchProgressTrackingModule from './modules/MVFiberTrenchProgressTrackingModule.jsx';
 import FibreModule from './modules/FibreModule.jsx';
 import MC4Module from './modules/MC4Module.jsx';
 import MVTerminationModule from './modules/MVTerminationModule.jsx';
 import LVTerminationTestingModule from './modules/LVTerminationTestingModule.jsx';
+import DCCableTestingProgressModule from './modules/DCCableTestingProgressModule.jsx';
+import DCTerminationTestingProgressModule from './modules/DCTerminationTestingProgressModule.jsx';
+import ModuleInstallationProgressTrackingModule from './modules/ModuleInstallationProgressTrackingModule.jsx';
+import TableInstallationProgressModule from './modules/TableInstallationProgressModule.jsx';
+import LVBoxInvBoxModule from './modules/LVBoxInvBoxModule.jsx';
+import PunchListModule from './modules/PunchListModule.jsx';
+import ParameterAndTableEarthingProgressModule from './modules/ParameterAndTableEarthingProgressModule.jsx';
+import DCACTrenchModule from './modules/DCACTrenchModule.jsx';
+import QAQCModule from './modules/qaqc/QAQCModule.jsx';
 
 const MODULES = {
-  DC: { key: 'DC', label: 'DC CABLE PULLING PROGRESS', Component: DCModule },
-  LV: { key: 'LV', label: 'LV CABLE PULLING PROGRESS', Component: LVModule },
-  MVF: { key: 'MVF', label: 'MV+FIBER PULLING PROGRESS', Component: MVFiberModule },
-  FIB: { key: 'FIB', label: 'FIBRE PULLING PROGRESS', Component: FibreModule },
-  MC4: { key: 'MC4', label: 'MC4 INSTALLATION', Component: MC4Module },
-  MVT: { key: 'MVT', label: 'MV TERMINATION PROGRESS', Component: MVTerminationModule },
-  LVTT: { key: 'LVTT', label: 'LV_TERMINATION_and_TESTING PROGRESS', Component: LVTerminationTestingModule },
+  DC: { key: 'DC', label: 'DC Cable Pulling Progress', Component: DCModule },
+  LV: { key: 'LV', label: 'LV Cable Pulling Progress', Component: LVModule },
+  MVF: { key: 'MVF', label: 'MV Cable Pulling Progress', Component: MVFiberModule },
+  MVFT: { key: 'MVFT', label: 'MV&Fibre Trench Progress', Component: MVFiberTrenchProgressTrackingModule },
+  FIB: { key: 'FIB', label: 'Fibre Pulling Progress', Component: FibreModule },
+  MC4: { key: 'MC4', label: 'MC4 Installation', Component: MC4Module },
+  MVT: { key: 'MVT', label: 'MV Termination & Testing Progress', Component: MVTerminationModule },
+  LVTT: { key: 'LVTT', label: 'LV Termination & Testing Progress', Component: LVTerminationTestingModule },
+  DCCT: { key: 'DCCT', label: 'DC Cable Testing Progress', Component: DCCableTestingProgressModule },
+  DCTT: { key: 'DCTT', label: 'DC Termination & Testing Progress', Component: DCTerminationTestingProgressModule },
+  MIPT: { key: 'MIPT', label: 'Module Installation Progress', Component: ModuleInstallationProgressTrackingModule },
+  TIP: { key: 'TIP', label: 'Table Installation Progress', Component: TableInstallationProgressModule },
+  LVIB: { key: 'LVIB', label: 'LV Box & Inv Box Installation', Component: LVBoxInvBoxModule },
+  PTEP: { key: 'PTEP', label: 'Parameter & Table Earthing', Component: ParameterAndTableEarthingProgressModule },
+  DATP: { key: 'DATP', label: 'DC&AC Trench Progress', Component: DCACTrenchModule },
+  PL: { key: 'PL', label: 'Punch List', Component: PunchListModule },
+  QAQC: { key: 'QAQC', label: 'QA / QC – Docs & Status', Component: QAQCModule },
 };
 
 export default function App() {
-  const [activeKey, setActiveKey] = useState('DC');
+  const [activeKey, setActiveKey] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const fromUrl = params.get('module');
+      return fromUrl && MODULES[fromUrl] ? fromUrl : 'DC';
+    } catch {
+      return 'DC';
+    }
+  });
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
+  const menuOpenRef = useRef(false);
+
+  const buildModuleHref = (moduleKey) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('module', moduleKey);
+    return url.pathname + url.search + url.hash;
+  };
+
+  const handleModuleNavigate = (e, moduleKey) => {
+    // Let the browser handle: right-click context menu, middle click, ctrl/cmd-click, etc.
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    // Normal left-click: switch module in-place without navigation.
+    e.preventDefault();
+    setActiveKey(moduleKey);
+    setMenuOpen(false);
+  };
+
+  // Keep URL in sync with current module (shareable + supports opening in new tab)
+  useEffect(() => {
+    if (!MODULES[activeKey]) return;
+    const url = new URL(window.location.href);
+    const current = url.searchParams.get('module');
+    if (current === activeKey) return;
+    url.searchParams.set('module', activeKey);
+    window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+  }, [activeKey]);
+
+  // Keep ref in sync and expose globally for BaseModule to check
+  useEffect(() => {
+    menuOpenRef.current = menuOpen;
+    window.__cewHamburgerMenuOpen = menuOpen;
+  }, [menuOpen]);
+
+  // Listen for custom toggle event from QAQCModule
+  useEffect(() => {
+    const handleToggle = () => setMenuOpen((v) => !v);
+    window.addEventListener('toggleHamburgerMenu', handleToggle);
+    return () => window.removeEventListener('toggleHamburgerMenu', handleToggle);
+  }, []);
 
   useEffect(() => {
     const onDocMouseDown = (e) => {
@@ -37,8 +104,9 @@ export default function App() {
     <>
       <ActiveComponent />
 
-      {/* Mode button (left). Keep it aligned with the Note button across all modules. */}
-      <div className="fixed left-3 sm:left-5 top-[20%] z-[1200]" ref={menuRef}>
+      {/* Mode button (left) - hidden for QAQC module */}
+      {activeKey !== 'QAQC' && (
+      <div className="fixed left-3 sm:left-5 top-[calc(var(--cewHeaderH,92px)+8px)] z-[1200]" ref={menuRef}>
         <div className="relative">
           <button
             type="button"
@@ -55,26 +123,41 @@ export default function App() {
           </button>
 
           {menuOpen && (
-            <div className="absolute left-0 mt-2 w-72 border-2 border-slate-700 bg-slate-900 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
-              {Object.values(MODULES).map((m, idx) => (
-              <button 
+            <div className="absolute left-0 mt-2 w-72 max-h-[70vh] overflow-y-auto border-2 border-slate-700 bg-slate-900 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
+              {Object.values(MODULES).map((m) => (
+                <a
                   key={m.key}
-                  type="button"
-                onClick={() => {
-                    setActiveKey(m.key);
-                    setMenuOpen(false);
-                  }}
-                  className={`w-full px-3 py-3 text-left text-xs font-extrabold uppercase tracking-wide ${
-                    idx === 0 ? 'border-b-2 border-slate-700' : ''
-                  } ${activeKey === m.key ? 'bg-amber-500 text-black' : 'bg-slate-900 text-slate-200 hover:bg-slate-800'}`}
+                  href={buildModuleHref(m.key)}
+                  onClick={(e) => handleModuleNavigate(e, m.key)}
+                  className={`block w-full px-3 py-2.5 text-left text-[11px] font-medium tracking-wide ${activeKey === m.key ? 'bg-amber-500 text-black' : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white'}`}
                 >
                   {m.label}
-              </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                </a>
+              ))}
             </div>
+          )}
+        </div>
+      </div>
+      )}
+
+      {/* Menu dropdown for QAQC module */}
+      {activeKey === 'QAQC' && menuOpen && (
+        <div 
+          ref={menuRef}
+          className="fixed left-3 top-[42px] z-[1300] w-72 max-h-[70vh] overflow-y-auto border-2 border-slate-700 bg-slate-900 shadow-[0_10px_26px_rgba(0,0,0,0.55)]"
+        >
+          {Object.values(MODULES).map((m) => (
+            <a
+              key={m.key}
+              href={buildModuleHref(m.key)}
+              onClick={(e) => handleModuleNavigate(e, m.key)}
+              className={`block w-full px-3 py-2.5 text-left text-[11px] font-medium tracking-wide ${activeKey === m.key ? 'bg-amber-500 text-black' : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+            >
+              {m.label}
+            </a>
+          ))}
+        </div>
+      )}
     </>
   );
 }

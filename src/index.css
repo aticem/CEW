@@ -10,3 +10,12 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+.leaflet-tooltip.punch-list-tooltip {
+  font-weight: 600;
+}
+
+/* Force classic arrow cursor everywhere (requested) */
+*, *::before, *::after {
+  cursor: default !important;
+}

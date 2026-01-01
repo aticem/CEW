@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/generate-public-manifest.cjs",
     "dev": "vite",
+    "prebuild": "node scripts/generate-public-manifest.cjs",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"

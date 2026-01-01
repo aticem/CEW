@@ -1,33 +1,29 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 export default function useDailyLog(moduleKey = "DC") {
-  const storageKey = `cew:dailyLog:${String(moduleKey || "DC").toUpperCase()}`;
+  // Don't persist to localStorage - history resets on page refresh (same as selections)
   const [dailyLog, setDailyLog] = useState([]);
 
-  useEffect(() => {
-    const stored = localStorage.getItem(storageKey);
-    if (stored) {
-      try {
-        setDailyLog(JSON.parse(stored));
-      } catch (e) {
-        console.error("Failed to parse daily log:", e);
-        setDailyLog([]);
-      }
-    }
-  }, [storageKey]);
-
   const addRecord = (record) => {
-    const updated = [...dailyLog, record];
-    setDailyLog(updated);
-    localStorage.setItem(storageKey, JSON.stringify(updated));
+    // Generate unique ID for the record
+    const id = `${record.date}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const recordWithId = { ...record, id };
+    setDailyLog(prev => [...prev, recordWithId]);
+  };
+
+  const updateRecord = (id, updates) => {
+    setDailyLog(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
+  };
+
+  const deleteRecord = (id) => {
+    setDailyLog(prev => prev.filter(r => r.id !== id));
   };
 
   const resetLog = () => {
     if (window.confirm("Are you sure you want to clear all daily logs?")) {
-      localStorage.removeItem(storageKey);
       setDailyLog([]);
     }
   };
 
-  return { dailyLog, addRecord, resetLog };
+  return { dailyLog, addRecord, updateRecord, deleteRecord, resetLog };
 }

@@ -17,6 +17,7 @@ export function useChartExport() {
       const moduleKey = String(options.moduleKey || "MODULE").toUpperCase();
       const moduleLabel = String(options.moduleLabel || moduleKey);
       const unit = String(options.unit || "m");
+      const lvibBreakdown = Boolean(options.lvibBreakdown);
       const dataSheetName = String(options.dataSheetName || "Daily Progress");
       const chartTitle = String(options.chartTitle || `Daily ${moduleLabel} Progress`);
       const chartSheetNameRaw = String(options.chartSheetName || "Chart");
@@ -29,6 +30,7 @@ export function useChartExport() {
       const aggregated = {};
       dailyLog.forEach((record) => {
         const dateKey = record.date;
+        if (!dateKey) return;
         if (!aggregated[dateKey]) {
           aggregated[dateKey] = {
             date: dateKey,
@@ -37,15 +39,24 @@ export function useChartExport() {
             total_cable: 0,
             workers: 0,
             subcontractor: record.subcontractor || "",
+            lv_boxes: 0,
+            inv_boxes: 0,
           };
         }
-        aggregated[dateKey].plus_dc += record.plus_dc || 0;
-        aggregated[dateKey].minus_dc += record.minus_dc || 0;
-        aggregated[dateKey].total_cable += record.total_cable || 0;
-        aggregated[dateKey].workers = Math.max(
-          aggregated[dateKey].workers,
-          record.workers || 0
-        );
+        const k = String(record.module_key || "").toUpperCase();
+        if (lvibBreakdown && (k === 'LVIB_LV' || k === 'LVIB_INV')) {
+          const amt = record.total_cable || 0;
+          if (k === 'LVIB_LV') aggregated[dateKey].lv_boxes += amt;
+          else aggregated[dateKey].inv_boxes += amt;
+          aggregated[dateKey].total_cable += amt;
+        } else {
+          aggregated[dateKey].plus_dc += record.plus_dc || 0;
+          aggregated[dateKey].minus_dc += record.minus_dc || 0;
+          aggregated[dateKey].total_cable += record.total_cable || 0;
+        }
+
+        // Sum workers for the day (total workers across all submissions)
+        aggregated[dateKey].workers += record.workers || 0;
       });
 
       // 2. Sort by date
@@ -56,6 +67,8 @@ export function useChartExport() {
       // 3. Prepare chart data
       const labels = sorted.map((r) => r.date);
       const cableData = sorted.map((r) => r.total_cable);
+      const lvBoxData = sorted.map((r) => r.lv_boxes || 0);
+      const invBoxData = sorted.map((r) => r.inv_boxes || 0);
       const workerData = sorted.map((r) => r.workers);
       const subData = sorted.map((r) =>
         r.subcontractor ? r.subcontractor.slice(0, 3).toUpperCase() : ""
@@ -81,12 +94,23 @@ export function useChartExport() {
           labels: labels,
           datasets: [
             {
-              label: `${moduleLabel} (${unit})`,
-              data: cableData,
-              backgroundColor: "rgba(54, 162, 235, 0.8)",
-              borderColor: "rgba(54, 162, 235, 1)",
+              label: lvibBreakdown ? `LV boxes` : `${moduleLabel} (${unit})`,
+              data: lvibBreakdown ? lvBoxData : cableData,
+              backgroundColor: lvibBreakdown ? "rgba(239, 68, 68, 0.75)" : "rgba(54, 162, 235, 0.8)",
+              borderColor: lvibBreakdown ? "rgba(185, 28, 28, 1)" : "rgba(54, 162, 235, 1)",
               borderWidth: 1,
             },
+            ...(lvibBreakdown
+              ? [
+                  {
+                    label: `INV boxes`,
+                    data: invBoxData,
+                    backgroundColor: "rgba(245, 158, 11, 0.75)",
+                    borderColor: "rgba(180, 83, 9, 1)",
+                    borderWidth: 1,
+                  },
+                ]
+              : []),
           ],
         },
         options: {
@@ -120,7 +144,7 @@ export function useChartExport() {
               beginAtZero: true,
               title: {
                 display: true,
-                text: `Amount (${unit})`,
+                text: lvibBreakdown ? `Boxes` : `Amount (${unit})`,
               },
             },
             x: {
@@ -153,13 +177,18 @@ export function useChartExport() {
       const hasDcBreakdown = sorted.some((r) => (r.plus_dc || 0) !== 0 || (r.minus_dc || 0) !== 0);
       dataSheet.columns = [
         { header: "Date", key: "date", width: 12 },
-        ...(hasDcBreakdown
+        ...(lvibBreakdown
           ? [
-              { header: `+DC Cable (${unit})`, key: "plus_dc", width: 15 },
-              { header: `-DC Cable (${unit})`, key: "minus_dc", width: 15 },
+              { header: "LV Boxes", key: "lv_boxes", width: 12 },
+              { header: "INV Boxes", key: "inv_boxes", width: 12 },
             ]
-          : []),
-        { header: `Amount of Work (${unit})`, key: "total_cable", width: 18 },
+          : (hasDcBreakdown
+            ? [
+                { header: `+DC Cable (${unit})`, key: "plus_dc", width: 15 },
+                { header: `-DC Cable (${unit})`, key: "minus_dc", width: 15 },
+              ]
+            : [])),
+        { header: lvibBreakdown ? `Total Boxes` : `Amount of Work (${unit})`, key: "total_cable", width: 18 },
         { header: "Workers", key: "workers", width: 10 },
         { header: "Subcontractor", key: "subcontractor", width: 20 },
       ];
@@ -181,7 +210,10 @@ export function useChartExport() {
           workers: row.workers,
           subcontractor: row.subcontractor,
         };
-        if (hasDcBreakdown) {
+        if (lvibBreakdown) {
+          out.lv_boxes = Math.round(row.lv_boxes || 0);
+          out.inv_boxes = Math.round(row.inv_boxes || 0);
+        } else if (hasDcBreakdown) {
           out.plus_dc = Math.round(row.plus_dc);
           out.minus_dc = Math.round(row.minus_dc);
         }
@@ -195,7 +227,10 @@ export function useChartExport() {
         workers: "",
         subcontractor: "",
       };
-      if (hasDcBreakdown) {
+      if (lvibBreakdown) {
+        totals.lv_boxes = sorted.reduce((sum, r) => sum + (r.lv_boxes || 0), 0);
+        totals.inv_boxes = sorted.reduce((sum, r) => sum + (r.inv_boxes || 0), 0);
+      } else if (hasDcBreakdown) {
         totals.plus_dc = sorted.reduce((sum, r) => sum + r.plus_dc, 0);
         totals.minus_dc = sorted.reduce((sum, r) => sum + r.minus_dc, 0);
       }
