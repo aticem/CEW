@@ -643,7 +643,9 @@ export const TABLE_INSTALLATION_PROGRESS_MODULE_CONFIG = {
   stringTextMaxFontSize: 26,
   stringTextRefZoom: 20,
   geojsonFiles: [
-    { url: '/TABLE_INSTALLATION_PROGRESS/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
+    // TIP: full.geojson was replaced by a LineString-based table outline dataset.
+    // We convert those LineStrings to Polygon hit-areas at load time so selection works per-table.
+    { url: '/TABLE_INSTALLATION_PROGRESS/full_plot_single_box.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
     { url: '/TABLE_INSTALLATION_PROGRESS/inv_id.geojson', name: 'inv_id', color: '#16a34a', fillColor: '#22c55e' },
     {
       // This dataset uses inv_box.geojson as the LV box/boundary layer

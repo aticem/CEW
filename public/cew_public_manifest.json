@@ -1,15 +1,6 @@
 {
-  "generatedAt": "2026-01-01T23:00:57.729Z",
+  "generatedAt": "2026-01-01T23:49:49.895Z",
   "folders": {
-    "dc-cable-pulling-progress": {
-      "geojson": [
-        "boundry.geojson",
-        "full.geojson",
-        "inv_id.geojson",
-        "lv_box.geojson",
-        "string_text.geojson"
-      ]
-    },
     "DC_AC_TRENCH_PROGRESS": {
       "geojson": [
         "dc_trench_boundry.geojson",
@@ -135,9 +126,18 @@
     },
     "TABLE_INSTALLATION_PROGRESS": {
       "geojson": [
-        "full.geojson",
+        "full_plot_single_box.geojson",
         "inv_box.geojson",
         "inv_id.geojson"
+      ]
+    },
+    "dc-cable-pulling-progress": {
+      "geojson": [
+        "boundry.geojson",
+        "full.geojson",
+        "inv_id.geojson",
+        "lv_box.geojson",
+        "string_text.geojson"
       ]
     }
   }

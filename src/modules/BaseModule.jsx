@@ -9314,6 +9314,7 @@ export default function BaseModule({
 
           // TABLE_INSTALLATION_PROGRESS: count tables (2 panels = 1 table)
           if (isTIP) {
+            const isTipSingleBoxSource = /full_plot_single_box\.geojson$/i.test(String(file?.url || ''));
             const threshold = activeMode?.tableAreaThreshold || 50; // m²
             
             // Calculate polygon area in m² using Shoelace formula
@@ -9351,83 +9352,266 @@ export default function BaseModule({
                 return null;
               }
             };
-            
-            // Build panel info array
-            const panels = (data.features || []).map((feature, idx) => ({
-              idx,
-              area: calcAreaM2(feature?.geometry?.coordinates),
-              centroid: getCentroid(feature?.geometry?.coordinates),
-            })).filter(p => p.centroid);
-            
-            // Pair panels by proximity (panels that form a table are very close)
-            const PAIR_THRESHOLD = 0.00008; // ~8m in degrees
-            const used = new Set();
-            const pairs = []; // [{idx1, idx2, area}]
-            
-            for (let i = 0; i < panels.length; i++) {
-              if (used.has(i)) continue;
-              const p1 = panels[i];
-              let minDist = Infinity, minJ = -1;
-              
-              for (let j = i + 1; j < panels.length; j++) {
-                if (used.has(j)) continue;
-                const p2 = panels[j];
-                const dist = Math.sqrt(
-                  Math.pow(p1.centroid[0] - p2.centroid[0], 2) + 
-                  Math.pow(p1.centroid[1] - p2.centroid[1], 2)
+
+            if (isTipSingleBoxSource) {
+              // New TIP dataset: tables are stored as 4 separate LineString edges.
+              // Build Polygon hit-areas in-memory so selection targets the whole rectangle.
+              try {
+                const rawLines = (data?.features || []).filter(
+                  (f) => f?.geometry?.type === 'LineString' && Array.isArray(f?.geometry?.coordinates) && f.geometry.coordinates.length >= 2
                 );
-                if (dist < minDist) {
-                  minDist = dist;
-                  minJ = j;
+
+                if (rawLines.length > 0) {
+                  const coordKey = (c) => {
+                    const x = Number(c?.[0]);
+                    const y = Number(c?.[1]);
+                    if (!Number.isFinite(x) || !Number.isFinite(y)) return '';
+                    return `${x.toFixed(9)},${y.toFixed(9)}`;
+                  };
+
+                  const byLayer = new Map();
+                  for (const line of rawLines) {
+                    const layer = String(line?.properties?.layer || '');
+                    const k = layer || '__no_layer__';
+                    if (!byLayer.has(k)) byLayer.set(k, []);
+                    byLayer.get(k).push(line);
+                  }
+
+                  const polygonFeatures = [];
+                  const residualLineFeatures = [];
+
+                  for (const [layerKey, layerLines] of byLayer.entries()) {
+                    const endpointToIdx = new Map();
+                    const used = new Array(layerLines.length).fill(false);
+                    const blocked = new Array(layerLines.length).fill(false);
+
+                    const pushEndpoint = (k, idx) => {
+                      if (!k) return;
+                      const arr = endpointToIdx.get(k);
+                      if (arr) arr.push(idx);
+                      else endpointToIdx.set(k, [idx]);
+                    };
+
+                    for (let i = 0; i < layerLines.length; i++) {
+                      const coords = layerLines[i]?.geometry?.coordinates;
+                      const a = coords?.[0];
+                      const b = coords?.[coords.length - 1];
+                      pushEndpoint(coordKey(a), i);
+                      pushEndpoint(coordKey(b), i);
+                    }
+
+                    for (let i = 0; i < layerLines.length; i++) {
+                      if (used[i] || blocked[i]) continue;
+
+                      const coords0 = layerLines[i]?.geometry?.coordinates;
+                      const a0 = coords0?.[0];
+                      const b0 = coords0?.[coords0.length - 1];
+                      const startKey = coordKey(a0);
+                      let lastKey = coordKey(b0);
+                      if (!startKey || !lastKey) {
+                        used[i] = true;
+                        continue;
+                      }
+
+                      const ring = [
+                        [a0[0], a0[1]],
+                        [b0[0], b0[1]],
+                      ];
+                      const attemptIdx = [i];
+                      used[i] = true;
+
+                      // Safety bound: rectangles should close quickly (4 edges).
+                      let safety = 12;
+                      while (lastKey !== startKey && safety-- > 0) {
+                        const candidates = endpointToIdx.get(lastKey) || [];
+                        let nextIdx = -1;
+
+                        for (const cIdx of candidates) {
+                          if (used[cIdx] || blocked[cIdx]) continue;
+                          const coordsN = layerLines[cIdx]?.geometry?.coordinates;
+                          const aN = coordsN?.[0];
+                          const bN = coordsN?.[coordsN.length - 1];
+                          const aK = coordKey(aN);
+                          const bK = coordKey(bN);
+                          if (!aK || !bK) continue;
+                          if (aK === lastKey || bK === lastKey) {
+                            nextIdx = cIdx;
+                            break;
+                          }
+                        }
+                        if (nextIdx < 0) break;
+
+                        const coordsN = layerLines[nextIdx]?.geometry?.coordinates;
+                        const aN = coordsN?.[0];
+                        const bN = coordsN?.[coordsN.length - 1];
+                        const aK = coordKey(aN);
+                        const bK = coordKey(bN);
+                        if (!aK || !bK) break;
+
+                        if (aK === lastKey) {
+                          ring.push([bN[0], bN[1]]);
+                          lastKey = bK;
+                        } else if (bK === lastKey) {
+                          ring.push([aN[0], aN[1]]);
+                          lastKey = aK;
+                        } else {
+                          break;
+                        }
+
+                        used[nextIdx] = true;
+                        attemptIdx.push(nextIdx);
+                      }
+
+                      if (lastKey === startKey && ring.length >= 4) {
+                        const first = ring[0];
+                        const last = ring[ring.length - 1];
+                        if (!last || last[0] !== first[0] || last[1] !== first[1]) {
+                          ring.push([first[0], first[1]]);
+                        }
+
+                        polygonFeatures.push({
+                          type: 'Feature',
+                          properties: {
+                            ...(layerLines[i]?.properties || {}),
+                            layer: layerKey === '__no_layer__' ? undefined : layerKey,
+                          },
+                          geometry: {
+                            type: 'Polygon',
+                            coordinates: [ring],
+                          },
+                        });
+                      } else {
+                        // Failed to close: release segments and block this start to avoid loops.
+                        for (const idx of attemptIdx) used[idx] = false;
+                        blocked[i] = true;
+                      }
+                    }
+
+                    // Keep any remaining segments as visual-only lines.
+                    for (let i = 0; i < layerLines.length; i++) {
+                      if (used[i]) continue;
+                      residualLineFeatures.push({
+                        type: 'Feature',
+                        properties: {
+                          ...(layerLines[i]?.properties || {}),
+                          layer: layerKey === '__no_layer__' ? undefined : layerKey,
+                          __tip_residualLine: true,
+                        },
+                        geometry: layerLines[i]?.geometry,
+                      });
+                    }
+                  }
+
+                  // Swap in polygons if conversion looks successful.
+                  const minExpected = Math.max(50, Math.floor(rawLines.length / 6));
+                  if (polygonFeatures.length >= minExpected) {
+                    data = {
+                      ...data,
+                      type: 'FeatureCollection',
+                      features: [...polygonFeatures, ...residualLineFeatures],
+                    };
+                  }
+                }
+              } catch (_e) {
+                void _e;
+              }
+
+              let smallTables = 0;
+              let bigTables = 0;
+              (data.features || []).forEach((feature) => {
+                const gType = feature?.geometry?.type;
+                const isPoly = gType === 'Polygon' || gType === 'MultiPolygon';
+                if (!isPoly) return;
+                const area = calcAreaM2(feature?.geometry?.coordinates);
+                if (area < threshold) smallTables++;
+                else bigTables++;
+              });
+
+              setTableSmallCount(Math.round(smallTables));
+              setTableBigCount(Math.round(bigTables));
+
+              // No pairing in single-table dataset
+              tipPanelPairsRef.current = { featurePairs: new Map(), polygonPairs: new Map() };
+            } else {
+              // Legacy TIP dataset: 2 panels = 1 table; pair panels by proximity.
+
+              // Build panel info array
+              const panels = (data.features || []).map((feature, idx) => ({
+                idx,
+                area: calcAreaM2(feature?.geometry?.coordinates),
+                centroid: getCentroid(feature?.geometry?.coordinates),
+              })).filter(p => p.centroid);
+
+              // Pair panels by proximity (panels that form a table are very close)
+              const PAIR_THRESHOLD = 0.00008; // ~8m in degrees
+              const used = new Set();
+              const pairs = []; // [{idx1, idx2, area}]
+
+              for (let i = 0; i < panels.length; i++) {
+                if (used.has(i)) continue;
+                const p1 = panels[i];
+                let minDist = Infinity, minJ = -1;
+
+                for (let j = i + 1; j < panels.length; j++) {
+                  if (used.has(j)) continue;
+                  const p2 = panels[j];
+                  const dist = Math.sqrt(
+                    Math.pow(p1.centroid[0] - p2.centroid[0], 2) +
+                    Math.pow(p1.centroid[1] - p2.centroid[1], 2)
+                  );
+                  if (dist < minDist) {
+                    minDist = dist;
+                    minJ = j;
+                  }
+                }
+
+                if (minJ >= 0 && minDist < PAIR_THRESHOLD) {
+                  used.add(i);
+                  used.add(minJ);
+                  // Combined area of both panels
+                  const combinedArea = p1.area + panels[minJ].area;
+                  pairs.push({ idx1: panels[i].idx, idx2: panels[minJ].idx, area: combinedArea });
                 }
               }
-              
-              if (minJ >= 0 && minDist < PAIR_THRESHOLD) {
-                used.add(i);
-                used.add(minJ);
-                // Combined area of both panels
-                const combinedArea = p1.area + panels[minJ].area;
-                pairs.push({ idx1: panels[i].idx, idx2: panels[minJ].idx, area: combinedArea });
-              }
-            }
-            
-            // Count tables by size (combined area of both panels)
-            let smallTables = 0;
-            let bigTables = 0;
-            const combinedThreshold = threshold * 2; // Both panels combined
-            
-            pairs.forEach(pair => {
-              if (pair.area < combinedThreshold) {
-                smallTables++;
-              } else {
-                bigTables++;
-              }
-            });
-            
-            // Also count unpaired panels as half tables (shouldn't happen normally)
-            const unpairedCount = panels.length - used.size;
-            if (unpairedCount > 0) {
-              // Add unpaired as individual (likely edge cases)
-              panels.forEach((p, i) => {
-                if (!used.has(i)) {
-                  if (p.area < threshold) smallTables += 0.5;
-                  else bigTables += 0.5;
+
+              // Count tables by size (combined area of both panels)
+              let smallTables = 0;
+              let bigTables = 0;
+              const combinedThreshold = threshold * 2; // Both panels combined
+
+              pairs.forEach(pair => {
+                if (pair.area < combinedThreshold) {
+                  smallTables++;
+                } else {
+                  bigTables++;
                 }
               });
+
+              // Also count unpaired panels as half tables (shouldn't happen normally)
+              const unpairedCount = panels.length - used.size;
+              if (unpairedCount > 0) {
+                // Add unpaired as individual (likely edge cases)
+                panels.forEach((p, i) => {
+                  if (!used.has(i)) {
+                    if (p.area < threshold) smallTables += 0.5;
+                    else bigTables += 0.5;
+                  }
+                });
+              }
+
+              setTableSmallCount(Math.round(smallTables));
+              setTableBigCount(Math.round(bigTables));
+
+              // Store panel pairs by feature index (will map to polygonId after layer creation)
+              // tipFeaturePairs: featureIndex -> partnerFeatureIndex
+              const tipFeaturePairs = new Map();
+              pairs.forEach(pair => {
+                tipFeaturePairs.set(pair.idx1, pair.idx2);
+                tipFeaturePairs.set(pair.idx2, pair.idx1);
+              });
+              // Store for use in onEachFeature
+              tipPanelPairsRef.current = { featurePairs: tipFeaturePairs, polygonPairs: new Map() };
             }
-            
-            setTableSmallCount(Math.round(smallTables));
-            setTableBigCount(Math.round(bigTables));
-            
-            // Store panel pairs by feature index (will map to polygonId after layer creation)
-            // tipFeaturePairs: featureIndex -> partnerFeatureIndex
-            const tipFeaturePairs = new Map();
-            pairs.forEach(pair => {
-              tipFeaturePairs.set(pair.idx1, pair.idx2);
-              tipFeaturePairs.set(pair.idx2, pair.idx1);
-            });
-            // Store for use in onEachFeature
-            tipPanelPairsRef.current = { featurePairs: tipFeaturePairs, polygonPairs: new Map() };
           }
           
           // LVTT: tables must NOT be selectable; draw only.
@@ -9504,7 +9688,7 @@ export default function BaseModule({
               // FULL.GEOJSON: same base style across all modules (requested)
               color: FULL_GEOJSON_BASE_COLOR,
               weight: FULL_GEOJSON_BASE_WEIGHT,
-              fill: !!isPL,
+              fill: !!isPL || !!isTIP,
               fillOpacity: 0,
             }),
             
@@ -9518,6 +9702,16 @@ export default function BaseModule({
 
               // PUNCH_LIST: residual lines are only a visual fallback (never selectable)
               if (isPL && isLine) {
+                try {
+                  featureLayer.options.interactive = false;
+                } catch (_e) {
+                  void _e;
+                }
+                return;
+              }
+
+              // TIP: residual lines are visual-only; selection must be by polygon (whole table)
+              if (isTIP && isLine) {
                 try {
                   featureLayer.options.interactive = false;
                 } catch (_e) {
@@ -14634,7 +14828,11 @@ export default function BaseModule({
   // TIP: Total = 2V14 + 2V27 (from full.geojson), Completed = selected tables count
   const tipTotal = tableSmallCount + tableBigCount;
   // TIP: Count selected tables (each table = 2 panels, so divide by 2)
-  const tipCompletedTables = isTIP ? Math.floor(selectedPolygons.size / 2) : 0;
+  const tipSingleBoxMode =
+    isTIP &&
+    Array.isArray(activeMode?.geojsonFiles) &&
+    activeMode.geojsonFiles.some((f) => /full_plot_single_box\.geojson$/i.test(String(f?.url || '')));
+  const tipCompletedTables = isTIP ? (tipSingleBoxMode ? selectedPolygons.size : Math.floor(selectedPolygons.size / 2)) : 0;
 
   // MVF Total must come from CSV (already represents 3 circuits); completed comes from selected trench meters * 3.
   // DATP: use fixed total (15993 m)
@@ -16082,20 +16280,6 @@ export default function BaseModule({
                       </div>
                     ) : isTIP ? (
                       <>
-                        {/* Left card: 2V14 / 2V27 */}
-                        <div className="min-w-[140px] border-2 border-slate-700 bg-slate-800 py-3 px-3 self-center">
-                          <div className="flex flex-col gap-y-1">
-                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
-                              <span className="text-xs font-bold text-slate-200">{activeMode?.smallTableLabel || '2V14'}</span>
-                              <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{tableSmallCount}</span>
-                            </div>
-                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
-                              <span className="text-xs font-bold text-slate-200">{activeMode?.bigTableLabel || '2V27'}</span>
-                              <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{tableBigCount}</span>
-                            </div>
-                          </div>
-                        </div>
-
                         {/* Right group: Total / Completed / Remaining */}
                         <div className="flex items-center gap-3 self-center">
                           <div className="min-w-[120px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
