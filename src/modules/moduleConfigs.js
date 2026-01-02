@@ -646,9 +646,19 @@ export const TABLE_INSTALLATION_PROGRESS_MODULE_CONFIG = {
     // TIP: full.geojson was replaced by a LineString-based table outline dataset.
     // We convert those LineStrings to Polygon hit-areas at load time so selection works per-table.
     { url: '/TABLE_INSTALLATION_PROGRESS/full_plot_single_box.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
+    {
+      // Boundary: thin red line
+      url: '/TABLE_INSTALLATION_PROGRESS/boundry.geojson',
+      name: 'boundry',
+      color: 'rgba(239, 68, 68, 0.7)',
+      fillColor: 'transparent',
+      weight: 1.2,
+      fillOpacity: 0,
+      interactive: false,
+    },
     { url: '/TABLE_INSTALLATION_PROGRESS/inv_id.geojson', name: 'inv_id', color: '#16a34a', fillColor: '#22c55e' },
     {
-      // This dataset uses inv_box.geojson as the LV box/boundary layer
+      // LV/INV boxes
       url: '/TABLE_INSTALLATION_PROGRESS/inv_box.geojson',
       name: 'lv_box',
       color: '#eab308',
@@ -694,6 +704,16 @@ export const LV_BOX_INV_BOX_INSTALLATION_PROGRESS_CONFIG = {
   stringTextRefZoom: 20,
   geojsonFiles: [
     { url: '/LV_BOX_INV_BOX_INSTALLATION_PROGRESS_TRACKING/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
+    {
+      // Boundary: thin red line
+      url: '/LV_BOX_INV_BOX_INSTALLATION_PROGRESS_TRACKING/boundry.geojson',
+      name: 'boundry',
+      color: 'rgba(239, 68, 68, 0.7)',
+      fillColor: 'transparent',
+      weight: 1.2,
+      fillOpacity: 0,
+      interactive: false,
+    },
     { url: '/LV_BOX_INV_BOX_INSTALLATION_PROGRESS_TRACKING/inv_id.geojson', name: 'inv_id', color: '#16a34a', fillColor: '#22c55e' },
     {
       url: '/LV_BOX_INV_BOX_INSTALLATION_PROGRESS_TRACKING/lv_box.geojson',
@@ -802,6 +822,16 @@ export const PUNCH_LIST_MODULE_CONFIG = {
   stringTextRefZoom: 20,
   geojsonFiles: [
     { url: '/PUNCH_LIST/full.geojson', name: 'full', color: '#2563eb', fillColor: '#3b82f6' },
+    {
+      // Boundary: thin red line
+      url: '/PUNCH_LIST/boundry.geojson',
+      name: 'boundry',
+      color: 'rgba(239, 68, 68, 0.7)',
+      fillColor: 'transparent',
+      weight: 1.2,
+      fillOpacity: 0,
+      interactive: false,
+    },
     { url: '/PUNCH_LIST/inv_id.geojson', name: 'inv_id', color: '#16a34a', fillColor: '#22c55e' },
     {
       url: '/PUNCH_LIST/inv_box.geojson',

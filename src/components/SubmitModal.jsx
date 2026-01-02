@@ -11,6 +11,7 @@ export default function SubmitModal({
   workUnit = 'm',
   selectedPolygons = new Set(), // Add selected polygons parameter
 }) {
+  const unitText = typeof workUnit === 'string' ? workUnit.trim() : '';
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [subcontractor, setSubcontractor] = useState('');
   const [workers, setWorkers] = useState(1);
@@ -34,7 +35,7 @@ export default function SubmitModal({
       module_label: moduleLabel || '',
       // Keep `total_cable` for backwards compatibility with existing history/export logic.
       total_cable: Number(workAmount) || 0,
-      unit: workUnit || 'm',
+      unit: typeof workUnit === 'string' ? workUnit : 'm',
       subcontractor,
       workers: parseInt(workers),
       selections: Array.from(selectedPolygons), // Store selected polygon IDs
@@ -147,7 +148,10 @@ export default function SubmitModal({
           <div className="form-summary">
             <div className="summary-row">
               <span>Amount of Work</span>
-              <strong>{(Number(workAmount) || 0).toFixed(0)} {workUnit}</strong>
+              <strong>
+                {(Number(workAmount) || 0).toFixed(0)}
+                {unitText ? ` ${unitText}` : ''}
+              </strong>
             </div>
           </div>
 

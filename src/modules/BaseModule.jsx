@@ -14827,12 +14827,16 @@ export default function BaseModule({
 
   // TIP: Total = 2V14 + 2V27 (from full.geojson), Completed = selected tables count
   const tipTotal = tableSmallCount + tableBigCount;
-  // TIP: Count selected tables (each table = 2 panels, so divide by 2)
+  // TIP: Count selected tables.
+  // - Legacy dataset: 1 table = 2 panels  => divide by 2
+  // - Single-box dataset: 1 table = 4 edges (LineStrings) => divide by 4
   const tipSingleBoxMode =
     isTIP &&
     Array.isArray(activeMode?.geojsonFiles) &&
     activeMode.geojsonFiles.some((f) => /full_plot_single_box\.geojson$/i.test(String(f?.url || '')));
-  const tipCompletedTables = isTIP ? (tipSingleBoxMode ? selectedPolygons.size : Math.floor(selectedPolygons.size / 2)) : 0;
+  const tipCompletedTables = isTIP
+    ? (tipSingleBoxMode ? Math.floor(selectedPolygons.size / 4) : Math.floor(selectedPolygons.size / 2))
+    : 0;
 
   // MVF Total must come from CSV (already represents 3 circuits); completed comes from selected trench meters * 3.
   // DATP: use fixed total (15993 m)
@@ -19922,7 +19926,9 @@ export default function BaseModule({
                       ? lvttWorkUnit
                     : activeMode?.submitWorkUnit
                       ? String(activeMode.submitWorkUnit)
-                      : activeMode?.workUnitWeights ? 'panels' : 'm'
+                      : activeMode?.workUnitWeights
+                        ? 'panels'
+                        : (typeof activeMode?.simpleCounterUnit === 'string' ? String(activeMode.simpleCounterUnit) : 'm')
         }
       />
       

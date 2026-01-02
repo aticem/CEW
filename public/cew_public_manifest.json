@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-01-01T23:49:49.895Z",
+  "generatedAt": "2026-01-02T00:08:27.964Z",
   "folders": {
     "DC_AC_TRENCH_PROGRESS": {
       "geojson": [
@@ -39,6 +39,7 @@
     },
     "LV_BOX_INV_BOX_INSTALLATION_PROGRESS_TRACKING": {
       "geojson": [
+        "boundry.geojson",
         "full.geojson",
         "inv_box.geojson",
         "inv_id.geojson",
@@ -118,6 +119,7 @@
     },
     "PUNCH_LIST": {
       "geojson": [
+        "boundry.geojson",
         "full_plot.geojson",
         "full.geojson",
         "inv_box.geojson",
@@ -126,6 +128,7 @@
     },
     "TABLE_INSTALLATION_PROGRESS": {
       "geojson": [
+        "boundry.geojson",
         "full_plot_single_box.geojson",
         "inv_box.geojson",
         "inv_id.geojson"
