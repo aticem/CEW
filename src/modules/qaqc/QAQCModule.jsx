@@ -130,7 +130,7 @@ const PublicFileItem = ({ file, categoryKey, nodeKey, onStatusChange, metadata, 
   
   return (
     <div 
-      className="flex items-center gap-2 py-1.5 px-2 hover:bg-slate-700/50 rounded cursor-pointer group"
+      className="flex items-center gap-2 py-1.5 px-2 hover:bg-slate-700/50 rounded-none cursor-pointer group"
       style={{ marginLeft: `${(depth + 1) * 20}px` }}
     >
       <span className="w-4 h-4 flex items-center justify-center text-[10px] font-bold">
@@ -663,7 +663,7 @@ export default function QAQCModule() {
     return (
       <div key={nodeKey} className="select-none">
         <div 
-          className={`flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer group ${
+          className={`flex items-center gap-2 py-1.5 px-2 rounded-none cursor-pointer group ${
             isSelectedFolder ? 'bg-slate-700/70' : 'hover:bg-slate-700/50'
           }`}
           style={{ marginLeft: `${depth * 20}px` }}
