@@ -16,6 +16,7 @@ import PunchListModule from './modules/PunchListModule.jsx';
 import ParameterAndTableEarthingProgressModule from './modules/ParameterAndTableEarthingProgressModule.jsx';
 import DCACTrenchModule from './modules/DCACTrenchModule.jsx';
 import QAQCModule from './modules/qaqc/QAQCModule.jsx';
+import AIAssistantModule from './modules/ai/AIAssistantModule.jsx';
 
 const MODULES = {
   DC: { key: 'DC', label: 'DC Cable Pulling Progress', Component: DCModule },
@@ -35,6 +36,7 @@ const MODULES = {
   DATP: { key: 'DATP', label: 'DC&AC Trench Progress', Component: DCACTrenchModule },
   PL: { key: 'PL', label: 'Punch List', Component: PunchListModule },
   QAQC: { key: 'QAQC', label: 'QA / QC – Docs & Status', Component: QAQCModule },
+  AI: { key: 'AI', label: '🤖 AI Assistant', Component: AIAssistantModule },
 };
 
 export default function App() {

@@ -201,6 +201,7 @@ export default function QAQCModule() {
         { name: 'electrical - Copy.docx', path: '/QAQC/Checklists/electrical/dc-cable/electrical - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
         { name: 'mechanical - Copy.docx', path: '/QAQC/Checklists/electrical/dc-cable/mechanical - Copy.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
         { name: '277-007-D-C-40327 Rev 03 Trenches crossing layout.pdf', path: '/QAQC/Checklists/electrical/dc-cable/277-007-D-C-40327 Rev 03 Trenches crossing layout.pdf', type: 'application/pdf' },
+        { name: 'bill of m 227-005-L-E-00010 Rev07.xlsx', path: '/QAQC/Checklists/electrical/dc-cable/bill of m 227-005-L-E-00010 Rev07.xlsx', type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
       ],
       'cl-earthing-foc': [
         { name: 'civil.docx', path: '/QAQC/Checklists/electrical/earthing-foc/civil.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
