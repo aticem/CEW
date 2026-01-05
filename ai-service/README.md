@@ -178,3 +178,9 @@ LLM_TEMPERATURE=0.1
 - ❌ DWG/CAD yok
 - ❌ Auto-ingest yok
 - ❌ Vector search yok (keyword only)
+
+## Guard Layer (Mandatory)
+
+All user queries MUST pass through the Guard layer.
+Any response generated without Guard validation
+is considered a system defect.
