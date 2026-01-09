@@ -1,216 +1,287 @@
 # CEW AI Service
 
-RAG-based AI Assistant service for the Construction Engineering Workflow (CEW) application. This service provides document Q&A capabilities using retrieval-augmented generation.
+Production-ready RAG-based AI Assistant for Construction Engineering Workflow (CEW) system.
 
 ## Features
 
-- **Document Ingestion**: Process PDF, DOCX, XLSX, TXT, and CSV files
-- **Vector Search**: Semantic search using embeddings stored in ChromaDB
-- **Query Classification**: Automatically classifies queries as document, data, hybrid, or conversational
-- **OCR Support**: Extract text from scanned PDFs using Tesseract.js
-- **Conversation History**: Maintain context across multiple queries
-- **Source Citations**: Responses include relevant source references
+- 📄 **Document Ingestion**: Supports PDF, DOCX, XLSX, and TXT files
+- 🔍 **OCR Support**: Automatic text extraction from scanned documents
+- 🧠 **RAG Pipeline**: Retrieval-Augmented Generation for accurate answers
+- 🌐 **Multilingual**: Supports both English and Turkish
+- 🔒 **Safety First**: Built-in guardrails against hallucination
+- 📊 **Vector Store**: ChromaDB for efficient similarity search
+- 🚀 **REST API**: Clean HTTP endpoints for easy integration
 
 ## Architecture
 
 ```
-ai-service/
-├── src/
-│   ├── config/          # Environment configuration
-│   ├── ingest/          # Document processing pipeline
-│   │   ├── documentLoader.ts   # Load various file formats
-│   │   ├── chunker.ts          # Split documents into chunks
-│   │   ├── embedder.ts         # Generate embeddings
-│   │   └── indexer.ts          # Store in vector database
-│   ├── query/           # Query processing
-│   │   ├── retriever.ts        # Retrieve relevant chunks
-│   │   ├── queryClassifier.ts  # Classify query type
-│   │   └── responseGenerator.ts # Generate responses
-│   ├── services/        # External services
-│   │   ├── llmService.ts       # OpenAI API
-│   │   ├── ocrService.ts       # Tesseract OCR
-│   │   └── policyService.ts    # Input validation
-│   ├── connectors/      # Data source connectors
-│   │   ├── localDocConnector.ts    # Local file system
-│   │   └── cewQAQCConnector.ts     # CEW QA/QC integration
-│   ├── routes/          # API endpoints
-│   │   ├── chat.ts             # Chat API
-│   │   ├── ingest.ts           # Document ingestion API
-│   │   └── health.ts           # Health checks
-│   └── server.ts        # Express server entry point
-├── documents/           # Document storage (gitignored)
-├── index-store/         # Vector index storage (gitignored)
-└── package.json
+Document → Load → OCR → Chunk → Embed → Index (ChromaDB)
+                                                  ↓
+Query → Classify → Retrieve → LLM → Response
 ```
 
 ## Prerequisites
 
-- Node.js 18+
-- ChromaDB server (or use in-memory for development)
+- Node.js 18+ and npm
 - OpenAI API key
+- ChromaDB running (optional, uses local embedded version by default)
 
 ## Installation
 
-```bash
-# Navigate to ai-service directory
-cd ai-service
+1. **Clone and navigate to ai-service:**
+   ```bash
+   cd /workspaces/CEW/ai-service
+   ```
 
-# Install dependencies
-npm install
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
 
-# Copy environment template
-cp .env.example .env
+3. **Configure environment variables:**
+   ```bash
+   cp .env.example .env
+   ```
+   
+   Edit `.env` and set your OpenAI API key:
+   ```env
+   OPENAI_API_KEY=sk-your-api-key-here
+   ```
 
-# Edit .env with your configuration
-# Required: OPENAI_API_KEY
-```
+## Usage
 
-## Configuration
+### Development Mode
 
-Edit `.env` file with your settings:
-
-```env
-# Required
-OPENAI_API_KEY=sk-your-api-key-here
-
-# Optional - defaults shown
-PORT=3001
-NODE_ENV=development
-OPENAI_MODEL=gpt-4-turbo-preview
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-VECTOR_STORE_TYPE=chroma
-CHROMA_HOST=localhost
-CHROMA_PORT=8000
-```
-
-## Running the Service
+Start the server in development mode with auto-reload:
 
 ```bash
-# Development mode with auto-reload
 npm run dev
+```
 
-# Production build
+Server will be available at `http://localhost:3001`
+
+### Production Mode
+
+Build and run in production:
+
+```bash
 npm run build
 npm start
+```
+
+### Document Ingestion
+
+Ingest a single document:
+
+```bash
+npm run ingest /path/to/document.pdf
+```
+
+Ingest all documents in a directory:
+
+```bash
+npm run ingest /path/to/documents/
+```
+
+### Test Chat
+
+Test the RAG pipeline without starting the server:
+
+```bash
+npm run test-chat "What are the safety requirements?"
 ```
 
 ## API Endpoints
 
 ### Chat
 
-```http
-POST /api/chat
-Content-Type: application/json
+**POST** `/api/chat`
 
+Request body:
+```json
 {
-  "query": "What are the safety requirements for concrete work?",
+  "query": "What is the project timeline?",
+  "userId": "optional-user-id",
   "conversationId": "optional-conversation-id",
-  "filters": {
-    "documentTypes": ["pdf"],
-    "tags": ["safety"]
-  },
-  "maxResults": 5
+  "language": "en"
 }
 ```
 
 Response:
 ```json
 {
-  "success": true,
-  "data": {
-    "answer": "According to the safety manual...",
-    "sources": [
-      {
-        "documentId": "doc-123",
-        "documentName": "Safety_Manual.pdf",
-        "pageNumber": 15,
-        "excerpt": "...",
-        "relevanceScore": 0.92
-      }
-    ],
-    "queryType": "document",
-    "confidence": 0.85,
-    "conversationId": "conv-456"
+  "answer": "According to the project plan...",
+  "sources": [
+    {
+      "documentId": "uuid",
+      "filename": "project-plan.pdf",
+      "pageNumber": 5,
+      "excerpt": "...",
+      "relevanceScore": 0.92
+    }
+  ],
+  "queryType": "DOCUMENT",
+  "language": "en",
+  "confidence": 0.85,
+  "processingTime": 1234,
+  "tokenUsage": {
+    "prompt": 450,
+    "completion": 120,
+    "total": 570
   }
 }
 ```
 
-### Document Ingestion
+### Document Management
 
-```http
-POST /api/ingest
-Content-Type: application/json
-
+**POST** `/api/ingest` - Ingest a single document
+```json
 {
-  "filepath": "/path/to/document.pdf",
-  "source": "local",
-  "tags": ["safety", "concrete"]
+  "filepath": "/path/to/document.pdf"
 }
 ```
 
-### Scan Documents Folder
-
-```http
-POST /api/ingest/scan
+**POST** `/api/ingest/directory` - Ingest a directory
+```json
+{
+  "dirPath": "/path/to/documents/"
+}
 ```
 
-### Health Check
+**GET** `/api/ingest/documents` - List all ingested documents
 
-```http
-GET /api/health
-GET /api/health/detailed
+**DELETE** `/api/ingest/documents/:documentId` - Delete a document
+
+### Health Checks
+
+**GET** `/api/health` - Overall health status
+
+**GET** `/api/health/ready` - Readiness probe
+
+**GET** `/api/health/live` - Liveness probe
+
+## Configuration
+
+All configuration is done through environment variables in `.env`:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENAI_API_KEY` | OpenAI API key (required) | - |
+| `PORT` | Server port | 3001 |
+| `NODE_ENV` | Environment (development/production) | development |
+| `CHUNK_SIZE` | Text chunk size for embedding | 1000 |
+| `CHUNK_OVERLAP` | Overlap between chunks | 200 |
+| `MAX_RETRIEVAL_RESULTS` | Number of chunks to retrieve | 5 |
+| `EMBEDDING_MODEL` | OpenAI embedding model | text-embedding-3-small |
+| `LLM_MODEL` | OpenAI LLM model | gpt-4-turbo-preview |
+| `LLM_TEMPERATURE` | LLM temperature (0-1) | 0.1 |
+| `OCR_LANGUAGES` | OCR languages | eng+tur |
+
+## Project Structure
+
 ```
-
-## Document Processing Pipeline
-
-1. **Load**: Parse document based on file type (PDF, DOCX, XLSX, etc.)
-2. **OCR** (if needed): Extract text from scanned images
-3. **Chunk**: Split content into overlapping chunks (default: 1000 chars, 200 overlap)
-4. **Embed**: Generate vector embeddings using OpenAI
-5. **Index**: Store in ChromaDB for semantic search
-
-## Query Processing Pipeline
-
-1. **Validate**: Check input against policy rules
-2. **Classify**: Determine query type (document/data/hybrid/conversational)
-3. **Retrieve**: Find relevant document chunks via vector similarity
-4. **Rerank**: Score results based on keyword relevance
-5. **Generate**: Create response using LLM with retrieved context
-
-## Integration with CEW
-
-The service includes a connector for CEW QA/QC storage (`cewQAQCConnector.ts`). Configure with:
-
-```env
-CEW_API_URL=http://localhost:5000
-CEW_API_KEY=your-cew-api-key
+ai-service/
+├── src/
+│   ├── config/           # Configuration management
+│   ├── types/            # TypeScript type definitions
+│   ├── services/         # Core services (logger, LLM, OCR, policy)
+│   ├── ingest/           # Document ingestion pipeline
+│   │   ├── documentLoader.ts
+│   │   ├── chunker.ts
+│   │   ├── embedder.ts
+│   │   └── index.ts
+│   ├── vector/           # Vector store (ChromaDB)
+│   ├── query/            # Query processing
+│   │   ├── queryClassifier.ts
+│   │   ├── retriever.ts
+│   │   └── responseGenerator.ts
+│   ├── routes/           # API routes
+│   ├── scripts/          # CLI scripts
+│   └── server.ts         # Main server file
+├── data/                 # Data directory (created at runtime)
+│   ├── documents/        # Document storage
+│   ├── vector-store/     # Vector database
+│   └── documents-registry.json
+├── logs/                 # Log files
+└── package.json
 ```
 
 ## Development
 
-```bash
-# Run tests
-npm test
+### Code Style
 
-# Lint code
-npm run lint
+The project uses TypeScript with strict mode enabled. Follow these guidelines:
 
-# Build TypeScript
-npm run build
-```
+- Use explicit types where possible
+- Document all public functions with JSDoc
+- Use singleton pattern for services
+- Implement proper error handling and logging
 
-## Docker (Future)
+### Adding New Document Types
 
-```dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --production
-COPY dist ./dist
-EXPOSE 3001
-CMD ["node", "dist/server.js"]
-```
+1. Add parser in `src/ingest/documentLoader.ts`
+2. Update `SUPPORTED_EXTENSIONS` array
+3. Implement extraction logic
+4. Update documentation
+
+### Extending Query Types
+
+1. Add new type to `QueryType` enum in `src/types/index.ts`
+2. Update classifier in `src/query/queryClassifier.ts`
+3. Add handler in `src/query/responseGenerator.ts`
+
+## Troubleshooting
+
+### "Missing required environment variables: OPENAI_API_KEY"
+
+Make sure you've created a `.env` file and set a valid OpenAI API key.
+
+### "Vector store initialization failed"
+
+If using external ChromaDB, ensure it's running and accessible at the configured URL.
+
+### "No relevant documents found"
+
+Ingest documents first using `npm run ingest <path>` before querying.
+
+### OCR not working properly
+
+OCR for scanned PDFs requires additional setup. Current implementation uses basic text extraction with OCR detection.
+
+## Security
+
+- Never commit `.env` file or API keys
+- Use HTTPS in production
+- Implement rate limiting for public APIs
+- Validate all user inputs
+- Regular security audits recommended
+
+## Performance Tips
+
+- Adjust `CHUNK_SIZE` and `CHUNK_OVERLAP` for your use case
+- Use appropriate `MAX_RETRIEVAL_RESULTS` (5-10 recommended)
+- Monitor token usage to control costs
+- Consider caching for frequently asked questions
 
 ## License
 
-ISC
+MIT
+
+## Support
+
+For issues and questions, please refer to the project documentation or create an issue in the repository.
+
+## Roadmap
+
+- [ ] Database query integration for real-time data
+- [ ] Conversation history and context
+- [ ] Multi-user support with authentication
+- [ ] Advanced OCR for scanned documents
+- [ ] Document update tracking
+- [ ] Query analytics and insights
+- [ ] Fine-tuning support
+- [ ] Hybrid search (keyword + semantic)
+
+---
+
+Built with ❤️ for the CEW Team

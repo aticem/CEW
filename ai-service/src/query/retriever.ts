@@ -1,199 +1,195 @@
-import { indexer } from '../ingest/indexer';
-import { embedder } from '../ingest/embedder';
-import { QueryFilters, VectorSearchResult, SourceReference } from '../types';
+/**
+ * Retriever - Retrieves relevant document chunks for queries
+ */
+import { SearchResult } from '../types';
 import { logger } from '../services/logger';
+import { embedder } from '../ingest/embedder';
+import { chromaVectorStore } from '../vector/chroma';
+import { config } from '../config';
 
-export interface RetrievalOptions {
-  maxResults?: number;
-  minScore?: number;
-  filters?: QueryFilters;
-  rerank?: boolean;
-}
+/**
+ * Retriever class - handles semantic search over document chunks
+ */
+export class Retriever {
+  private maxResults: number;
 
-export interface RetrievalResult {
-  chunks: VectorSearchResult[];
-  sources: SourceReference[];
-  context: string;
-}
+  constructor() {
+    this.maxResults = config.maxRetrievalResults;
+  }
 
-class Retriever {
-  private defaultOptions: Required<Omit<RetrievalOptions, 'filters'>> = {
-    maxResults: 5,
-    minScore: 0.7,
-    rerank: true,
-  };
-
-  async retrieve(
-    query: string,
-    options?: RetrievalOptions
-  ): Promise<RetrievalResult> {
-    const opts = { ...this.defaultOptions, ...options };
+  /**
+   * Retrieve relevant document chunks for a query
+   * @param query - The user's query text
+   * @param topK - Number of results to retrieve (optional)
+   * @returns Array of search results
+   */
+  async retrieve(query: string, topK?: number): Promise<SearchResult[]> {
+    const k = topK || this.maxResults;
     const startTime = Date.now();
 
-    // Build filter for vector store
-    const filter = this.buildFilter(options?.filters);
+    try {
+      logger.info('Starting retrieval', { query, topK: k });
 
-    // Search vector store
-    let results = await indexer.search(query, opts.maxResults * 2, filter);
+      // Step 1: Generate embedding for the query
+      logger.debug('Generating query embedding...');
+      const queryEmbedding = await embedder.embedText(query);
 
-    // Filter by minimum score
-    results = results.filter((r) => r.score >= opts.minScore);
+      // Step 2: Search vector store
+      logger.debug('Searching vector store...');
+      const results = await chromaVectorStore.search(queryEmbedding, k);
 
-    // Rerank if enabled
-    if (opts.rerank && results.length > 0) {
-      results = await this.rerankResults(query, results);
+      const duration = Date.now() - startTime;
+      
+      logger.info('Retrieval completed', {
+        resultsFound: results.length,
+        duration: `${duration}ms`,
+        avgScore: results.length > 0 
+          ? (results.reduce((sum, r) => sum + r.score, 0) / results.length).toFixed(3)
+          : 0
+      });
+
+      return results;
+
+    } catch (error) {
+      logger.error('Retrieval failed', { error, query });
+      throw error;
+    }
+  }
+
+  /**
+   * Retrieve and format context for LLM
+   * @param query - The user's query
+   * @param maxLength - Maximum context length in characters
+   * @returns Formatted context string and sources
+   */
+  async retrieveContext(query: string, maxLength?: number): Promise<{
+    context: string;
+    sources: SearchResult[];
+  }> {
+    const results = await this.retrieve(query);
+
+    if (results.length === 0) {
+      logger.warn('No relevant documents found for query');
+      return {
+        context: '',
+        sources: []
+      };
     }
 
-    // Take top results
-    results = results.slice(0, opts.maxResults);
+    // Build context from results
+    const contextParts: string[] = [];
+    const usedSources: SearchResult[] = [];
+    let currentLength = 0;
+    const limit = maxLength || 8000;
 
-    // Build context string
-    const context = this.buildContext(results);
+    for (const result of results) {
+      const chunkText = result.chunk.content;
+      const source = `[Source: ${result.chunk.metadata.filename}${
+        result.chunk.pageNumber ? `, Page ${result.chunk.pageNumber}` : ''
+      }]`;
+      
+      const part = `${source}\n${chunkText}\n`;
+      
+      // Check if adding this chunk would exceed limit
+      if (currentLength + part.length > limit) {
+        logger.debug('Context length limit reached', {
+          currentLength,
+          limit,
+          chunksUsed: usedSources.length
+        });
+        break;
+      }
 
-    // Build source references
-    const sources = this.buildSourceReferences(results);
+      contextParts.push(part);
+      usedSources.push(result);
+      currentLength += part.length;
+    }
 
-    const processingTime = Date.now() - startTime;
-    logger.info('Retrieval completed', {
-      query: query.slice(0, 50),
-      resultsCount: results.length,
-      processingTimeMs: processingTime,
+    const context = contextParts.join('\n---\n\n');
+
+    logger.debug('Context built', {
+      contextLength: context.length,
+      sourcesUsed: usedSources.length
     });
 
     return {
-      chunks: results,
-      sources,
       context,
+      sources: usedSources
     };
   }
 
-  private buildFilter(
-    filters?: QueryFilters
-  ): Record<string, unknown> | undefined {
-    if (!filters) return undefined;
+  /**
+   * Filter results by minimum relevance score
+   * @param results - Search results
+   * @param minScore - Minimum relevance score (0-1)
+   * @returns Filtered results
+   */
+  filterByRelevance(results: SearchResult[], minScore: number = 0.7): SearchResult[] {
+    const filtered = results.filter(r => r.score >= minScore);
+    
+    logger.debug('Filtered results by relevance', {
+      original: results.length,
+      filtered: filtered.length,
+      minScore
+    });
 
-    const whereConditions: Record<string, unknown>[] = [];
-
-    if (filters.documentIds && filters.documentIds.length > 0) {
-      whereConditions.push({
-        documentId: { $in: filters.documentIds },
-      });
-    }
-
-    if (filters.documentTypes && filters.documentTypes.length > 0) {
-      whereConditions.push({
-        documentType: { $in: filters.documentTypes },
-      });
-    }
-
-    if (filters.tags && filters.tags.length > 0) {
-      whereConditions.push({
-        tags: { $containsAny: filters.tags },
-      });
-    }
-
-    if (whereConditions.length === 0) return undefined;
-    if (whereConditions.length === 1) return whereConditions[0];
-
-    return { $and: whereConditions };
+    return filtered;
   }
 
-  private async rerankResults(
-    query: string,
-    results: VectorSearchResult[]
-  ): Promise<VectorSearchResult[]> {
-    // Simple reranking based on keyword matching
-    // Can be replaced with a proper reranker model (e.g., Cohere rerank)
-    const queryTokens = this.tokenize(query.toLowerCase());
-
-    const scored = results.map((result) => {
-      const contentTokens = this.tokenize(result.chunk.content.toLowerCase());
-      const overlap = queryTokens.filter((t) => contentTokens.includes(t)).length;
-      const keywordScore = overlap / queryTokens.length;
-
-      // Combine vector similarity with keyword score
-      const combinedScore = result.score * 0.7 + keywordScore * 0.3;
-
+  /**
+   * Re-rank results based on query relevance
+   * This is a simple implementation - could be enhanced with a reranking model
+   * @param results - Search results
+   * @param query - Original query
+   * @returns Re-ranked results
+   */
+  rerank(results: SearchResult[], query: string): SearchResult[] {
+    const queryTerms = query.toLowerCase().split(/\s+/);
+    
+    // Calculate term overlap score
+    const scored = results.map(result => {
+      const content = result.chunk.content.toLowerCase();
+      const termMatches = queryTerms.filter(term => 
+        content.includes(term)
+      ).length;
+      
+      const termScore = termMatches / queryTerms.length;
+      
+      // Combine with similarity score (weighted average)
+      const combinedScore = (result.score * 0.7) + (termScore * 0.3);
+      
       return {
         ...result,
-        score: combinedScore,
+        score: combinedScore
       };
     });
 
-    return scored.sort((a, b) => b.score - a.score);
-  }
+    // Sort by combined score
+    scored.sort((a, b) => b.score - a.score);
 
-  private tokenize(text: string): string[] {
-    return text
-      .split(/\W+/)
-      .filter((token) => token.length > 2)
-      .filter((token) => !this.isStopWord(token));
-  }
-
-  private isStopWord(word: string): boolean {
-    const stopWords = new Set([
-      'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-      'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
-      'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
-      'could', 'should', 'may', 'might', 'must', 'shall', 'can', 'this',
-      'that', 'these', 'those', 'what', 'which', 'who', 'whom', 'whose',
-    ]);
-    return stopWords.has(word);
-  }
-
-  private buildContext(results: VectorSearchResult[]): string {
-    if (results.length === 0) {
-      return '';
-    }
-
-    const contextParts = results.map((result, index) => {
-      const { chunk } = result;
-      const pageInfo = chunk.metadata.pageNumber
-        ? ` (Page ${chunk.metadata.pageNumber})`
-        : '';
-      const headers = chunk.metadata.headers?.join(' > ') || '';
-      const headerInfo = headers ? `\n[${headers}]` : '';
-
-      return `[Source ${index + 1}${pageInfo}]${headerInfo}\n${chunk.content}`;
+    logger.debug('Results re-ranked', {
+      original: results.length,
+      reranked: scored.length
     });
 
-    return contextParts.join('\n\n---\n\n');
+    return scored;
   }
 
-  private buildSourceReferences(results: VectorSearchResult[]): SourceReference[] {
-    // Group by document and deduplicate
-    const documentMap = new Map<string, SourceReference>();
-
-    results.forEach((result) => {
-      const { chunk, score } = result;
-      const existingRef = documentMap.get(chunk.documentId);
-
-      if (!existingRef || score > existingRef.relevanceScore) {
-        documentMap.set(chunk.documentId, {
-          documentId: chunk.documentId,
-          documentName: chunk.documentId, // Will be populated from metadata in real implementation
-          pageNumber: chunk.metadata.pageNumber,
-          excerpt: this.truncateExcerpt(chunk.content),
-          relevanceScore: score,
-        });
-      }
-    });
-
-    return Array.from(documentMap.values()).sort(
-      (a, b) => b.relevanceScore - a.relevanceScore
-    );
-  }
-
-  private truncateExcerpt(content: string, maxLength: number = 200): string {
-    if (content.length <= maxLength) {
-      return content;
-    }
-
-    const truncated = content.slice(0, maxLength);
-    const lastSpace = truncated.lastIndexOf(' ');
-
-    return (lastSpace > maxLength * 0.8 ? truncated.slice(0, lastSpace) : truncated) + '...';
+  /**
+   * Get statistics about retrieval performance
+   */
+  async getStats(): Promise<{
+    avgRetrievalTime: number;
+    totalQueries: number;
+  }> {
+    // Placeholder for future stats tracking
+    return {
+      avgRetrievalTime: 0,
+      totalQueries: 0
+    };
   }
 }
 
+// Singleton instance
 export const retriever = new Retriever();
+export default retriever;

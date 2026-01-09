@@ -1,166 +1,182 @@
-import { QueryType } from '../types';
+/**
+ * Query Classifier - Classifies user queries and detects language
+ */
+import { UserQuery, QueryType } from '../types';
 import { logger } from '../services/logger';
 
-export interface ClassificationResult {
-  queryType: QueryType;
-  confidence: number;
-  suggestedFilters?: {
-    documentTypes?: string[];
-    keywords?: string[];
-  };
-}
-
-class QueryClassifier {
-  private documentKeywords = [
-    'document', 'file', 'pdf', 'report', 'specification', 'spec',
-    'drawing', 'plan', 'manual', 'guide', 'procedure', 'policy',
-    'contract', 'agreement', 'submittal', 'rfi', 'change order',
-  ];
-
-  private dataKeywords = [
-    'data', 'number', 'value', 'calculate', 'sum', 'total', 'average',
-    'count', 'quantity', 'measurement', 'dimension', 'cost', 'price',
-    'date', 'schedule', 'timeline', 'percentage', 'ratio', 'compare',
-  ];
-
-  private conversationalKeywords = [
-    'hello', 'hi', 'thanks', 'thank', 'help', 'can you', 'could you',
-    'please', 'what is', 'explain', 'tell me about', 'how does',
-  ];
-
-  classify(query: string): ClassificationResult {
-    const normalizedQuery = query.toLowerCase().trim();
-
-    // Check for conversational queries first
-    if (this.isConversational(normalizedQuery)) {
-      return {
-        queryType: 'conversational',
-        confidence: 0.9,
-      };
-    }
-
-    // Score for document-focused query
-    const docScore = this.scoreKeywords(normalizedQuery, this.documentKeywords);
-
-    // Score for data-focused query
-    const dataScore = this.scoreKeywords(normalizedQuery, this.dataKeywords);
-
-    // Determine query type
-    let queryType: QueryType;
-    let confidence: number;
-
-    if (docScore > 0.3 && dataScore > 0.3) {
-      queryType = 'hybrid';
-      confidence = Math.min(docScore, dataScore);
-    } else if (docScore > dataScore) {
-      queryType = 'document';
-      confidence = docScore;
-    } else if (dataScore > docScore) {
-      queryType = 'data';
-      confidence = dataScore;
-    } else {
-      // Default to document query
-      queryType = 'document';
-      confidence = 0.5;
-    }
-
-    const result: ClassificationResult = {
-      queryType,
-      confidence,
-      suggestedFilters: this.extractFilters(normalizedQuery),
-    };
-
+/**
+ * Query Classifier class
+ */
+export class QueryClassifier {
+  /**
+   * Classify a user query
+   * @param query - The user's query text
+   * @returns Classified query with metadata
+   */
+  classifyQuery(query: string): UserQuery {
+    const trimmedQuery = query.trim();
+    
+    // Detect language
+    const language = this.detectLanguage(trimmedQuery);
+    
+    // Classify query type
+    const { type, confidence } = this.classifyType(trimmedQuery, language);
+    
     logger.debug('Query classified', {
-      query: query.slice(0, 50),
-      queryType,
+      type,
+      language,
       confidence,
+      queryLength: trimmedQuery.length
     });
 
-    return result;
+    return {
+      query: trimmedQuery,
+      type,
+      language,
+      confidence
+    };
   }
 
-  private isConversational(query: string): boolean {
-    const conversationalScore = this.scoreKeywords(query, this.conversationalKeywords);
+  /**
+   * Detect the language of the query
+   * @param query - The query text
+   * @returns Language code (en or tr)
+   */
+  private detectLanguage(query: string): string {
+    // Simple heuristic-based language detection
+    const turkishChars = /[çğıöşüÇĞİÖŞÜ]/;
+    const turkishWords = /\b(nedir|nasıl|ne|nerede|kim|hangi|için|hakkında|var|yok|mı|mi|mu|mü)\b/i;
+    
+    if (turkishChars.test(query) || turkishWords.test(query)) {
+      return 'tr';
+    }
+    
+    return 'en';
+  }
 
-    // Also check for very short queries or greetings
-    if (query.length < 20 || /^(hi|hello|hey|thanks|thank you)[\s!.]*$/i.test(query)) {
-      return true;
+  /**
+   * Classify the type of query
+   * @param query - The query text
+   * @param language - Detected language
+   * @returns Query type and confidence
+   */
+  private classifyType(query: string, language: string): {
+    type: QueryType;
+    confidence: number;
+  } {
+    const lowerQuery = query.toLowerCase();
+
+    // Check for greetings
+    if (this.isGreeting(lowerQuery, language)) {
+      return { type: QueryType.GENERAL, confidence: 0.95 };
     }
 
-    return conversationalScore > 0.5;
-  }
-
-  private scoreKeywords(query: string, keywords: string[]): number {
-    let matches = 0;
-    const words = query.split(/\s+/);
-
-    for (const keyword of keywords) {
-      if (query.includes(keyword)) {
-        matches++;
-      }
+    // Check for DATA queries (database/statistics requests)
+    if (this.isDataQuery(lowerQuery, language)) {
+      return { type: QueryType.DATA, confidence: 0.85 };
     }
 
-    // Normalize score
-    return Math.min(matches / 3, 1);
+    // Check for out-of-scope queries
+    if (this.isOutOfScope(lowerQuery, language)) {
+      return { type: QueryType.OUT_OF_SCOPE, confidence: 0.8 };
+    }
+
+    // Default to DOCUMENT query (RAG-based)
+    return { type: QueryType.DOCUMENT, confidence: 0.9 };
   }
 
-  private extractFilters(query: string): ClassificationResult['suggestedFilters'] {
-    const filters: ClassificationResult['suggestedFilters'] = {};
+  /**
+   * Check if query is a greeting
+   */
+  private isGreeting(query: string, language: string): boolean {
+    const englishGreetings = [
+      'hello', 'hi', 'hey', 'greetings',
+      'good morning', 'good afternoon', 'good evening'
+    ];
+    
+    const turkishGreetings = [
+      'merhaba', 'selam', 'günaydın', 'iyi günler',
+      'iyi akşamlar', 'hey', 'selamlar'
+    ];
 
-    // Extract document type hints
-    const docTypePatterns: Record<string, string[]> = {
-      pdf: ['pdf', 'document'],
-      docx: ['word', 'docx', 'document'],
-      xlsx: ['excel', 'spreadsheet', 'xlsx', 'xls'],
-      txt: ['text', 'txt'],
+    const greetings = language === 'tr' ? turkishGreetings : englishGreetings;
+    
+    // Check if query is just a greeting (very short)
+    if (query.length < 50) {
+      return greetings.some(greeting => query.includes(greeting));
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if query requires database access
+   */
+  private isDataQuery(query: string, language: string): boolean {
+    const dataKeywords = {
+      en: [
+        'how many', 'count', 'total number', 'statistics',
+        'show me all', 'list all', 'database', 'query',
+        'latest data', 'current status', 'real-time'
+      ],
+      tr: [
+        'kaç tane', 'toplam', 'sayısı', 'istatistik',
+        'hepsini göster', 'listele', 'veritabanı',
+        'güncel veri', 'son durum', 'anlık'
+      ]
     };
 
-    const suggestedTypes: string[] = [];
-    for (const [type, patterns] of Object.entries(docTypePatterns)) {
-      if (patterns.some((p) => query.includes(p))) {
-        suggestedTypes.push(type);
-      }
-    }
-
-    if (suggestedTypes.length > 0) {
-      filters.documentTypes = suggestedTypes;
-    }
-
-    // Extract potential keywords/topics
-    const keywords = this.extractKeywords(query);
-    if (keywords.length > 0) {
-      filters.keywords = keywords;
-    }
-
-    return Object.keys(filters).length > 0 ? filters : undefined;
+    const keywords = dataKeywords[language as 'en' | 'tr'] || dataKeywords.en;
+    
+    return keywords.some(keyword => query.includes(keyword));
   }
 
-  private extractKeywords(query: string): string[] {
-    // Extract nouns and important terms (simplified)
-    const words = query.split(/\s+/);
-    const stopWords = new Set([
-      'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-      'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'what',
-      'where', 'when', 'how', 'which', 'who', 'can', 'could', 'would', 'should',
-      'find', 'show', 'tell', 'me', 'about', 'please', 'get', 'give',
-    ]);
-
-    return words
-      .filter((word) => word.length > 3)
-      .filter((word) => !stopWords.has(word.toLowerCase()))
-      .slice(0, 5);
-  }
-
-  getQueryTypeDescription(queryType: QueryType): string {
-    const descriptions: Record<QueryType, string> = {
-      document: 'Search for information within documents',
-      data: 'Extract or calculate specific data values',
-      hybrid: 'Combination of document search and data extraction',
-      conversational: 'General conversation or help request',
+  /**
+   * Check if query is out of scope
+   */
+  private isOutOfScope(query: string, language: string): boolean {
+    const outOfScopeKeywords = {
+      en: [
+        'weather', 'news', 'stock price', 'movie', 'recipe',
+        'song', 'game', 'joke', 'story',
+        'what is your name', 'who created you', 'who are you'
+      ],
+      tr: [
+        'hava durumu', 'haber', 'borsa', 'film', 'tarif',
+        'şarkı', 'oyun', 'fıkra', 'hikaye',
+        'adın ne', 'kim yarattı', 'kimsin'
+      ]
     };
 
-    return descriptions[queryType];
+    const keywords = outOfScopeKeywords[language as 'en' | 'tr'] || outOfScopeKeywords.en;
+    
+    return keywords.some(keyword => query.includes(keyword));
+  }
+
+  /**
+   * Extract potential parameters from query
+   * (For future use with structured queries)
+   */
+  extractParameters(query: string): Record<string, any> {
+    const parameters: Record<string, any> = {};
+    
+    // Extract numbers
+    const numbers = query.match(/\d+/g);
+    if (numbers) {
+      parameters.numbers = numbers.map(n => parseInt(n));
+    }
+
+    // Extract dates (basic pattern)
+    const datePattern = /\d{4}-\d{2}-\d{2}/g;
+    const dates = query.match(datePattern);
+    if (dates) {
+      parameters.dates = dates;
+    }
+
+    return parameters;
   }
 }
 
+// Singleton instance
 export const queryClassifier = new QueryClassifier();
+export default queryClassifier;

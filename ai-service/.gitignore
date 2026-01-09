@@ -1,47 +1,39 @@
 # Dependencies
 node_modules/
+package-lock.json
+
+# Environment variables
+.env
 
 # Build output
 dist/
-
-# Environment files
-.env
-.env.local
-.env.*.local
-
-# Document storage (contains user uploads)
-documents/
-*.pdf
-*.docx
-*.xlsx
-
-# Vector index storage
-index-store/
-chroma-data/
+*.tsbuildinfo
 
 # Logs
 logs/
 *.log
-npm-debug.log*
+
+# Data directories
+data/
+documents/
+vector-store/
+
+# OS files
+.DS_Store
+Thumbs.db
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
-# OS files
-.DS_Store
-Thumbs.db
-
-# Test coverage
+# Test files
+test-output/
 coverage/
 
 # Temporary files
 tmp/
 temp/
 *.tmp
-
-# Debug
-.npm
-.eslintcache

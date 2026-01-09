@@ -1,198 +1,108 @@
+/**
+ * Configuration module - loads and validates environment variables
+ */
 import dotenv from 'dotenv';
 import path from 'path';
-import { AppConfig, Language } from '../types';
+import { AppConfig } from '../types';
+import { logger } from '../services/logger';
 
-// Load environment variables from .env file
+// Load environment variables
 dotenv.config();
 
 /**
- * Supported languages for the application
+ * Validate required environment variables
  */
-export const SUPPORTED_LANGUAGES: Language[] = ['tr', 'en'];
+function validateConfig(): void {
+  const required = ['OPENAI_API_KEY'];
+  const missing = required.filter(key => !process.env[key]);
+  
+  if (missing.length > 0) {
+    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+  }
+  
+  // Validate OpenAI API key format
+  if (!process.env.OPENAI_API_KEY?.startsWith('sk-')) {
+    logger.warn('OpenAI API key does not start with "sk-" - this may be invalid');
+  }
+}
+
+/**
+ * Parse integer from environment variable with default
+ */
+function getInt(key: string, defaultValue: number): number {
+  const value = process.env[key];
+  if (!value) return defaultValue;
+  const parsed = parseInt(value, 10);
+  return isNaN(parsed) ? defaultValue : parsed;
+}
+
+/**
+ * Parse float from environment variable with default
+ */
+function getFloat(key: string, defaultValue: number): number {
+  const value = process.env[key];
+  if (!value) return defaultValue;
+  const parsed = parseFloat(value);
+  return isNaN(parsed) ? defaultValue : parsed;
+}
 
 /**
  * Application configuration object
- * Loaded from environment variables with sensible defaults
  */
-export const config: AppConfig & {
-  nodeEnv: string;
-  llm: {
-    model: string;
-    embeddingModel: string;
-    temperature: number;
-    maxTokens: number;
-  };
-  vectorStore: {
-    type: 'chroma' | 'faiss';
-    host: string;
-    port: number;
-    collection: string;
-    dimension: number;
-  };
-  logging: {
-    level: string;
-  };
-  cors: {
-    origin: string;
-  };
-  supportedLanguages: Language[];
-} = {
-  // Server Configuration
-  port: parseInt(process.env.PORT || '3001', 10),
+export const config: AppConfig = {
+  // Server
+  port: getInt('PORT', 3001),
   nodeEnv: process.env.NODE_ENV || 'development',
-
-  // OpenAI API Key (required)
+  
+  // OpenAI
   openaiApiKey: process.env.OPENAI_API_KEY || '',
-
-  // File Paths (resolved to absolute paths)
-  documentsPath: path.resolve(
-    process.env.DOCUMENTS_PATH || path.join(__dirname, '../../documents')
-  ),
-  indexStorePath: path.resolve(
-    process.env.INDEX_STORE_PATH || path.join(__dirname, '../../index-store')
-  ),
-
-  // LLM Settings
-  llm: {
-    /** Model to use for chat completions */
-    model: process.env.OPENAI_MODEL || 'gpt-4-turbo-preview',
-    /** Model to use for generating embeddings */
-    embeddingModel: process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small',
-    /** Temperature for response generation (0-2, lower = more deterministic) */
-    temperature: parseFloat(process.env.LLM_TEMPERATURE || '0.3'),
-    /** Maximum tokens in generated response */
-    maxTokens: parseInt(process.env.LLM_MAX_TOKENS || '2000', 10),
-  },
-
-  // Chunking Settings
-  maxChunkSize: parseInt(process.env.CHUNK_SIZE || '1000', 10),
-  chunkOverlap: parseInt(process.env.CHUNK_OVERLAP || '200', 10),
-
-  // Vector Store Configuration
-  vectorStore: {
-    type: (process.env.VECTOR_STORE_TYPE || 'chroma') as 'chroma' | 'faiss',
-    host: process.env.CHROMA_HOST || 'localhost',
-    port: parseInt(process.env.CHROMA_PORT || '8000', 10),
-    collection: process.env.CHROMA_COLLECTION || 'cew_documents',
-    /** Embedding dimension for text-embedding-3-small */
-    dimension: 1536,
-  },
-
+  
+  // Vector Store
+  vectorStore: (process.env.VECTOR_STORE as 'chroma' | 'faiss') || 'chroma',
+  chromaUrl: process.env.CHROMA_URL || 'http://localhost:8000',
+  vectorStorePath: process.env.VECTOR_STORE_PATH || path.join(process.cwd(), 'data', 'vector-store'),
+  
+  // Document Processing
+  chunkSize: getInt('CHUNK_SIZE', 1000),
+  chunkOverlap: getInt('CHUNK_OVERLAP', 200),
+  maxRetrievalResults: getInt('MAX_RETRIEVAL_RESULTS', 5),
+  
+  // Embeddings
+  embeddingModel: process.env.EMBEDDING_MODEL || 'text-embedding-3-small',
+  embeddingDimensions: getInt('EMBEDDING_DIMENSIONS', 1536),
+  
+  // LLM
+  llmModel: process.env.LLM_MODEL || 'gpt-4-turbo-preview',
+  llmTemperature: getFloat('LLM_TEMPERATURE', 0.1),
+  maxTokens: getInt('MAX_TOKENS', 2000),
+  
+  // OCR
+  ocrLanguages: process.env.OCR_LANGUAGES || 'eng+tur',
+  
   // Logging
-  logging: {
-    level: process.env.LOG_LEVEL || 'info',
-  },
-
-  // CORS
-  cors: {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
-  },
-
-  // Supported Languages
-  supportedLanguages: SUPPORTED_LANGUAGES,
+  logLevel: process.env.LOG_LEVEL || 'info',
+  logFile: process.env.LOG_FILE || './logs/ai-service.log',
+  
+  // Data Paths
+  documentsPath: process.env.DOCUMENTS_PATH || path.join(process.cwd(), 'data', 'documents'),
+  registryPath: process.env.REGISTRY_PATH || path.join(process.cwd(), 'data', 'documents-registry.json'),
 };
 
-/**
- * Validates the configuration and throws an error if required fields are missing
- * @throws Error if validation fails
- */
-export function validateConfig(): void {
-  const errors: string[] = [];
-
-  // Required fields
-  if (!config.openaiApiKey) {
-    errors.push('OPENAI_API_KEY is required - set it in your .env file');
-  }
-
-  // Validate port
-  if (config.port < 1 || config.port > 65535) {
-    errors.push('PORT must be between 1 and 65535');
-  }
-
-  // Validate chunking settings
-  if (config.maxChunkSize < 100) {
-    errors.push('CHUNK_SIZE must be at least 100 characters');
-  }
-
-  if (config.chunkOverlap < 0) {
-    errors.push('CHUNK_OVERLAP cannot be negative');
-  }
-
-  if (config.chunkOverlap >= config.maxChunkSize) {
-    errors.push('CHUNK_OVERLAP must be less than CHUNK_SIZE');
-  }
-
-  // Validate LLM settings
-  if (config.llm.temperature < 0 || config.llm.temperature > 2) {
-    errors.push('LLM_TEMPERATURE must be between 0 and 2');
-  }
-
-  if (config.llm.maxTokens < 1) {
-    errors.push('LLM_MAX_TOKENS must be at least 1');
-  }
-
-  // Throw if there are validation errors
-  if (errors.length > 0) {
-    throw new Error(
-      `Configuration validation failed:\n  - ${errors.join('\n  - ')}`
-    );
-  }
-}
-
-/**
- * Masks sensitive values for safe logging
- */
-function maskSensitive(value: string): string {
-  if (!value || value.length < 8) return '***';
-  return `${value.substring(0, 4)}...${value.substring(value.length - 4)}`;
-}
-
-/**
- * Logs a summary of the current configuration (without sensitive values)
- */
-export function logConfigSummary(): void {
-  const summary = {
-    environment: config.nodeEnv,
-    port: config.port,
-    openaiApiKey: maskSensitive(config.openaiApiKey),
-    llm: {
-      model: config.llm.model,
-      embeddingModel: config.llm.embeddingModel,
-      temperature: config.llm.temperature,
-      maxTokens: config.llm.maxTokens,
-    },
-    chunking: {
-      maxChunkSize: config.maxChunkSize,
-      chunkOverlap: config.chunkOverlap,
-    },
-    paths: {
-      documents: config.documentsPath,
-      indexStore: config.indexStorePath,
-    },
-    vectorStore: {
-      type: config.vectorStore.type,
-      host: config.vectorStore.host,
-      port: config.vectorStore.port,
-      collection: config.vectorStore.collection,
-    },
-    supportedLanguages: config.supportedLanguages,
-    cors: config.cors.origin,
-    logLevel: config.logging.level,
-  };
-
-  console.log('\n📋 Configuration Summary:');
-  console.log('─'.repeat(50));
-  console.log(JSON.stringify(summary, null, 2));
-  console.log('─'.repeat(50) + '\n');
-}
-
-/**
- * Initialize configuration - validate and log summary
- * Call this on application startup
- */
-export function initializeConfig(): void {
+// Validate configuration on load
+try {
   validateConfig();
-  logConfigSummary();
+  logger.info('Configuration loaded successfully', {
+    port: config.port,
+    nodeEnv: config.nodeEnv,
+    vectorStore: config.vectorStore,
+    embeddingModel: config.embeddingModel,
+    llmModel: config.llmModel,
+    chunkSize: config.chunkSize,
+    chunkOverlap: config.chunkOverlap,
+  });
+} catch (error) {
+  logger.error('Configuration validation failed', { error });
+  throw error;
 }
 
 export default config;

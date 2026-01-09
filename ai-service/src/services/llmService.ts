@@ -1,130 +1,233 @@
-import { ChatOpenAI } from '@langchain/openai';
-import { HumanMessage, SystemMessage, AIMessage } from '@langchain/core/messages';
-import { LLMRequest, LLMResponse } from '../types';
-import { config } from '../config';
+/**
+ * LLM Service - Interacts with OpenAI's LLM for response generation
+ */
+import { OpenAI } from 'openai';
 import { logger } from './logger';
+import { policyService } from './policyService';
+import { config } from '../config';
 
-class LLMService {
-  private openaiClient: ChatOpenAI;
+/**
+ * LLM response with metadata
+ */
+export interface LLMResponse {
+  answer: string;
+  tokenUsage: {
+    prompt: number;
+    completion: number;
+    total: number;
+  };
+  model: string;
+  finishReason: string;
+}
+
+/**
+ * LLM Service class
+ */
+export class LLMService {
+  private openai: OpenAI;
+  private model: string;
+  private temperature: number;
+  private maxTokens: number;
 
   constructor() {
-    this.openaiClient = new ChatOpenAI({
-      openAIApiKey: config.openai.apiKey,
-      modelName: config.openai.model,
-      temperature: 0.3,
+    this.openai = new OpenAI({
+      apiKey: config.openaiApiKey,
+    });
+    this.model = config.llmModel;
+    this.temperature = config.llmTemperature;
+    this.maxTokens = config.maxTokens;
+
+    logger.info('LLM Service initialized', {
+      model: this.model,
+      temperature: this.temperature,
+      maxTokens: this.maxTokens
     });
   }
 
-  async generateResponse(request: LLMRequest): Promise<LLMResponse> {
-    const startTime = Date.now();
-
-    try {
-      const messages = this.buildMessages(request);
-
-      const response = await this.openaiClient.invoke(messages, {
-        ...(request.temperature !== undefined && { temperature: request.temperature }),
-        ...(request.maxTokens !== undefined && { maxTokens: request.maxTokens }),
-      });
-
-      const content = typeof response.content === 'string'
-        ? response.content
-        : JSON.stringify(response.content);
-
-      const result: LLMResponse = {
-        content,
-        model: config.openai.model,
-        tokensUsed: {
-          prompt: response.usage_metadata?.input_tokens || 0,
-          completion: response.usage_metadata?.output_tokens || 0,
-          total: response.usage_metadata?.total_tokens || 0,
-        },
-        finishReason: response.response_metadata?.finish_reason || 'stop',
-      };
-
-      const processingTime = Date.now() - startTime;
-      logger.debug('LLM response generated', {
-        model: config.openai.model,
-        tokensUsed: result.tokensUsed.total,
-        processingTimeMs: processingTime,
-      });
-
-      return result;
-    } catch (error) {
-      logger.error('LLM request failed', {
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
-      throw error;
-    }
-  }
-
-  private buildMessages(request: LLMRequest): (SystemMessage | HumanMessage)[] {
-    const messages: (SystemMessage | HumanMessage)[] = [];
-
-    if (request.systemPrompt) {
-      messages.push(new SystemMessage(request.systemPrompt));
-    }
-
-    // Add context if provided
-    let userContent = request.prompt;
-    if (request.context && request.context.length > 0) {
-      const contextStr = request.context.join('\n\n---\n\n');
-      userContent = `Context:\n${contextStr}\n\nQuestion: ${request.prompt}`;
-    }
-
-    messages.push(new HumanMessage(userContent));
-
-    return messages;
-  }
-
-  async streamResponse(
-    request: LLMRequest,
-    onChunk: (chunk: string) => void
+  /**
+   * Generate an answer based on context and query
+   * @param query - User's question
+   * @param context - Retrieved context from documents
+   * @param language - Detected language
+   * @returns LLM response
+   */
+  async generateAnswer(
+    query: string,
+    context: string,
+    language: string
   ): Promise<LLMResponse> {
     const startTime = Date.now();
 
     try {
-      const messages = this.buildMessages(request);
-      let fullContent = '';
+      logger.info('Generating LLM response', {
+        queryLength: query.length,
+        contextLength: context.length,
+        language
+      });
 
-      const stream = await this.openaiClient.stream(messages);
+      // Build prompt
+      const systemPrompt = policyService.getSystemPrompt();
+      const userPrompt = this.buildPrompt(query, context, language);
 
-      for await (const chunk of stream) {
-        const content = typeof chunk.content === 'string' ? chunk.content : '';
-        fullContent += content;
-        onChunk(content);
+      // Call OpenAI
+      const response = await this.openai.chat.completions.create({
+        model: this.model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: this.temperature,
+        max_tokens: this.maxTokens,
+      });
+
+      const answer = response.choices[0]?.message?.content || '';
+      const finishReason = response.choices[0]?.finish_reason || 'unknown';
+
+      const duration = Date.now() - startTime;
+
+      logger.info('LLM response generated', {
+        answerLength: answer.length,
+        finishReason,
+        duration: `${duration}ms`,
+        totalTokens: response.usage?.total_tokens || 0
+      });
+
+      // Validate response
+      const validation = policyService.validateResponse(answer, context.length > 0);
+      if (!validation.valid) {
+        logger.warn('LLM response validation issues', { issues: validation.issues });
       }
 
-      const processingTime = Date.now() - startTime;
+      return {
+        answer,
+        tokenUsage: {
+          prompt: response.usage?.prompt_tokens || 0,
+          completion: response.usage?.completion_tokens || 0,
+          total: response.usage?.total_tokens || 0
+        },
+        model: response.model,
+        finishReason
+      };
+
+    } catch (error) {
+      logger.error('LLM generation failed', { error });
+      throw new Error(`LLM generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Generate a simple response without context (for greetings, etc.)
+   * @param query - User's query
+   * @param language - Language code
+   * @returns LLM response
+   */
+  async generateSimpleResponse(query: string, language: string): Promise<LLMResponse> {
+    try {
+      const systemPrompt = `You are a helpful AI assistant for the CEW system. 
+Keep responses brief and friendly. 
+Respond in ${language === 'tr' ? 'Turkish' : 'English'}.`;
+
+      const response = await this.openai.chat.completions.create({
+        model: this.model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: query }
+        ],
+        temperature: 0.7,
+        max_tokens: 200,
+      });
+
+      const answer = response.choices[0]?.message?.content || '';
 
       return {
-        content: fullContent,
-        model: config.openai.model,
-        tokensUsed: {
-          prompt: 0, // Not available in streaming
-          completion: 0,
-          total: 0,
+        answer,
+        tokenUsage: {
+          prompt: response.usage?.prompt_tokens || 0,
+          completion: response.usage?.completion_tokens || 0,
+          total: response.usage?.total_tokens || 0
         },
-        finishReason: 'stop',
+        model: response.model,
+        finishReason: response.choices[0]?.finish_reason || 'unknown'
       };
+
     } catch (error) {
-      logger.error('LLM streaming failed', {
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
+      logger.error('Simple response generation failed', { error });
       throw error;
     }
   }
 
-  async checkHealth(): Promise<boolean> {
+  /**
+   * Build the user prompt with context
+   * @param query - User's question
+   * @param context - Document context
+   * @param language - Language code
+   * @returns Formatted prompt
+   */
+  private buildPrompt(query: string, context: string, language: string): string {
+    const instructions = policyService.getDocumentInstructions();
+    
+    if (context && context.length > 0) {
+      return `${instructions}
+
+CONTEXT:
+${context}
+
+USER QUESTION (${language}):
+${query}
+
+Please provide a comprehensive answer based ONLY on the context above. Cite your sources by mentioning document filenames.`;
+    } else {
+      // No context available
+      const noAnswerTemplate = policyService.getNoAnswerTemplate(language);
+      return `The user asked: "${query}"
+
+However, no relevant information was found in the indexed documents.
+
+Please provide this response: ${noAnswerTemplate}`;
+    }
+  }
+
+  /**
+   * Test OpenAI connection
+   */
+  async testConnection(): Promise<boolean> {
     try {
-      await this.generateResponse({
-        prompt: 'Hello',
-        maxTokens: 5,
+      const response = await this.openai.chat.completions.create({
+        model: this.model,
+        messages: [{ role: 'user', content: 'Hello' }],
+        max_tokens: 10
       });
+
+      logger.info('OpenAI LLM API connection successful');
       return true;
-    } catch {
+    } catch (error) {
+      logger.error('OpenAI LLM API connection failed', { error });
       return false;
     }
   }
+
+  /**
+   * Estimate token count (rough approximation)
+   * @param text - Text to estimate
+   * @returns Estimated token count
+   */
+  estimateTokens(text: string): number {
+    // Rough estimate: 1 token ≈ 4 characters
+    return Math.ceil(text.length / 4);
+  }
+
+  /**
+   * Check if text fits within token limit
+   * @param text - Text to check
+   * @param limit - Token limit
+   * @returns True if within limit
+   */
+  fitsTokenLimit(text: string, limit: number): boolean {
+    const estimated = this.estimateTokens(text);
+    return estimated <= limit;
+  }
 }
 
+// Singleton instance
 export const llmService = new LLMService();
+export default llmService;

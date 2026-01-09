@@ -1,48 +1,51 @@
 {
   "name": "cew-ai-service",
   "version": "1.0.0",
-  "description": "RAG-based AI Assistant service for CEW Construction Engineering Workflow",
+  "description": "RAG-based AI Assistant for Construction Engineering Workflow",
   "main": "dist/server.js",
   "scripts": {
     "dev": "nodemon --exec ts-node src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "lint": "eslint src/**/*.ts",
-    "test": "jest"
+    "ingest": "ts-node src/scripts/ingest.ts",
+    "test-chat": "ts-node src/scripts/test-chat.ts",
+    "clean": "rm -rf dist"
   },
   "keywords": [
-    "rag",
     "ai",
+    "rag",
+    "document-qa",
     "langchain",
-    "construction",
-    "document-qa"
+    "openai",
+    "construction"
   ],
-  "author": "",
-  "license": "ISC",
+  "author": "CEW Team",
+  "license": "MIT",
   "dependencies": {
-    "@langchain/core": "^0.3.40",
-    "@langchain/community": "^0.3.25",
-    "@langchain/openai": "^0.4.0",
-    "chromadb": "^1.8.1",
+    "express": "^4.18.2",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.21.0",
     "helmet": "^7.1.0",
-    "langchain": "^0.3.20",
-    "mammoth": "^1.8.0",
+    "dotenv": "^16.3.1",
+    "@langchain/openai": "^0.0.19",
+    "@langchain/core": "^0.1.17",
+    "langchain": "^0.1.17",
+    "openai": "^4.24.1",
     "pdf-parse": "^1.1.1",
-    "tesseract.js": "^5.1.0",
-    "uuid": "^10.0.0",
-    "winston": "^3.14.0",
-    "xlsx": "^0.18.5"
+    "mammoth": "^1.6.0",
+    "xlsx": "^0.18.5",
+    "tesseract.js": "^5.0.4",
+    "chromadb": "^1.7.3",
+    "uuid": "^9.0.1",
+    "winston": "^3.11.0"
   },
   "devDependencies": {
-    "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
-    "@types/node": "^22.5.0",
-    "@types/uuid": "^10.0.0",
-    "nodemon": "^3.1.4",
+    "@types/cors": "^2.8.17",
+    "@types/node": "^20.10.6",
+    "@types/uuid": "^9.0.7",
+    "@types/pdf-parse": "^1.1.4",
+    "typescript": "^5.3.3",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.4"
+    "nodemon": "^3.0.2"
   }
 }
