@@ -1,0 +1,48 @@
+# ============================================================================
+# CEW AI Service - Docker Compose Configuration
+# ============================================================================
+# Usage:
+#   docker-compose up -d        # Start AI service
+#   docker-compose down         # Stop AI service
+#   docker-compose logs -f      # View logs
+# ============================================================================
+
+version: '3.8'
+
+services:
+  # --------------------------------------------------------------------------
+  # AI Service (RAG Backend)
+  # --------------------------------------------------------------------------
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: cew-ai-service
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DOCUMENTS_PATH=/app/documents
+      - INDEX_STORE_PATH=/app/index-store
+    env_file:
+      - ./ai-service/.env
+    volumes:
+      # Persist documents and index across container restarts
+      - ./ai-service/documents:/app/documents
+      - ./ai-service/index-store:/app/index-store
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# ============================================================================
+# Notes:
+# - Frontend is NOT dockerized (run locally with: cd CEW1/_root && npm run dev)
+# - Ensure ai-service/.env exists with OPENAI_API_KEY set
+# - Documents folder is mounted for easy document addition
+# - Index store is persisted so you don't re-index on restart
+# ============================================================================

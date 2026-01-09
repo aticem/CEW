@@ -4,9 +4,11 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
+import { AI_CONFIG } from '../../config/aiService';
 import './AIAssistantModule.css';
 
-const AI_SERVICE_URL = 'http://localhost:3001';
+// Use centralized config
+const AI_SERVICE_URL = AI_CONFIG.baseUrl;
 
 export default function AIAssistantModule() {
   const [messages, setMessages] = useState([
@@ -62,10 +64,10 @@ export default function AIAssistantModule() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${AI_SERVICE_URL}/api/query`, {
+      const res = await fetch(`${AI_SERVICE_URL}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question })
+        body: JSON.stringify({ message: question })
       });
 
       const data = await res.json();
@@ -73,7 +75,7 @@ export default function AIAssistantModule() {
       if (data.success) {
         setMessages(prev => [...prev, {
           role: 'assistant',
-          content: data.answer,
+          content: data.message,
           sources: data.sources || [],
           blocked: data.blocked,
           guardResult: data.guardResult
@@ -81,7 +83,7 @@ export default function AIAssistantModule() {
       } else {
         setMessages(prev => [...prev, {
           role: 'assistant',
-          content: `Sorry, I couldn't process your question. ${data.error || ''}`,
+          content: `Sorry, I couldn't process your question. ${data.error?.message || data.message || ''}`,
           sources: [],
           error: true
         }]);
@@ -115,8 +117,8 @@ export default function AIAssistantModule() {
               <span className="sources-label">📄 Sources:</span>
               {msg.sources.slice(0, 5).map((src, i) => (
                 <span key={i} className="source-tag">
-                  {src.docName}
-                  {src.page && ` (p.${src.page})`}
+                  {src.filename || src.docName}
+                  {(src.pageNumber || src.page) && ` (p.${src.pageNumber || src.page})`}
                 </span>
               ))}
             </div>

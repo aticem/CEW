@@ -17,6 +17,7 @@ import ParameterAndTableEarthingProgressModule from './modules/ParameterAndTable
 import DCACTrenchModule from './modules/DCACTrenchModule.jsx';
 import QAQCModule from './modules/qaqc/QAQCModule.jsx';
 import AIAssistantModule from './modules/ai/AIAssistantModule.jsx';
+import { AIAssistant } from './components/AIAssistant';
 
 const MODULES = {
   DC: { key: 'DC', label: 'DC Cable Pulling Progress', Component: DCModule },
@@ -160,6 +161,9 @@ export default function App() {
           ))}
         </div>
       )}
+
+      {/* Floating AI Assistant - visible on all pages */}
+      <AIAssistant />
     </>
   );
 }

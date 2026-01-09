@@ -5,6 +5,7 @@ import '../App.css';
 import SubmitModal from '../components/SubmitModal';
 import useDailyLog from '../hooks/useDailyLog';
 import { useChartExport } from '../hooks/useChartExport';
+import { sendSnapshotAfterSubmit } from '../utils/snapshotExport';
 import Papa from 'papaparse';
 import {
   asLineStrings,
@@ -19382,6 +19383,20 @@ export default function BaseModule({
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         onSubmit={(record) => {
+          // Helper: Send snapshot to AI backend (non-blocking, silent fail)
+          const sendModuleSnapshot = (workAmountOverride) => {
+            const moduleKey = activeMode?.key || 'UNKNOWN';
+            const moduleLabel = activeMode?.label || moduleKey;
+            sendSnapshotAfterSubmit({
+              moduleKey,
+              moduleLabel,
+              completedToday: typeof workAmountOverride === 'number' ? workAmountOverride : (record.total_cable || 0),
+              completedTotal: completedTotal + (typeof workAmountOverride === 'number' ? workAmountOverride : (record.total_cable || 0)),
+              overallTotal,
+              unit: simpleCounterUnit || record.unit || 'm',
+            });
+          };
+
           // Add notes from the same date to the record
           const recordDate = record.date;
           const notesOnDate = notes.filter(n => {
@@ -19483,6 +19498,7 @@ export default function BaseModule({
               setMvfActiveSegmentKeys(new Set());
             
             alert('Work submitted successfully!');
+            sendModuleSnapshot(meters);
             return;
           }
 
@@ -19524,6 +19540,7 @@ export default function BaseModule({
             });
 
             alert('Work submitted successfully!');
+            sendModuleSnapshot(meters);
             return;
           }
 
@@ -19582,6 +19599,7 @@ export default function BaseModule({
             };
             addRecord(recordWithSelections);
             alert('Work submitted successfully!');
+            sendModuleSnapshot();
             return;
           }
 
@@ -19642,6 +19660,7 @@ export default function BaseModule({
               dcttCommittedPanelIdsRef.current = nextCommitted;
             }
             alert('Work submitted successfully!');
+            sendModuleSnapshot();
             return;
           }
 
@@ -19666,6 +19685,7 @@ export default function BaseModule({
             // Clear selection after submit
             setDatpSelectedTrenchParts([]);
             alert('Work submitted successfully!');
+            sendModuleSnapshot(meters);
             return;
           }
 
@@ -19704,6 +19724,7 @@ export default function BaseModule({
             // Clear ONLY the draft selection after submit
             setMvftSelectedTrenchParts([]);
             alert('Work submitted successfully!');
+            sendModuleSnapshot(meters);
             return;
           }
 
@@ -19743,6 +19764,7 @@ export default function BaseModule({
               setPtepSelectedParameterParts([]);
             }
             alert('Work submitted successfully!');
+            sendModuleSnapshot();
             return;
           }
 
@@ -19769,6 +19791,7 @@ export default function BaseModule({
             };
             addRecord(recordWithSelections);
             alert('Work submitted successfully!');
+            sendModuleSnapshot(totalCables);
             return;
           }
 
@@ -19789,6 +19812,7 @@ export default function BaseModule({
             };
             addRecord(recordWithSelections);
             alert('Work submitted successfully!');
+            sendModuleSnapshot(totalCables);
             return;
           }
 
@@ -19854,6 +19878,7 @@ export default function BaseModule({
           });
 
           alert('Work submitted successfully!');
+          sendModuleSnapshot(newWorkAmount);
         }}
         moduleKey={isMC4
           ? (mc4SelectionMode === 'termination_panel'

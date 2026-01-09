@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { DOC_STATUSES, NCR_STATUSES, generateId } from './schema.js';
 import { 
   initializeMetadata, 
@@ -20,6 +20,7 @@ import {
   resetMetadata 
 } from './metadataStorage.js';
 import { saveFile, deleteFile, getFile, getFileUrl } from './fileStorage.js';
+import { exportQAQCSnapshot, exportQAQCSnapshotNow } from '../../utils/qaqcSnapshotExport.js';
 
 // Debug: expose reset function to window for manual reset
 if (typeof window !== 'undefined') {
@@ -264,6 +265,15 @@ export default function QAQCModule() {
     setMetadata(meta);
   }, []);
 
+  // Export QAQC snapshot on mount (for AI backend)
+  useEffect(() => {
+    // Delay slightly to ensure metadata is initialized
+    const timer = setTimeout(() => {
+      exportQAQCSnapshotNow();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, []);
+
   const expandFolderPath = useCallback((categoryKey, folderPath) => {
     if (!folderPath || folderPath.length === 0) return;
     setExpandedNodes(prev => {
@@ -449,6 +459,8 @@ export default function QAQCModule() {
       updateStatus(categoryKeyOrStatusKey, path, newStatus);
     }
     refreshMetadata();
+    // Export QAQC snapshot to AI backend (debounced)
+    exportQAQCSnapshot();
   }, [refreshMetadata]);
   
   // Handle delete

@@ -1,10 +1,18 @@
 {
   "name": "cew-1",
   "private": true,
+  "description": "CEW - Construction Engineering Workflow Application",
   "scripts": {
     "dev": "npm --prefix CEW1/_root run dev",
     "dev:ai": "npm --prefix ai-service run dev",
     "build": "npm --prefix CEW1/_root run build",
-    "build:ai": "npm --prefix ai-service run build"
+    "build:ai": "npm --prefix ai-service run build",
+    "ingest": "npm --prefix ai-service run ingest",
+    "test:ai": "npm --prefix ai-service run test",
+    "setup:ai": "cd ai-service && npm install",
+    "start:all": "concurrently \"npm run dev\" \"npm run dev:ai\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
   }
 }
