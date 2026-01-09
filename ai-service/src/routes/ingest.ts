@@ -11,15 +11,16 @@ const router = Router();
  * POST /api/ingest
  * Ingest a single document
  */
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', async (req: Request, res: Response): Promise<void> => {
   try {
     const { filepath } = req.body;
 
     // Validate request
     if (!filepath || typeof filepath !== 'string') {
-      return res.status(400).json({
+      res.status(400).json({
         error: 'Invalid request: filepath is required and must be a string'
       });
+      return;
     }
 
     logger.info('Received ingest request', { filepath });
@@ -46,15 +47,16 @@ router.post('/', async (req: Request, res: Response) => {
  * POST /api/ingest/directory
  * Ingest all documents from a directory
  */
-router.post('/directory', async (req: Request, res: Response) => {
+router.post('/directory', async (req: Request, res: Response): Promise<void> => {
   try {
     const { dirPath } = req.body;
 
     // Validate request
     if (!dirPath || typeof dirPath !== 'string') {
-      return res.status(400).json({
+      res.status(400).json({
         error: 'Invalid request: dirPath is required and must be a string'
       });
+      return;
     }
 
     logger.info('Received directory ingest request', { dirPath });
@@ -85,7 +87,7 @@ router.post('/directory', async (req: Request, res: Response) => {
  * GET /api/ingest/documents
  * Get list of ingested documents
  */
-router.get('/documents', async (req: Request, res: Response) => {
+router.get('/documents', async (_req: Request, res: Response): Promise<void> => {
   try {
     const documents = await ingestPipeline.getDocumentList();
     res.json({ documents });
@@ -102,14 +104,15 @@ router.get('/documents', async (req: Request, res: Response) => {
  * DELETE /api/ingest/documents/:documentId
  * Delete a document and its chunks
  */
-router.delete('/documents/:documentId', async (req: Request, res: Response) => {
+router.delete('/documents/:documentId', async (req: Request, res: Response): Promise<void> => {
   try {
     const { documentId } = req.params;
 
     if (!documentId) {
-      return res.status(400).json({
+      res.status(400).json({
         error: 'Invalid request: documentId is required'
       });
+      return;
     }
 
     logger.info('Received delete document request', { documentId });

@@ -3,7 +3,7 @@
  */
 import { Router, Request, Response } from 'express';
 import { HealthResponse } from '../types';
-import { chromaVectorStore } from '../vector/chroma';
+import { vectorStore } from '../vector';
 import { embedder } from '../ingest/embedder';
 import { logger } from '../services/logger';
 
@@ -16,12 +16,12 @@ const startTime = Date.now();
  * GET /api/health
  * Health check endpoint
  */
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', async (_req: Request, res: Response): Promise<void> => {
   try {
     // Check vector store connection
-    const vectorStoreConnected = await chromaVectorStore.isConnected();
+    const vectorStoreConnected = await vectorStore.isConnected();
     const vectorStats = vectorStoreConnected 
-      ? await chromaVectorStore.getStats()
+      ? await vectorStore.getStats()
       : { totalChunks: 0, uniqueDocuments: 0 };
 
     // Check OpenAI connection
@@ -65,9 +65,9 @@ router.get('/', async (req: Request, res: Response) => {
  * GET /api/health/ready
  * Readiness probe
  */
-router.get('/ready', async (req: Request, res: Response) => {
+router.get('/ready', async (_req: Request, res: Response): Promise<void> => {
   try {
-    const vectorStoreConnected = await chromaVectorStore.isConnected();
+    const vectorStoreConnected = await vectorStore.isConnected();
     
     if (vectorStoreConnected) {
       res.status(200).json({ ready: true });
@@ -83,7 +83,7 @@ router.get('/ready', async (req: Request, res: Response) => {
  * GET /api/health/live
  * Liveness probe
  */
-router.get('/live', (req: Request, res: Response) => {
+router.get('/live', (_req: Request, res: Response): void => {
   res.status(200).json({ alive: true });
 });
 

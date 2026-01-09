@@ -42,7 +42,7 @@ export class TextChunker {
     const chunks = this.splitText(text);
     
     // Create DocumentChunk objects
-    const documentChunks: DocumentChunk[] = chunks.map((chunk, index) => ({
+    const documentChunks: DocumentChunk[] = chunks.map((chunk, _index) => ({
       id: uuidv4(),
       documentId: document.metadata.id,
       content: chunk.text,

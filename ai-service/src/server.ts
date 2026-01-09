@@ -6,7 +6,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { config } from './config';
 import { logger } from './services/logger';
-import { chromaVectorStore } from './vector/chroma';
+import { vectorStore } from './vector';
 
 // Import routes
 import chatRoutes from './routes/chat';
@@ -33,7 +33,7 @@ function createApp(): Application {
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
   // Request logging middleware
-  app.use((req: Request, res: Response, next: NextFunction) => {
+  app.use((req: Request, _res: Response, next: NextFunction) => {
     logger.info(`${req.method} ${req.path}`, {
       ip: req.ip,
       userAgent: req.get('user-agent')
@@ -47,7 +47,7 @@ function createApp(): Application {
   app.use('/api/health', healthRoutes);
 
   // Root endpoint
-  app.get('/', (req: Request, res: Response) => {
+  app.get('/', (_req: Request, res: Response) => {
     res.json({
       service: 'CEW AI Service',
       version: '1.0.0',
@@ -74,7 +74,7 @@ function createApp(): Application {
   });
 
   // Error handling middleware
-  app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+  app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
     logger.error('Unhandled error', { error: err, path: req.path });
     res.status(500).json({
       error: 'Internal Server Error',
@@ -94,7 +94,7 @@ async function initializeServices(): Promise<void> {
   try {
     // Initialize vector store
     logger.info('Initializing vector store...');
-    await chromaVectorStore.initialize();
+    await vectorStore.initialize();
     logger.info('Vector store initialized successfully');
 
     // Add more service initializations here if needed

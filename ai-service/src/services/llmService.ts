@@ -192,7 +192,7 @@ Please provide this response: ${noAnswerTemplate}`;
    */
   async testConnection(): Promise<boolean> {
     try {
-      const response = await this.openai.chat.completions.create({
+      await this.openai.chat.completions.create({
         model: this.model,
         messages: [{ role: 'user', content: 'Hello' }],
         max_tokens: 10

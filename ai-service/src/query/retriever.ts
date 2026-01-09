@@ -4,7 +4,7 @@
 import { SearchResult } from '../types';
 import { logger } from '../services/logger';
 import { embedder } from '../ingest/embedder';
-import { chromaVectorStore } from '../vector/chroma';
+import { vectorStore } from '../vector';
 import { config } from '../config';
 
 /**
@@ -36,7 +36,7 @@ export class Retriever {
 
       // Step 2: Search vector store
       logger.debug('Searching vector store...');
-      const results = await chromaVectorStore.search(queryEmbedding, k);
+      const results = await vectorStore.search(queryEmbedding, k);
 
       const duration = Date.now() - startTime;
       

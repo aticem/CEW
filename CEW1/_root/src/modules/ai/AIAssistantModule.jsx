@@ -39,7 +39,7 @@ export default function AIAssistantModule() {
 
   async function checkServiceHealth() {
     try {
-      const res = await fetch(`${AI_SERVICE_URL}/health`);
+      const res = await fetch(`${AI_SERVICE_URL}/api/health`);
       if (res.ok) {
         setServiceStatus('online');
       } else {
@@ -62,31 +62,29 @@ export default function AIAssistantModule() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${AI_SERVICE_URL}/api/query`, {
+      const res = await fetch(`${AI_SERVICE_URL}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question })
+        body: JSON.stringify({ query: question })
       });
 
       const data = await res.json();
+      
+      // CRITICAL: Always use data.answer (string), never stringify entire object
+      const answerText = typeof data.answer === 'string' 
+        ? data.answer 
+        : 'Sorry, I couldn\'t process your question.';
 
-      if (data.success) {
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          content: data.answer,
-          sources: data.sources || [],
-          blocked: data.blocked,
-          guardResult: data.guardResult
-        }]);
-      } else {
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          content: `Sorry, I couldn't process your question. ${data.error || ''}`,
-          sources: [],
-          error: true
-        }]);
-      }
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: answerText,
+        sources: data.sources || [],
+        queryType: data.queryType,
+        confidence: data.confidence
+      }]);
+
     } catch (err) {
+      console.error('AI service error:', err);
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: 'Unable to connect to AI service. Please make sure the backend is running.',
