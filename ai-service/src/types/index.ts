@@ -167,7 +167,7 @@ export interface AppConfig {
   /** OpenAI API key */
   openaiApiKey: string;
   /** Vector store type */
-  vectorStore: 'chroma' | 'faiss';
+  vectorStore: 'chroma' | 'faiss' | 'local';
   /** Vector store URL (for Chroma) */
   chromaUrl?: string;
   /** Vector store file path */

@@ -2,9 +2,8 @@
  * Document ingestion script
  * Usage: npm run ingest <filepath or directory>
  */
-import { config } from '../config';
 import { logger } from '../services/logger';
-import { chromaVectorStore } from '../vector/chroma';
+import { vectorStore } from '../vector';
 import { ingestPipeline } from '../ingest';
 import fs from 'fs';
 import path from 'path';
@@ -44,7 +43,7 @@ Supported formats: PDF, DOCX, XLSX, TXT
     logger.info(`Input path: ${inputPath}`);
 
     // Initialize vector store
-    await chromaVectorStore.initialize();
+    await vectorStore.initialize();
 
     // Check if path is file or directory
     const stats = fs.statSync(inputPath);
@@ -99,7 +98,7 @@ Supported formats: PDF, DOCX, XLSX, TXT
     }
 
     // Get final stats
-    const vectorStats = await chromaVectorStore.getStats();
+    const vectorStats = await vectorStore.getStats();
     console.log('\n=== Vector Store Stats ===');
     console.log(`Total documents: ${vectorStats.uniqueDocuments}`);
     console.log(`Total chunks: ${vectorStats.totalChunks}`);

@@ -8,7 +8,7 @@ import { logger } from '../services/logger';
 import { documentLoader, DocumentLoader } from './documentLoader';
 import { textChunker } from './chunker';
 import { embedder } from './embedder';
-import { chromaVectorStore } from '../vector/chroma';
+import { vectorStore } from '../vector';
 import { config } from '../config';
 
 /**
@@ -69,7 +69,7 @@ export class IngestPipeline {
 
       // Step 4: Store in vector database
       logger.info('Step 4: Storing in vector database...');
-      await chromaVectorStore.addChunks(embeddedChunks);
+      await vectorStore.addChunks(embeddedChunks);
 
       // Step 5: Update registry
       logger.info('Step 5: Updating document registry...');
@@ -173,7 +173,7 @@ export class IngestPipeline {
 
     try {
       // Delete from vector store
-      await chromaVectorStore.deleteByDocumentId(documentId);
+      await vectorStore.deleteByDocumentId(documentId);
 
       // Remove from registry
       await this.removeFromRegistry(documentId);

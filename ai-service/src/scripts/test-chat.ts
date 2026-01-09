@@ -2,7 +2,7 @@
  * Test chat script
  * Usage: npm run test-chat "Your question here"
  */
-import { chromaVectorStore } from '../vector/chroma';
+import { vectorStore } from '../vector';
 import { responseGenerator } from '../query/responseGenerator';
 import { logger } from '../services/logger';
 
@@ -37,10 +37,10 @@ This script tests the complete RAG pipeline without starting the HTTP server.
 
     // Initialize vector store
     console.log('Initializing services...');
-    await chromaVectorStore.initialize();
+    await vectorStore.initialize();
     
     // Get stats
-    const stats = await chromaVectorStore.getStats();
+    const stats = await vectorStore.getStats();
     console.log(`Vector store: ${stats.uniqueDocuments} documents, ${stats.totalChunks} chunks\n`);
 
     if (stats.totalChunks === 0) {

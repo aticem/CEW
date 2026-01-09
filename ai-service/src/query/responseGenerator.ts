@@ -15,10 +15,11 @@ export class ResponseGenerator {
   /**
    * Generate a response for a user query
    * @param request - Chat request
-   * @returns Chat response
+   * @returns Chat response - ALWAYS returns a valid ChatResponse, never throws
    */
   async generateResponse(request: ChatRequest): Promise<ChatResponse> {
     const startTime = Date.now();
+    const language = request.language || 'en';
 
     try {
       logger.info('Processing chat request', {
@@ -30,16 +31,16 @@ export class ResponseGenerator {
       // Step 1: Validate query safety
       if (!policyService.isSafeQuery(request.query)) {
         logger.warn('Unsafe query detected', { query: request.query });
-        return this.createErrorResponse(
+        return this.createSafeResponse(
           'Query contains potentially unsafe content.',
-          request.language || 'en',
+          language,
           startTime
         );
       }
 
       // Step 2: Classify query
       const classifiedQuery = queryClassifier.classifyQuery(request.query);
-      const language = request.language || classifiedQuery.language;
+      const detectedLanguage = request.language || classifiedQuery.language;
 
       logger.info('Query classified', {
         type: classifiedQuery.type,
@@ -47,26 +48,39 @@ export class ResponseGenerator {
         confidence: classifiedQuery.confidence
       });
 
-      // Step 3: Route based on query type
+      // Step 3: Route based on query type - each handler is wrapped in try/catch
       let response: ChatResponse;
 
-      switch (classifiedQuery.type) {
-        case QueryType.GENERAL:
-          response = await this.handleGeneralQuery(request.query, language, startTime);
-          break;
+      try {
+        switch (classifiedQuery.type) {
+          case QueryType.GENERAL:
+            response = await this.handleGeneralQuery(request.query, detectedLanguage, startTime);
+            break;
 
-        case QueryType.OUT_OF_SCOPE:
-          response = await this.handleOutOfScopeQuery(language, startTime);
-          break;
+          case QueryType.OUT_OF_SCOPE:
+            response = await this.handleOutOfScopeQuery(detectedLanguage, startTime);
+            break;
 
-        case QueryType.DATA:
-          response = await this.handleDataQuery(request.query, language, startTime);
-          break;
+          case QueryType.DATA:
+            response = await this.handleDataQuery(request.query, detectedLanguage, startTime);
+            break;
 
-        case QueryType.DOCUMENT:
-        default:
-          response = await this.handleDocumentQuery(request.query, language, startTime);
-          break;
+          case QueryType.DOCUMENT:
+          default:
+            response = await this.handleDocumentQuery(request.query, detectedLanguage, startTime);
+            break;
+        }
+      } catch (handlerError) {
+        logger.error('Query handler failed', { 
+          error: handlerError,
+          queryType: classifiedQuery.type,
+          query: request.query
+        });
+        return this.createSafeResponse(
+          'Sorry, I couldn\'t process your question. Please try again.',
+          detectedLanguage,
+          startTime
+        );
       }
 
       logger.info('Response generated successfully', {
@@ -78,11 +92,18 @@ export class ResponseGenerator {
       return response;
 
     } catch (error) {
-      logger.error('Response generation failed', { error, query: request.query });
+      // Catch-all: This should NEVER happen, but if it does, return safe response
+      logger.error('Response generation critical failure', { 
+        error: error instanceof Error ? {
+          message: error.message,
+          stack: error.stack
+        } : error,
+        query: request.query 
+      });
       
-      return this.createErrorResponse(
-        'An error occurred while processing your query. Please try again.',
-        request.language || 'en',
+      return this.createSafeResponse(
+        'Sorry, I couldn\'t process your question. Please try again.',
+        language,
         startTime
       );
     }
@@ -90,6 +111,7 @@ export class ResponseGenerator {
 
   /**
    * Handle document-based queries (RAG)
+   * CRITICAL: ALWAYS returns a valid ChatResponse, NEVER throws
    */
   private async handleDocumentQuery(
     query: string,
@@ -97,26 +119,82 @@ export class ResponseGenerator {
     startTime: number
   ): Promise<ChatResponse> {
     try {
+      logger.info('Handling DOCUMENT query', { query, language });
+      
       // Retrieve relevant context
-      const { context, sources } = await retriever.retrieveContext(query);
-
-      if (!context || context.length === 0) {
-        // No relevant documents found
-        const noAnswerMessage = policyService.getNoAnswerTemplate(language);
+      let context: string;
+      let sources: any[];
+      
+      try {
+        const retrievalResult = await retriever.retrieveContext(query);
+        context = retrievalResult.context;
+        sources = retrievalResult.sources;
+        
+        logger.info('Retrieval completed', { 
+          contextLength: context?.length || 0,
+          sourcesFound: sources?.length || 0 
+        });
+      } catch (retrievalError) {
+        logger.error('Retrieval failed', { error: retrievalError, query });
+        // Return not-found message instead of error
+        const notFoundMessage = language === 'tr'
+          ? 'Bu bilgi mevcut dokümanlarda bulunamadı.'
+          : 'This information was not found in the available documents.';
         
         return {
-          answer: noAnswerMessage,
+          answer: notFoundMessage,
           sources: [],
           queryType: QueryType.DOCUMENT,
           language,
-          confidence: 0.5,
+          confidence: 0.3,
           processingTime: Date.now() - startTime,
-          warnings: ['No relevant documents found for this query']
+          warnings: ['Document retrieval failed']
+        };
+      }
+
+      // Check if we have context
+      if (!context || context.length === 0 || !sources || sources.length === 0) {
+        logger.info('No relevant documents found for query');
+        
+        // Return specific "not found" message (NOT a generic error)
+        const notFoundMessage = language === 'tr'
+          ? 'Bu bilgi mevcut dokümanlarda bulunamadı. Lütfen farklı bir şekilde sormayı deneyin.'
+          : 'This information was not found in the available documents. Please try rephrasing your question.';
+        
+        return {
+          answer: notFoundMessage,
+          sources: [],
+          queryType: QueryType.DOCUMENT,
+          language,
+          confidence: 0.3,
+          processingTime: Date.now() - startTime,
+          warnings: ['No relevant documents found']
         };
       }
 
       // Generate answer using LLM
-      const llmResponse = await llmService.generateAnswer(query, context, language);
+      let llmResponse;
+      try {
+        llmResponse = await llmService.generateAnswer(query, context, language);
+        logger.info('LLM response generated', { answerLength: llmResponse.answer.length });
+      } catch (llmError) {
+        logger.error('LLM generation failed', { error: llmError, query });
+        
+        // Return not-found message instead of error
+        const notFoundMessage = language === 'tr'
+          ? 'Bu bilgi mevcut dokümanlarda bulunamadı.'
+          : 'This information was not found in the available documents.';
+        
+        return {
+          answer: notFoundMessage,
+          sources: [],
+          queryType: QueryType.DOCUMENT,
+          language,
+          confidence: 0.3,
+          processingTime: Date.now() - startTime,
+          warnings: ['Answer generation failed']
+        };
+      }
 
       // Convert sources to the expected format
       const formattedSources: Source[] = sources.map(s => ({
@@ -127,8 +205,15 @@ export class ResponseGenerator {
         relevanceScore: s.score
       }));
 
+      // Ensure answer is a valid string
+      const finalAnswer = typeof llmResponse.answer === 'string' && llmResponse.answer.trim().length > 0
+        ? llmResponse.answer
+        : (language === 'tr' 
+            ? 'Bu bilgi mevcut dokümanlarda bulunamadı.'
+            : 'This information was not found in the available documents.');
+
       return {
-        answer: llmResponse.answer,
+        answer: finalAnswer,
         sources: formattedSources,
         queryType: QueryType.DOCUMENT,
         language,
@@ -138,8 +223,29 @@ export class ResponseGenerator {
       };
 
     } catch (error) {
-      logger.error('Document query handling failed', { error });
-      throw error;
+      // Final catch-all: MUST NOT return generic error for DOCUMENT queries
+      logger.error('CRITICAL: Document query handler failed completely', { 
+        error: error instanceof Error ? {
+          message: error.message,
+          stack: error.stack
+        } : error,
+        query 
+      });
+      
+      // Return NOT-FOUND message, NOT a generic error
+      const notFoundMessage = language === 'tr'
+        ? 'Bu bilgi mevcut dokümanlarda bulunamadı.'
+        : 'This information was not found in the available documents.';
+      
+      return {
+        answer: notFoundMessage,
+        sources: [],
+        queryType: QueryType.DOCUMENT,
+        language,
+        confidence: 0.2,
+        processingTime: Date.now() - startTime,
+        warnings: ['Critical processing error - treated as not found']
+      };
     }
   }
 
@@ -147,7 +253,7 @@ export class ResponseGenerator {
    * Handle general queries (greetings, etc.)
    */
   private async handleGeneralQuery(
-    query: string,
+    _query: string,
     language: string,
     startTime: number
   ): Promise<ChatResponse> {
@@ -187,7 +293,7 @@ export class ResponseGenerator {
    * Handle data queries (database/statistics)
    */
   private async handleDataQuery(
-    query: string,
+    _query: string,
     language: string,
     startTime: number
   ): Promise<ChatResponse> {
@@ -211,9 +317,9 @@ You can ask me what the documents say about a specific topic.`;
   }
 
   /**
-   * Create an error response
+   * Create a safe error response - NEVER returns null/undefined
    */
-  private createErrorResponse(
+  private createSafeResponse(
     message: string,
     language: string,
     startTime: number
@@ -225,7 +331,7 @@ You can ask me what the documents say about a specific topic.`;
       language,
       confidence: 0,
       processingTime: Date.now() - startTime,
-      warnings: ['An error occurred during processing']
+      warnings: ['Processing issue occurred']
     };
   }
 

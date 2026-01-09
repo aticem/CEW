@@ -58,9 +58,9 @@ export const config: AppConfig = {
   openaiApiKey: process.env.OPENAI_API_KEY || '',
   
   // Vector Store
-  vectorStore: (process.env.VECTOR_STORE as 'chroma' | 'faiss') || 'chroma',
+  vectorStore: (process.env.VECTOR_STORE as 'chroma' | 'faiss' | 'local') || 'local',
   chromaUrl: process.env.CHROMA_URL || 'http://localhost:8000',
-  vectorStorePath: process.env.VECTOR_STORE_PATH || path.join(process.cwd(), 'data', 'vector-store'),
+  vectorStorePath: process.env.VECTOR_STORE_PATH || path.join(process.cwd(), 'index-store'),
   
   // Document Processing
   chunkSize: getInt('CHUNK_SIZE', 1000),

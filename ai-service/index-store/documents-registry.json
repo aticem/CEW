@@ -1,0 +1,28 @@
+{
+  "documents": [
+    {
+      "id": "1d599ec1-0689-452b-b0f0-90b1b343cc66",
+      "filename": "1   277-007-D-C-40327 Rev 03 Trenches crossing layout.pdf",
+      "filepath": "/workspaces/CEW/ai-service/documents/1   277-007-D-C-40327 Rev 03 Trenches crossing layout.pdf",
+      "fileType": "pdf",
+      "ingestedAt": "2026-01-09T18:04:51.602Z",
+      "chunkCount": 48
+    },
+    {
+      "id": "e22d2a72-195b-4603-bc48-6db39429444d",
+      "filename": "Technical Description_Rev01.docx",
+      "filepath": "/workspaces/CEW/ai-service/documents/Technical Description_Rev01.docx",
+      "fileType": "docx",
+      "ingestedAt": "2026-01-09T18:04:59.929Z",
+      "chunkCount": 37
+    },
+    {
+      "id": "7a823d4d-f5ea-4160-8bc8-9b838f5680ae",
+      "filename": "bill of m 227-005-L-E-00010 Rev07.xlsx",
+      "filepath": "/workspaces/CEW/ai-service/documents/bill of m 227-005-L-E-00010 Rev07.xlsx",
+      "fileType": "xlsx",
+      "ingestedAt": "2026-01-09T18:05:02.507Z",
+      "chunkCount": 38
+    }
+  ]
+}
