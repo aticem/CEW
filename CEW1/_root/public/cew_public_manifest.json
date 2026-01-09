@@ -1,0 +1,147 @@
+{
+  "generatedAt": "2026-01-08T19:50:13.420Z",
+  "folders": {
+    "dc-cable-pulling-progress": {
+      "geojson": [
+        "boundry.geojson",
+        "full.geojson",
+        "inv_id.geojson",
+        "lv_box.geojson",
+        "string_text.geojson"
+      ]
+    },
+    "DC_AC_TRENCH_PROGRESS": {
+      "geojson": [
+        "dc_trench_boundry.geojson",
+        "dc_trench_full_panels.geojson",
+        "dc_trench_text_backup.geojson",
+        "dc_trench_text.geojson",
+        "dc_trench_trench_line.geojson"
+      ]
+    },
+    "DC_CABLE_TESTING_PROGRESS": {
+      "geojson": [
+        "boundry.geojson",
+        "full.geojson",
+        "inv_id.geojson",
+        "lv_box.geojson",
+        "string_text.geojson"
+      ]
+    },
+    "DC_TERMINATION_and_TESTING PROGRESS": {
+      "geojson": [
+        "boundry.geojson",
+        "full_line.geojson",
+        "inv_box.geojson",
+        "inv_id.geojson",
+        "string_text.geojson"
+      ]
+    },
+    "FIBRE_PULLING_PROGRESS_TRACKING": {
+      "geojson": [
+        "boundry.geojson",
+        "full.geojson",
+        "mv_trench.geojson",
+        "subs_text.geojson",
+        "subs.geojson"
+      ]
+    },
+    "LV_BOX_INV_BOX_INSTALLATION_PROGRESS_TRACKING": {
+      "geojson": [
+        "boundry.geojson",
+        "full.geojson",
+        "inv_box.geojson",
+        "inv_id.geojson",
+        "lv_box.geojson"
+      ]
+    },
+    "LV_CABLE_PULLING _PROGRESS_TRACKING": {
+      "geojson": [
+        "boundry.geojson",
+        "full.geojson",
+        "inv_id.geojson",
+        "lv_box.geojson",
+        "string_text.geojson"
+      ]
+    },
+    "LV_TERMINATION_and_TESTING PROGRESS": {
+      "geojson": [
+        "boundry.geojson",
+        "full.geojson",
+        "inv_box.geojson",
+        "inv_id.geojson",
+        "subs_text.geojson"
+      ]
+    },
+    "MC4_INSTALLATION_AND_DC_TERMINATION_PROGRESS_TRACKING": {
+      "geojson": [
+        "boundry.geojson",
+        "full.geojson",
+        "inv_id.geojson",
+        "lv_box.geojson",
+        "string_text.geojson",
+        "subs_text.geojson",
+        "subs.geojson"
+      ]
+    },
+    "MODULE_INSTALLATION_PROGRES_TRACKING": {
+      "geojson": [
+        "full.geojson",
+        "inv_box.geojson",
+        "inv_id.geojson",
+        "string_text.geojson"
+      ]
+    },
+    "MV+FIBRE_TRENCH_PROGRESS_TRACKING": {
+      "geojson": [
+        "boundry.geojson",
+        "full.geojson",
+        "mv_trench.geojson",
+        "subs_text.geojson",
+        "subs.geojson"
+      ]
+    },
+    "MV_PULLING_PROGRESS_TRACKING": {
+      "geojson": [
+        "boundry.geojson",
+        "full.geojson",
+        "mv_trench.geojson",
+        "subs_text.geojson",
+        "subs.geojson"
+      ]
+    },
+    "MV_TERMINATION_PROGRESS_TRACKING": {
+      "geojson": [
+        "boundry.geojson",
+        "full.geojson",
+        "mv_trench.geojson",
+        "subs_text.geojson",
+        "subs.geojson"
+      ]
+    },
+    "PARAMETER_and_TABLE_EARTHING_PROGRESS": {
+      "geojson": [
+        "earthing_full.geojson",
+        "earthing_parameter.geojson",
+        "earthing_tabletotable.geojson"
+      ]
+    },
+    "PUNCH_LIST": {
+      "geojson": [
+        "boundry.geojson",
+        "full_plot.geojson",
+        "full.geojson",
+        "inv_box.geojson",
+        "inv_id.geojson"
+      ]
+    },
+    "TABLE_INSTALLATION_PROGRESS": {
+      "geojson": [
+        "boundry.geojson",
+        "full_plot_single_box.geojson",
+        "inv_box.geojson",
+        "inv_id.geojson"
+      ]
+    }
+  }
+}
