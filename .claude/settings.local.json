@@ -5,7 +5,11 @@
       "Bash(npm install)",
       "Bash(npm view:*)",
       "Bash(npm install:*)",
-      "Bash(claude:*)"
+      "Bash(claude:*)",
+      "Bash(cat:*)",
+      "Bash(node:*)",
+      "Bash(powershell -Command \"Get-Content ''C:/Users/atila/CEW-1/ai-service/src/ingest/chunker.ts'' | Measure-Object -Line\")",
+      "Bash(npx tsc:*)"
     ]
   }
 }

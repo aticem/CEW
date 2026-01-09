@@ -1,264 +1,313 @@
 import { v4 as uuidv4 } from 'uuid';
-import { DocumentChunk, ChunkMetadata } from '../types';
+import { DocumentChunk, ChunkMetadata, ParsedDocument } from '../types';
 import { config } from '../config';
 import { logger } from '../services/logger';
-import { LoadedDocument, PageContent } from './documentLoader';
 
-export interface ChunkingOptions {
-  chunkSize?: number;
-  chunkOverlap?: number;
-  preserveParagraphs?: boolean;
-  preserveSentences?: boolean;
+interface ContentSegment {
+  content: string;
+  pageNumber?: number;
+  sheetName?: string;
+  startOffset: number;
 }
 
-class Chunker {
-  private defaultOptions: Required<ChunkingOptions> = {
-    chunkSize: config.documents.maxChunkSize,
-    chunkOverlap: config.documents.chunkOverlap,
-    preserveParagraphs: true,
-    preserveSentences: true,
-  };
+interface ChunkingStats {
+  documentsProcessed: number;
+  totalChunks: number;
+  averageChunkSize: number;
+  minChunkSize: number;
+  maxChunkSize: number;
+}
 
-  chunk(document: LoadedDocument, options?: ChunkingOptions): DocumentChunk[] {
-    const opts = { ...this.defaultOptions, ...options };
-    const chunks: DocumentChunk[] = [];
+export function chunkDocument(document: ParsedDocument): DocumentChunk[] {
+  const startTime = Date.now();
+  const chunks: DocumentChunk[] = [];
+  const documentId = document.metadata.id;
+  const segments = extractContentSegments(document);
 
-    if (document.pages && document.pages.length > 0) {
-      // Process page by page for better metadata
-      document.pages.forEach((page) => {
-        const pageChunks = this.chunkText(
-          page.content,
-          document.metadata.id,
-          opts,
-          page.pageNumber
-        );
-        chunks.push(...pageChunks);
-      });
-    } else {
-      // Process entire document
-      const contentChunks = this.chunkText(
-        document.content,
-        document.metadata.id,
-        opts
-      );
-      chunks.push(...contentChunks);
+  if (segments.length === 0) {
+    logger.warn('Document has no content to chunk', { documentId, filename: document.metadata.filename });
+    return [];
+  }
+
+  let globalChunkIndex = 0;
+  for (const segment of segments) {
+    const segmentChunks = chunkSegment(segment, documentId, globalChunkIndex, config.maxChunkSize, config.chunkOverlap);
+    chunks.push(...segmentChunks);
+    globalChunkIndex += segmentChunks.length;
+  }
+
+  const processingTime = Date.now() - startTime;
+  logger.info('Document chunked', {
+    documentId,
+    filename: document.metadata.filename,
+    totalChunks: chunks.length,
+    avgChunkSize: chunks.length > 0 ? Math.round(chunks.reduce((sum, c) => sum + c.content.length, 0) / chunks.length) : 0,
+    processingTimeMs: processingTime,
+  });
+
+  return chunks;
+}
+
+export function chunkAllDocuments(documents: ParsedDocument[]): DocumentChunk[] {
+  const startTime = Date.now();
+  const allChunks: DocumentChunk[] = [];
+
+  if (documents.length === 0) {
+    logger.warn('No documents provided for chunking');
+    return [];
+  }
+
+  for (const document of documents) {
+    const documentChunks = chunkDocument(document);
+    allChunks.push(...documentChunks);
+  }
+
+  const stats = calculateStats(documents.length, allChunks);
+  logChunkingStats(stats, Date.now() - startTime);
+  return allChunks;
+}
+
+function extractContentSegments(document: ParsedDocument): ContentSegment[] {
+  const segments: ContentSegment[] = [];
+  if (document.chunks && document.chunks.length > 0) {
+    let cumulativeOffset = 0;
+    for (const chunk of document.chunks) {
+      if (chunk.content && chunk.content.trim().length > 0) {
+        segments.push({
+          content: chunk.content,
+          pageNumber: chunk.metadata.pageNumber,
+          sheetName: chunk.metadata.sheetName,
+          startOffset: cumulativeOffset,
+        });
+        cumulativeOffset += chunk.content.length + 1;
+      }
     }
+  }
+  return segments;
+}
 
-    logger.info('Document chunked', {
-      documentId: document.metadata.id,
-      filename: document.metadata.filename,
-      totalChunks: chunks.length,
-      avgChunkSize: Math.round(
-        chunks.reduce((sum, c) => sum + c.content.length, 0) / chunks.length
-      ),
-    });
+function chunkSegment(segment: ContentSegment, documentId: string, startChunkIndex: number, maxChunkSize: number, chunkOverlap: number): DocumentChunk[] {
+  const chunks: DocumentChunk[] = [];
+  const { content, pageNumber, sheetName, startOffset } = segment;
+  const cleanedContent = cleanText(content);
 
+  if (cleanedContent.length === 0) return chunks;
+
+  if (cleanedContent.length <= maxChunkSize) {
+    chunks.push(createChunk(documentId, cleanedContent, startChunkIndex, startOffset, startOffset + cleanedContent.length, pageNumber, sheetName));
     return chunks;
   }
 
-  private chunkText(
-    text: string,
-    documentId: string,
-    options: Required<ChunkingOptions>,
-    pageNumber?: number
-  ): DocumentChunk[] {
-    const chunks: DocumentChunk[] = [];
-    const { chunkSize, chunkOverlap, preserveParagraphs, preserveSentences } =
-      options;
+  const paragraphs = splitByParagraphs(cleanedContent);
+  let currentChunkText = '';
+  let currentChunkStart = startOffset;
+  let chunkIndex = startChunkIndex;
 
-    // Clean and normalize text
-    const cleanedText = this.cleanText(text);
+  for (let i = 0; i < paragraphs.length; i++) {
+    const paragraph = paragraphs[i];
 
-    if (cleanedText.length === 0) {
-      return chunks;
+    if (paragraph.length > maxChunkSize) {
+      if (currentChunkText.length > 0) {
+        chunks.push(createChunk(documentId, currentChunkText.trim(), chunkIndex++, currentChunkStart, currentChunkStart + currentChunkText.length, pageNumber, sheetName));
+        currentChunkStart += currentChunkText.length + 2;
+        currentChunkText = '';
+      }
+      const sentenceChunks = splitBySentences(paragraph, maxChunkSize, chunkOverlap);
+      for (const sentenceChunk of sentenceChunks) {
+        chunks.push(createChunk(documentId, sentenceChunk.text, chunkIndex++, currentChunkStart + sentenceChunk.start, currentChunkStart + sentenceChunk.end, pageNumber, sheetName));
+      }
+      currentChunkStart += paragraph.length + 2;
+      continue;
     }
 
-    // Split into segments based on preservation rules
-    let segments: string[];
+    const separator = currentChunkText.length > 0 ? '
 
-    if (preserveParagraphs) {
-      segments = this.splitByParagraphs(cleanedText);
-    } else if (preserveSentences) {
-      segments = this.splitBySentences(cleanedText);
+' : '';
+    const wouldBeLength = currentChunkText.length + separator.length + paragraph.length;
+
+    if (wouldBeLength <= maxChunkSize) {
+      currentChunkText += separator + paragraph;
     } else {
-      segments = [cleanedText];
-    }
+      if (currentChunkText.length > 0) {
+        chunks.push(createChunk(documentId, currentChunkText.trim(), chunkIndex++, currentChunkStart, currentChunkStart + currentChunkText.length, pageNumber, sheetName));
+        if (chunkOverlap > 0 && currentChunkText.length > chunkOverlap) {
+          const overlapText = getOverlapText(currentChunkText, chunkOverlap);
+          currentChunkStart = currentChunkStart + currentChunkText.length - overlapText.length;
+          currentChunkText = overlapText + '
 
-    // Build chunks from segments
-    let currentChunk = '';
-    let currentStart = 0;
-    let chunkIndex = 0;
-
-    for (const segment of segments) {
-      if (currentChunk.length + segment.length <= chunkSize) {
-        currentChunk += (currentChunk ? '\n' : '') + segment;
-      } else {
-        // Save current chunk if it has content
-        if (currentChunk.length > 0) {
-          chunks.push(
-            this.createChunk(
-              documentId,
-              currentChunk,
-              chunkIndex,
-              currentStart,
-              pageNumber
-            )
-          );
-          chunkIndex++;
-
-          // Handle overlap
-          if (chunkOverlap > 0 && currentChunk.length > chunkOverlap) {
-            currentChunk = currentChunk.slice(-chunkOverlap);
-            currentStart = currentStart + currentChunk.length - chunkOverlap;
-          } else {
-            currentChunk = '';
-            currentStart = currentStart + currentChunk.length;
-          }
-        }
-
-        // Handle segment larger than chunk size
-        if (segment.length > chunkSize) {
-          const subChunks = this.splitLargeSegment(segment, chunkSize, chunkOverlap);
-          subChunks.forEach((subChunk, subIndex) => {
-            chunks.push(
-              this.createChunk(
-                documentId,
-                subChunk,
-                chunkIndex,
-                currentStart,
-                pageNumber
-              )
-            );
-            chunkIndex++;
-            currentStart += subChunk.length - chunkOverlap;
-          });
-          currentChunk = '';
+' + paragraph;
         } else {
-          currentChunk = segment;
+          currentChunkStart += currentChunkText.length + 2;
+          currentChunkText = paragraph;
         }
+      } else {
+        currentChunkText = paragraph;
       }
     }
-
-    // Don't forget the last chunk
-    if (currentChunk.length > 0) {
-      chunks.push(
-        this.createChunk(
-          documentId,
-          currentChunk,
-          chunkIndex,
-          currentStart,
-          pageNumber
-        )
-      );
-    }
-
-    return chunks;
   }
 
-  private createChunk(
-    documentId: string,
-    content: string,
-    chunkIndex: number,
-    startChar: number,
-    pageNumber?: number
-  ): DocumentChunk {
-    const metadata: ChunkMetadata = {
-      chunkIndex,
-      startChar,
-      endChar: startChar + content.length,
-    };
-
-    if (pageNumber !== undefined) {
-      metadata.pageNumber = pageNumber;
-    }
-
-    // Extract headers if present
-    const headers = this.extractHeaders(content);
-    if (headers.length > 0) {
-      metadata.headers = headers;
-    }
-
-    return {
-      id: uuidv4(),
-      documentId,
-      content,
-      metadata,
-    };
+  if (currentChunkText.trim().length > 0) {
+    chunks.push(createChunk(documentId, currentChunkText.trim(), chunkIndex, currentChunkStart, currentChunkStart + currentChunkText.length, pageNumber, sheetName));
   }
 
-  private cleanText(text: string): string {
-    return text
-      .replace(/\r\n/g, '\n') // Normalize line endings
-      .replace(/\t/g, ' ') // Replace tabs with spaces
-      .replace(/ +/g, ' ') // Collapse multiple spaces
-      .replace(/\n{3,}/g, '\n\n') // Collapse multiple newlines
-      .trim();
-  }
-
-  private splitByParagraphs(text: string): string[] {
-    return text
-      .split(/\n\s*\n/)
-      .map((p) => p.trim())
-      .filter((p) => p.length > 0);
-  }
-
-  private splitBySentences(text: string): string[] {
-    // Simple sentence splitting - can be improved with NLP library
-    return text
-      .split(/(?<=[.!?])\s+/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-  }
-
-  private splitLargeSegment(
-    segment: string,
-    chunkSize: number,
-    overlap: number
-  ): string[] {
-    const chunks: string[] = [];
-    let start = 0;
-
-    while (start < segment.length) {
-      const end = Math.min(start + chunkSize, segment.length);
-      let chunk = segment.slice(start, end);
-
-      // Try to break at word boundary
-      if (end < segment.length) {
-        const lastSpace = chunk.lastIndexOf(' ');
-        if (lastSpace > chunkSize * 0.8) {
-          chunk = chunk.slice(0, lastSpace);
-        }
-      }
-
-      chunks.push(chunk.trim());
-      start = start + chunk.length - overlap;
-    }
-
-    return chunks;
-  }
-
-  private extractHeaders(content: string): string[] {
-    const headers: string[] = [];
-    const lines = content.split('\n');
-
-    for (const line of lines.slice(0, 5)) {
-      // Check first 5 lines
-      const trimmed = line.trim();
-      // Heuristics for headers: short, possibly uppercase, ends with colon
-      if (
-        trimmed.length > 0 &&
-        trimmed.length < 100 &&
-        (trimmed === trimmed.toUpperCase() ||
-          trimmed.endsWith(':') ||
-          /^#+\s/.test(trimmed) ||
-          /^[A-Z][^.!?]*$/.test(trimmed))
-      ) {
-        headers.push(trimmed.replace(/^#+\s*/, '').replace(/:$/, ''));
-      }
-    }
-
-    return headers;
-  }
+  return chunks;
 }
 
-export const chunker = new Chunker();
+function splitByParagraphs(text: string): string[] {
+  return text.split(/
+s*
+/).map(p => p.trim()).filter(p => p.length > 0);
+}
+
+function splitBySentences(text: string, maxChunkSize: number, chunkOverlap: number): Array<{ text: string; start: number; end: number }> {
+  const result: Array<{ text: string; start: number; end: number }> = [];
+  const sentencePattern = /(?<=[.!?])s+(?=[A-Z])|(?<=[.!?])s*$/g;
+  const sentences = text.split(sentencePattern).filter(s => s.trim().length > 0);
+  let currentText = '';
+  let currentStart = 0;
+
+  for (const sentence of sentences) {
+    const trimmedSentence = sentence.trim();
+    if (trimmedSentence.length > maxChunkSize) {
+      if (currentText.length > 0) {
+        result.push({ text: currentText.trim(), start: currentStart, end: currentStart + currentText.length });
+        currentStart += currentText.length + 1;
+        currentText = '';
+      }
+      const wordChunks = splitByWords(trimmedSentence, maxChunkSize, chunkOverlap);
+      for (const wordChunk of wordChunks) {
+        result.push({ text: wordChunk, start: currentStart, end: currentStart + wordChunk.length });
+        currentStart += wordChunk.length - chunkOverlap;
+      }
+      continue;
+    }
+    const separator = currentText.length > 0 ? ' ' : '';
+    const wouldBeLength = currentText.length + separator.length + trimmedSentence.length;
+    if (wouldBeLength <= maxChunkSize) {
+      currentText += separator + trimmedSentence;
+    } else {
+      if (currentText.length > 0) {
+        result.push({ text: currentText.trim(), start: currentStart, end: currentStart + currentText.length });
+        if (chunkOverlap > 0) {
+          const overlapText = getOverlapText(currentText, chunkOverlap);
+          currentStart = currentStart + currentText.length - overlapText.length;
+          currentText = overlapText + ' ' + trimmedSentence;
+        } else {
+          currentStart += currentText.length + 1;
+          currentText = trimmedSentence;
+        }
+      } else {
+        currentText = trimmedSentence;
+      }
+    }
+  }
+  if (currentText.trim().length > 0) {
+    result.push({ text: currentText.trim(), start: currentStart, end: currentStart + currentText.length });
+  }
+  return result;
+}
+
+function splitByWords(text: string, maxChunkSize: number, chunkOverlap: number): string[] {
+  const chunks: string[] = [];
+  const words = text.split(/s+/);
+  let currentChunk = '';
+
+  for (const word of words) {
+    const separator = currentChunk.length > 0 ? ' ' : '';
+    const wouldBeLength = currentChunk.length + separator.length + word.length;
+    if (wouldBeLength <= maxChunkSize) {
+      currentChunk += separator + word;
+    } else {
+      if (currentChunk.length > 0) {
+        chunks.push(currentChunk);
+        if (chunkOverlap > 0) {
+          const overlapText = getOverlapText(currentChunk, chunkOverlap);
+          currentChunk = overlapText + ' ' + word;
+        } else {
+          currentChunk = word;
+        }
+      } else {
+        currentChunk = word.substring(0, maxChunkSize);
+      }
+    }
+  }
+  if (currentChunk.length > 0) chunks.push(currentChunk);
+  return chunks;
+}
+
+function getOverlapText(text: string, overlapSize: number): string {
+  if (text.length <= overlapSize) return text;
+  let overlap = text.slice(-overlapSize);
+  const firstSpace = overlap.indexOf(' ');
+  if (firstSpace > 0 && firstSpace < overlapSize / 2) {
+    overlap = overlap.slice(firstSpace + 1);
+  }
+  return overlap.trim();
+}
+
+function createChunk(documentId: string, content: string, chunkIndex: number, startOffset: number, endOffset: number, pageNumber?: number, sheetName?: string): DocumentChunk {
+  const metadata: ChunkMetadata = { chunkIndex, startOffset, endOffset };
+  if (pageNumber !== undefined) metadata.pageNumber = pageNumber;
+  if (sheetName !== undefined) metadata.sheetName = sheetName;
+  const headers = extractHeaders(content);
+  if (headers.length > 0) metadata.headers = headers;
+  return { id: uuidv4(), documentId, content, metadata, embedding: [] };
+}
+
+function cleanText(text: string): string {
+  return text
+    .replace(/
+/g, '
+')
+    .replace(//g, '
+')
+    .replace(/	/g, ' ')
+    .replace(/ +/g, ' ')
+    .replace(/
+{3,}/g, '
+
+')
+    .trim();
+}
+
+function extractHeaders(content: string): string[] {
+  const headers: string[] = [];
+  const lines = content.split('
+').slice(0, 5);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.length > 0 && trimmed.length < 100 && (trimmed === trimmed.toUpperCase() || trimmed.endsWith(':') || /^#+s/.test(trimmed) || /^[A-Z][^.!?]*$/.test(trimmed))) {
+      const cleanHeader = trimmed.replace(/^#+s*/, '').replace(/:$/, '');
+      headers.push(cleanHeader);
+    }
+  }
+  return headers;
+}
+
+function calculateStats(documentsCount: number, chunks: DocumentChunk[]): ChunkingStats {
+  if (chunks.length === 0) {
+    return { documentsProcessed: documentsCount, totalChunks: 0, averageChunkSize: 0, minChunkSize: 0, maxChunkSize: 0 };
+  }
+  const sizes = chunks.map(c => c.content.length);
+  const totalSize = sizes.reduce((sum, size) => sum + size, 0);
+  return {
+    documentsProcessed: documentsCount,
+    totalChunks: chunks.length,
+    averageChunkSize: Math.round(totalSize / chunks.length),
+    minChunkSize: Math.min(...sizes),
+    maxChunkSize: Math.max(...sizes),
+  };
+}
+
+function logChunkingStats(stats: ChunkingStats, processingTimeMs: number): void {
+  logger.info('Chunking completed', {
+    documentsProcessed: stats.documentsProcessed,
+    totalChunks: stats.totalChunks,
+    averageChunkSize: stats.averageChunkSize,
+    minChunkSize: stats.minChunkSize,
+    maxChunkSize: stats.maxChunkSize,
+    processingTimeMs,
+  });
+}
+
+export default { chunkDocument, chunkAllDocuments };
