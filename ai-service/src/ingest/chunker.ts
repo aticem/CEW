@@ -1,264 +1,217 @@
+/**
+ * Text Chunker - Splits documents into chunks for embedding
+ */
 import { v4 as uuidv4 } from 'uuid';
-import { DocumentChunk, ChunkMetadata } from '../types';
-import { config } from '../config';
+import { DocumentChunk, ParsedDocument } from '../types';
 import { logger } from '../services/logger';
-import { LoadedDocument, PageContent } from './documentLoader';
+import { config } from '../config';
 
-export interface ChunkingOptions {
-  chunkSize?: number;
-  chunkOverlap?: number;
-  preserveParagraphs?: boolean;
-  preserveSentences?: boolean;
-}
+/**
+ * Text Chunker class - handles intelligent text splitting
+ */
+export class TextChunker {
+  private chunkSize: number;
+  private chunkOverlap: number;
 
-class Chunker {
-  private defaultOptions: Required<ChunkingOptions> = {
-    chunkSize: config.documents.maxChunkSize,
-    chunkOverlap: config.documents.chunkOverlap,
-    preserveParagraphs: true,
-    preserveSentences: true,
-  };
+  constructor(chunkSize?: number, chunkOverlap?: number) {
+    this.chunkSize = chunkSize || config.chunkSize;
+    this.chunkOverlap = chunkOverlap || config.chunkOverlap;
+    
+    logger.info(`Text Chunker initialized`, {
+      chunkSize: this.chunkSize,
+      chunkOverlap: this.chunkOverlap
+    });
+  }
 
-  chunk(document: LoadedDocument, options?: ChunkingOptions): DocumentChunk[] {
-    const opts = { ...this.defaultOptions, ...options };
-    const chunks: DocumentChunk[] = [];
+  /**
+   * Split a parsed document into chunks
+   * @param document - The parsed document
+   * @returns Array of document chunks
+   */
+  chunkDocument(document: ParsedDocument): DocumentChunk[] {
+    const startTime = Date.now();
+    logger.info(`Chunking document: ${document.metadata.filename}`);
 
-    if (document.pages && document.pages.length > 0) {
-      // Process page by page for better metadata
-      document.pages.forEach((page) => {
-        const pageChunks = this.chunkText(
-          page.content,
-          document.metadata.id,
-          opts,
-          page.pageNumber
-        );
-        chunks.push(...pageChunks);
-      });
-    } else {
-      // Process entire document
-      const contentChunks = this.chunkText(
-        document.content,
-        document.metadata.id,
-        opts
-      );
-      chunks.push(...contentChunks);
+    const text = document.text;
+    if (!text || text.trim().length === 0) {
+      logger.warn(`Document has no text content: ${document.metadata.filename}`);
+      return [];
     }
 
-    logger.info('Document chunked', {
+    // Split text into chunks
+    const chunks = this.splitText(text);
+    
+    // Create DocumentChunk objects
+    const documentChunks: DocumentChunk[] = chunks.map((chunk, index) => ({
+      id: uuidv4(),
       documentId: document.metadata.id,
+      content: chunk.text,
+      startIndex: chunk.start,
+      endIndex: chunk.end,
+      pageNumber: this.estimatePageNumber(chunk.start, text, document.pageCount),
+      metadata: document.metadata
+    }));
+
+    const duration = Date.now() - startTime;
+    logger.info(`Document chunked successfully`, {
       filename: document.metadata.filename,
-      totalChunks: chunks.length,
-      avgChunkSize: Math.round(
-        chunks.reduce((sum, c) => sum + c.content.length, 0) / chunks.length
-      ),
+      totalChunks: documentChunks.length,
+      avgChunkSize: Math.round(text.length / documentChunks.length),
+      duration: `${duration}ms`
     });
 
+    return documentChunks;
+  }
+
+  /**
+   * Split text into overlapping chunks
+   * @param text - The text to split
+   * @returns Array of text chunks with position info
+   */
+  private splitText(text: string): Array<{ text: string; start: number; end: number }> {
+    const chunks: Array<{ text: string; start: number; end: number }> = [];
+    
+    // Normalize whitespace
+    const normalizedText = text.replace(/\s+/g, ' ').trim();
+    
+    let startIndex = 0;
+    
+    while (startIndex < normalizedText.length) {
+      // Calculate end index for this chunk
+      let endIndex = Math.min(startIndex + this.chunkSize, normalizedText.length);
+      
+      // If not at the end, try to break at sentence or word boundary
+      if (endIndex < normalizedText.length) {
+        endIndex = this.findBoundary(normalizedText, endIndex);
+      }
+      
+      // Extract chunk text
+      const chunkText = normalizedText.substring(startIndex, endIndex).trim();
+      
+      if (chunkText.length > 0) {
+        chunks.push({
+          text: chunkText,
+          start: startIndex,
+          end: endIndex
+        });
+      }
+      
+      // Move to next chunk with overlap
+      startIndex = endIndex - this.chunkOverlap;
+      
+      // Ensure we make progress
+      if (startIndex <= chunks[chunks.length - 1]?.start) {
+        startIndex = endIndex;
+      }
+    }
+    
     return chunks;
   }
 
-  private chunkText(
-    text: string,
-    documentId: string,
-    options: Required<ChunkingOptions>,
-    pageNumber?: number
-  ): DocumentChunk[] {
-    const chunks: DocumentChunk[] = [];
-    const { chunkSize, chunkOverlap, preserveParagraphs, preserveSentences } =
-      options;
-
-    // Clean and normalize text
-    const cleanedText = this.cleanText(text);
-
-    if (cleanedText.length === 0) {
-      return chunks;
-    }
-
-    // Split into segments based on preservation rules
-    let segments: string[];
-
-    if (preserveParagraphs) {
-      segments = this.splitByParagraphs(cleanedText);
-    } else if (preserveSentences) {
-      segments = this.splitBySentences(cleanedText);
-    } else {
-      segments = [cleanedText];
-    }
-
-    // Build chunks from segments
-    let currentChunk = '';
-    let currentStart = 0;
-    let chunkIndex = 0;
-
-    for (const segment of segments) {
-      if (currentChunk.length + segment.length <= chunkSize) {
-        currentChunk += (currentChunk ? '\n' : '') + segment;
-      } else {
-        // Save current chunk if it has content
-        if (currentChunk.length > 0) {
-          chunks.push(
-            this.createChunk(
-              documentId,
-              currentChunk,
-              chunkIndex,
-              currentStart,
-              pageNumber
-            )
-          );
-          chunkIndex++;
-
-          // Handle overlap
-          if (chunkOverlap > 0 && currentChunk.length > chunkOverlap) {
-            currentChunk = currentChunk.slice(-chunkOverlap);
-            currentStart = currentStart + currentChunk.length - chunkOverlap;
-          } else {
-            currentChunk = '';
-            currentStart = currentStart + currentChunk.length;
-          }
-        }
-
-        // Handle segment larger than chunk size
-        if (segment.length > chunkSize) {
-          const subChunks = this.splitLargeSegment(segment, chunkSize, chunkOverlap);
-          subChunks.forEach((subChunk, subIndex) => {
-            chunks.push(
-              this.createChunk(
-                documentId,
-                subChunk,
-                chunkIndex,
-                currentStart,
-                pageNumber
-              )
-            );
-            chunkIndex++;
-            currentStart += subChunk.length - chunkOverlap;
-          });
-          currentChunk = '';
-        } else {
-          currentChunk = segment;
+  /**
+   * Find a good boundary to split at (sentence or word)
+   * @param text - The text to search
+   * @param position - Starting position to search from
+   * @returns Adjusted boundary position
+   */
+  private findBoundary(text: string, position: number): number {
+    // Look back up to 200 characters for a good break point
+    const lookbackDistance = Math.min(200, position);
+    const searchStart = position - lookbackDistance;
+    const searchText = text.substring(searchStart, position + 50);
+    
+    // Try to find sentence endings first
+    const sentenceEndings = ['. ', '! ', '? ', '.\n', '!\n', '?\n'];
+    let bestBoundary = -1;
+    let bestScore = -1;
+    
+    for (const ending of sentenceEndings) {
+      const lastIndex = searchText.lastIndexOf(ending);
+      if (lastIndex !== -1) {
+        const absoluteIndex = searchStart + lastIndex + ending.length;
+        const distance = Math.abs(absoluteIndex - position);
+        const score = 1000 - distance; // Prefer closer to target position
+        
+        if (score > bestScore && absoluteIndex <= position) {
+          bestScore = score;
+          bestBoundary = absoluteIndex;
         }
       }
     }
-
-    // Don't forget the last chunk
-    if (currentChunk.length > 0) {
-      chunks.push(
-        this.createChunk(
-          documentId,
-          currentChunk,
-          chunkIndex,
-          currentStart,
-          pageNumber
-        )
-      );
+    
+    if (bestBoundary !== -1) {
+      return bestBoundary;
     }
-
-    return chunks;
-  }
-
-  private createChunk(
-    documentId: string,
-    content: string,
-    chunkIndex: number,
-    startChar: number,
-    pageNumber?: number
-  ): DocumentChunk {
-    const metadata: ChunkMetadata = {
-      chunkIndex,
-      startChar,
-      endChar: startChar + content.length,
-    };
-
-    if (pageNumber !== undefined) {
-      metadata.pageNumber = pageNumber;
-    }
-
-    // Extract headers if present
-    const headers = this.extractHeaders(content);
-    if (headers.length > 0) {
-      metadata.headers = headers;
-    }
-
-    return {
-      id: uuidv4(),
-      documentId,
-      content,
-      metadata,
-    };
-  }
-
-  private cleanText(text: string): string {
-    return text
-      .replace(/\r\n/g, '\n') // Normalize line endings
-      .replace(/\t/g, ' ') // Replace tabs with spaces
-      .replace(/ +/g, ' ') // Collapse multiple spaces
-      .replace(/\n{3,}/g, '\n\n') // Collapse multiple newlines
-      .trim();
-  }
-
-  private splitByParagraphs(text: string): string[] {
-    return text
-      .split(/\n\s*\n/)
-      .map((p) => p.trim())
-      .filter((p) => p.length > 0);
-  }
-
-  private splitBySentences(text: string): string[] {
-    // Simple sentence splitting - can be improved with NLP library
-    return text
-      .split(/(?<=[.!?])\s+/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-  }
-
-  private splitLargeSegment(
-    segment: string,
-    chunkSize: number,
-    overlap: number
-  ): string[] {
-    const chunks: string[] = [];
-    let start = 0;
-
-    while (start < segment.length) {
-      const end = Math.min(start + chunkSize, segment.length);
-      let chunk = segment.slice(start, end);
-
-      // Try to break at word boundary
-      if (end < segment.length) {
-        const lastSpace = chunk.lastIndexOf(' ');
-        if (lastSpace > chunkSize * 0.8) {
-          chunk = chunk.slice(0, lastSpace);
-        }
-      }
-
-      chunks.push(chunk.trim());
-      start = start + chunk.length - overlap;
-    }
-
-    return chunks;
-  }
-
-  private extractHeaders(content: string): string[] {
-    const headers: string[] = [];
-    const lines = content.split('\n');
-
-    for (const line of lines.slice(0, 5)) {
-      // Check first 5 lines
-      const trimmed = line.trim();
-      // Heuristics for headers: short, possibly uppercase, ends with colon
-      if (
-        trimmed.length > 0 &&
-        trimmed.length < 100 &&
-        (trimmed === trimmed.toUpperCase() ||
-          trimmed.endsWith(':') ||
-          /^#+\s/.test(trimmed) ||
-          /^[A-Z][^.!?]*$/.test(trimmed))
-      ) {
-        headers.push(trimmed.replace(/^#+\s*/, '').replace(/:$/, ''));
+    
+    // If no sentence boundary found, try paragraph breaks
+    const paragraphBreak = searchText.lastIndexOf('\n\n');
+    if (paragraphBreak !== -1) {
+      const absoluteIndex = searchStart + paragraphBreak + 2;
+      if (absoluteIndex <= position) {
+        return absoluteIndex;
       }
     }
+    
+    // Try line breaks
+    const lineBreak = searchText.lastIndexOf('\n');
+    if (lineBreak !== -1) {
+      const absoluteIndex = searchStart + lineBreak + 1;
+      if (absoluteIndex <= position) {
+        return absoluteIndex;
+      }
+    }
+    
+    // Fall back to word boundary
+    const wordBreak = searchText.lastIndexOf(' ');
+    if (wordBreak !== -1) {
+      const absoluteIndex = searchStart + wordBreak + 1;
+      if (absoluteIndex <= position) {
+        return absoluteIndex;
+      }
+    }
+    
+    // Last resort: use the original position
+    return position;
+  }
 
-    return headers;
+  /**
+   * Estimate page number based on character position
+   * @param position - Character position in text
+   * @param totalText - Full text content
+   * @param pageCount - Total number of pages
+   * @returns Estimated page number
+   */
+  private estimatePageNumber(
+    position: number,
+    totalText: string,
+    pageCount?: number
+  ): number | undefined {
+    if (!pageCount || pageCount <= 1) {
+      return undefined;
+    }
+    
+    // Simple estimation: assume uniform text distribution
+    const progress = position / totalText.length;
+    return Math.min(Math.ceil(progress * pageCount), pageCount);
+  }
+
+  /**
+   * Update chunk size configuration
+   */
+  setChunkSize(size: number): void {
+    this.chunkSize = size;
+    logger.info(`Chunk size updated to ${size}`);
+  }
+
+  /**
+   * Update chunk overlap configuration
+   */
+  setChunkOverlap(overlap: number): void {
+    this.chunkOverlap = overlap;
+    logger.info(`Chunk overlap updated to ${overlap}`);
   }
 }
 
-export const chunker = new Chunker();
+// Singleton instance
+export const textChunker = new TextChunker();
+export default textChunker;

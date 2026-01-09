@@ -1,69 +1,80 @@
+/**
+ * Winston logger service for the AI service
+ */
 import winston from 'winston';
+import path from 'path';
+import fs from 'fs';
 
-const { combine, timestamp, printf, colorize, json } = winston.format;
+// Ensure logs directory exists
+const logsDir = path.join(process.cwd(), 'logs');
+if (!fs.existsSync(logsDir)) {
+  fs.mkdirSync(logsDir, { recursive: true });
+}
 
-/**
- * Custom console format for development
- */
-const consoleFormat = printf(({ level, message, timestamp, service, ...metadata }) => {
-  let metaString = '';
-  if (Object.keys(metadata).length > 0) {
-    metaString = ` ${JSON.stringify(metadata)}`;
-  }
-  return `${timestamp} [${level}]: ${message}${metaString}`;
-});
-
-/**
- * Determine log level from environment
- */
 const logLevel = process.env.LOG_LEVEL || 'info';
+const logFile = process.env.LOG_FILE || './logs/ai-service.log';
 
 /**
- * Determine if we're in production
+ * Custom log format
  */
-const isProduction = process.env.NODE_ENV === 'production';
+const customFormat = winston.format.combine(
+  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+  winston.format.errors({ stack: true }),
+  winston.format.splat(),
+  winston.format.printf(({ timestamp, level, message, stack, ...metadata }) => {
+    let msg = `${timestamp} [${level.toUpperCase()}]: ${message}`;
+    
+    // Add metadata if present
+    if (Object.keys(metadata).length > 0) {
+      msg += ` ${JSON.stringify(metadata)}`;
+    }
+    
+    // Add stack trace if present
+    if (stack) {
+      msg += `\n${stack}`;
+    }
+    
+    return msg;
+  })
+);
 
 /**
- * Winston logger instance configured for the CEW AI Service
- *
- * Log levels (in order of priority):
- * - error: Error conditions
- * - warn: Warning conditions
- * - info: Informational messages
- * - debug: Debug-level messages
- *
- * @example
- * ```typescript
- * import { logger } from './services/logger';
- *
- * logger.info('Document loaded', { documentId: '123', filename: 'test.pdf' });
- * logger.error('Failed to process', { error: err.message });
- * ```
+ * Logger instance
  */
 export const logger = winston.createLogger({
   level: logLevel,
-  format: isProduction
-    ? combine(timestamp(), json())
-    : combine(timestamp(), colorize(), consoleFormat),
+  format: customFormat,
   transports: [
-    new winston.transports.Console(),
-  ],
-  defaultMeta: { service: 'cew-ai-service' },
+    // Console transport
+    new winston.transports.Console({
+      format: winston.format.combine(
+        winston.format.colorize(),
+        customFormat
+      )
+    }),
+    // File transport
+    new winston.transports.File({
+      filename: logFile,
+      maxsize: 5242880, // 5MB
+      maxFiles: 5,
+    }),
+    // Error file transport
+    new winston.transports.File({
+      filename: path.join(logsDir, 'error.log'),
+      level: 'error',
+      maxsize: 5242880,
+      maxFiles: 5,
+    })
+  ]
 });
 
-// Add file transports in production
-if (isProduction) {
-  logger.add(
-    new winston.transports.File({
-      filename: 'logs/error.log',
-      level: 'error',
-    })
-  );
-  logger.add(
-    new winston.transports.File({
-      filename: 'logs/combined.log',
-    })
-  );
-}
+/**
+ * Log stream for Morgan (HTTP logging)
+ */
+export const logStream = {
+  write: (message: string) => {
+    logger.info(message.trim());
+  }
+};
 
 export default logger;

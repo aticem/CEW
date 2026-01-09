@@ -1,229 +1,256 @@
-import { QueryResult, QueryType, SourceReference, ChatMessage } from '../types';
-import { llmService } from '../services/llmService';
+/**
+ * Response Generator - Orchestrates the complete query response pipeline
+ */
+import { ChatRequest, ChatResponse, QueryType, Source } from '../types';
 import { logger } from '../services/logger';
-import { RetrievalResult } from './retriever';
+import { policyService } from '../services/policyService';
+import { queryClassifier } from './queryClassifier';
+import { retriever } from './retriever';
+import { llmService } from '../services/llmService';
 
-export interface GenerationOptions {
-  includeSourceCitations?: boolean;
-  maxResponseLength?: number;
-  temperature?: number;
-  conversationHistory?: ChatMessage[];
-}
-
-class ResponseGenerator {
-  private systemPrompts: Record<QueryType, string> = {
-    document: `You are a helpful AI assistant for a Construction Engineering Workflow (CEW) application.
-Your role is to answer questions based on the provided document context.
-
-Guidelines:
-- Base your answers ONLY on the provided context
-- If the context doesn't contain enough information, say so clearly
-- Cite specific sources when referencing information
-- Use clear, professional language appropriate for construction industry
-- Format responses with bullet points or numbered lists when appropriate
-- If asked about something not in the context, acknowledge this limitation`,
-
-    data: `You are a helpful AI assistant specializing in extracting and analyzing data from construction documents.
-
-Guidelines:
-- Extract precise data values, measurements, and calculations
-- Present numerical data clearly with units
-- Create tables when comparing multiple values
-- Highlight any discrepancies or notable patterns
-- If data is incomplete or unclear, note the limitations
-- Always cite the source document for data values`,
-
-    hybrid: `You are a helpful AI assistant for a Construction Engineering Workflow (CEW) application.
-You handle both document search and data extraction queries.
-
-Guidelines:
-- Combine document context with data extraction as needed
-- Present information in a clear, organized manner
-- Use tables for data comparisons
-- Cite sources for both narrative and data content
-- Balance completeness with conciseness`,
-
-    conversational: `You are a helpful AI assistant for a Construction Engineering Workflow (CEW) application.
-You're here to help users navigate the system and answer general questions.
-
-Guidelines:
-- Be friendly and helpful
-- Provide guidance on using the document Q&A system
-- If the user seems to want document information, guide them to ask specific questions
-- Keep responses conversational but professional`,
-  };
-
-  async generate(
-    query: string,
-    queryType: QueryType,
-    retrievalResult: RetrievalResult,
-    options?: GenerationOptions
-  ): Promise<QueryResult> {
+/**
+ * Response Generator class - main orchestrator for query handling
+ */
+export class ResponseGenerator {
+  /**
+   * Generate a response for a user query
+   * @param request - Chat request
+   * @returns Chat response
+   */
+  async generateResponse(request: ChatRequest): Promise<ChatResponse> {
     const startTime = Date.now();
-    const opts = this.getDefaultOptions(options);
 
-    // Build the prompt
-    const prompt = this.buildPrompt(
-      query,
-      queryType,
-      retrievalResult,
-      opts.conversationHistory
-    );
+    try {
+      logger.info('Processing chat request', {
+        query: request.query,
+        userId: request.userId,
+        conversationId: request.conversationId
+      });
 
-    // Generate response from LLM
-    const response = await llmService.generateResponse({
-      prompt,
-      systemPrompt: this.systemPrompts[queryType],
-      temperature: opts.temperature,
-      maxTokens: opts.maxResponseLength,
-    });
+      // Step 1: Validate query safety
+      if (!policyService.isSafeQuery(request.query)) {
+        logger.warn('Unsafe query detected', { query: request.query });
+        return this.createErrorResponse(
+          'Query contains potentially unsafe content.',
+          request.language || 'en',
+          startTime
+        );
+      }
 
-    // Process and format the response
-    let answer = response.content;
+      // Step 2: Classify query
+      const classifiedQuery = queryClassifier.classifyQuery(request.query);
+      const language = request.language || classifiedQuery.language;
 
-    // Add source citations if requested and sources exist
-    if (opts.includeSourceCitations && retrievalResult.sources.length > 0) {
-      answer = this.addSourceCitations(answer, retrievalResult.sources);
+      logger.info('Query classified', {
+        type: classifiedQuery.type,
+        language: classifiedQuery.language,
+        confidence: classifiedQuery.confidence
+      });
+
+      // Step 3: Route based on query type
+      let response: ChatResponse;
+
+      switch (classifiedQuery.type) {
+        case QueryType.GENERAL:
+          response = await this.handleGeneralQuery(request.query, language, startTime);
+          break;
+
+        case QueryType.OUT_OF_SCOPE:
+          response = await this.handleOutOfScopeQuery(language, startTime);
+          break;
+
+        case QueryType.DATA:
+          response = await this.handleDataQuery(request.query, language, startTime);
+          break;
+
+        case QueryType.DOCUMENT:
+        default:
+          response = await this.handleDocumentQuery(request.query, language, startTime);
+          break;
+      }
+
+      logger.info('Response generated successfully', {
+        queryType: response.queryType,
+        processingTime: response.processingTime,
+        sourcesCount: response.sources.length
+      });
+
+      return response;
+
+    } catch (error) {
+      logger.error('Response generation failed', { error, query: request.query });
+      
+      return this.createErrorResponse(
+        'An error occurred while processing your query. Please try again.',
+        request.language || 'en',
+        startTime
+      );
     }
-
-    const processingTime = Date.now() - startTime;
-
-    const result: QueryResult = {
-      answer,
-      sources: retrievalResult.sources,
-      queryType,
-      confidence: this.calculateConfidence(retrievalResult),
-      processingTimeMs: processingTime,
-    };
-
-    logger.info('Response generated', {
-      queryType,
-      sourcesCount: retrievalResult.sources.length,
-      responseLength: answer.length,
-      processingTimeMs: processingTime,
-    });
-
-    return result;
   }
 
-  async generateConversational(
+  /**
+   * Handle document-based queries (RAG)
+   */
+  private async handleDocumentQuery(
     query: string,
-    conversationHistory?: ChatMessage[]
-  ): Promise<QueryResult> {
-    const startTime = Date.now();
+    language: string,
+    startTime: number
+  ): Promise<ChatResponse> {
+    try {
+      // Retrieve relevant context
+      const { context, sources } = await retriever.retrieveContext(query);
 
-    const historyContext = conversationHistory
-      ? this.formatConversationHistory(conversationHistory)
-      : '';
+      if (!context || context.length === 0) {
+        // No relevant documents found
+        const noAnswerMessage = policyService.getNoAnswerTemplate(language);
+        
+        return {
+          answer: noAnswerMessage,
+          sources: [],
+          queryType: QueryType.DOCUMENT,
+          language,
+          confidence: 0.5,
+          processingTime: Date.now() - startTime,
+          warnings: ['No relevant documents found for this query']
+        };
+      }
 
-    const prompt = historyContext
-      ? `Previous conversation:\n${historyContext}\n\nUser: ${query}`
-      : query;
+      // Generate answer using LLM
+      const llmResponse = await llmService.generateAnswer(query, context, language);
 
-    const response = await llmService.generateResponse({
-      prompt,
-      systemPrompt: this.systemPrompts.conversational,
-      temperature: 0.7,
-    });
+      // Convert sources to the expected format
+      const formattedSources: Source[] = sources.map(s => ({
+        documentId: s.chunk.documentId,
+        filename: s.chunk.metadata.filename,
+        pageNumber: s.chunk.pageNumber,
+        excerpt: s.chunk.content.substring(0, 200) + '...',
+        relevanceScore: s.score
+      }));
 
-    const processingTime = Date.now() - startTime;
+      return {
+        answer: llmResponse.answer,
+        sources: formattedSources,
+        queryType: QueryType.DOCUMENT,
+        language,
+        confidence: 0.85,
+        processingTime: Date.now() - startTime,
+        tokenUsage: llmResponse.tokenUsage
+      };
+
+    } catch (error) {
+      logger.error('Document query handling failed', { error });
+      throw error;
+    }
+  }
+
+  /**
+   * Handle general queries (greetings, etc.)
+   */
+  private async handleGeneralQuery(
+    query: string,
+    language: string,
+    startTime: number
+  ): Promise<ChatResponse> {
+    const greeting = policyService.getGreetingTemplate(language);
 
     return {
-      answer: response.content,
+      answer: greeting,
       sources: [],
-      queryType: 'conversational',
-      confidence: 1,
-      processingTimeMs: processingTime,
+      queryType: QueryType.GENERAL,
+      language,
+      confidence: 0.95,
+      processingTime: Date.now() - startTime
     };
   }
 
-  private buildPrompt(
-    query: string,
-    queryType: QueryType,
-    retrievalResult: RetrievalResult,
-    conversationHistory?: ChatMessage[]
-  ): string {
-    const parts: string[] = [];
+  /**
+   * Handle out-of-scope queries
+   */
+  private async handleOutOfScopeQuery(
+    language: string,
+    startTime: number
+  ): Promise<ChatResponse> {
+    const message = policyService.getOutOfScopeTemplate(language);
 
-    // Add conversation history if present
-    if (conversationHistory && conversationHistory.length > 0) {
-      parts.push('Previous conversation:');
-      parts.push(this.formatConversationHistory(conversationHistory));
-      parts.push('');
-    }
-
-    // Add context
-    if (retrievalResult.context) {
-      parts.push('Relevant document context:');
-      parts.push('```');
-      parts.push(retrievalResult.context);
-      parts.push('```');
-      parts.push('');
-    } else {
-      parts.push('Note: No relevant documents were found for this query.');
-      parts.push('');
-    }
-
-    // Add the query
-    parts.push('User question:');
-    parts.push(query);
-
-    // Add response guidance based on query type
-    if (queryType === 'data') {
-      parts.push('');
-      parts.push('Please extract and present the relevant data from the context above.');
-    }
-
-    return parts.join('\n');
-  }
-
-  private formatConversationHistory(messages: ChatMessage[]): string {
-    return messages
-      .slice(-6) // Keep last 6 messages for context
-      .map((msg) => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
-      .join('\n');
-  }
-
-  private addSourceCitations(
-    answer: string,
-    sources: SourceReference[]
-  ): string {
-    if (sources.length === 0) return answer;
-
-    const citations = sources
-      .map((source, index) => {
-        const pageInfo = source.pageNumber ? `, Page ${source.pageNumber}` : '';
-        return `[${index + 1}] ${source.documentName}${pageInfo}`;
-      })
-      .join('\n');
-
-    return `${answer}\n\n**Sources:**\n${citations}`;
-  }
-
-  private calculateConfidence(retrievalResult: RetrievalResult): number {
-    if (retrievalResult.chunks.length === 0) {
-      return 0.1;
-    }
-
-    // Average relevance score of top chunks
-    const avgScore =
-      retrievalResult.chunks.reduce((sum, c) => sum + c.score, 0) /
-      retrievalResult.chunks.length;
-
-    // Scale to 0-1 range (assuming scores are typically 0.7-1.0 for good matches)
-    return Math.min(Math.max((avgScore - 0.5) * 2, 0), 1);
-  }
-
-  private getDefaultOptions(
-    options?: GenerationOptions
-  ): Required<GenerationOptions> {
     return {
-      includeSourceCitations: options?.includeSourceCitations ?? true,
-      maxResponseLength: options?.maxResponseLength ?? 2000,
-      temperature: options?.temperature ?? 0.3,
-      conversationHistory: options?.conversationHistory ?? [],
+      answer: message,
+      sources: [],
+      queryType: QueryType.OUT_OF_SCOPE,
+      language,
+      confidence: 0.8,
+      processingTime: Date.now() - startTime,
+      warnings: ['Query is outside the system scope']
+    };
+  }
+
+  /**
+   * Handle data queries (database/statistics)
+   */
+  private async handleDataQuery(
+    query: string,
+    language: string,
+    startTime: number
+  ): Promise<ChatResponse> {
+    const message = language === 'tr'
+      ? `Bu tür veri sorguları henüz desteklenmiyor. Şu anda yalnızca yüklenmiş teknik dokümanlardaki bilgilere erişebiliyorum.
+
+Belirli bir konu hakkında dokümanlarda ne yazıyor diye sorabilirsiniz.`
+      : `This type of data query is not yet supported. Currently, I can only access information from uploaded technical documents.
+
+You can ask me what the documents say about a specific topic.`;
+
+    return {
+      answer: message,
+      sources: [],
+      queryType: QueryType.DATA,
+      language,
+      confidence: 0.7,
+      processingTime: Date.now() - startTime,
+      warnings: ['Database queries are not yet implemented']
+    };
+  }
+
+  /**
+   * Create an error response
+   */
+  private createErrorResponse(
+    message: string,
+    language: string,
+    startTime: number
+  ): ChatResponse {
+    return {
+      answer: message,
+      sources: [],
+      queryType: QueryType.OUT_OF_SCOPE,
+      language,
+      confidence: 0,
+      processingTime: Date.now() - startTime,
+      warnings: ['An error occurred during processing']
+    };
+  }
+
+  /**
+   * Get query statistics (placeholder for future implementation)
+   */
+  async getStats(): Promise<{
+    totalQueries: number;
+    avgProcessingTime: number;
+    queryTypeDistribution: Record<QueryType, number>;
+  }> {
+    // Placeholder for stats tracking
+    return {
+      totalQueries: 0,
+      avgProcessingTime: 0,
+      queryTypeDistribution: {
+        [QueryType.DOCUMENT]: 0,
+        [QueryType.DATA]: 0,
+        [QueryType.GENERAL]: 0,
+        [QueryType.OUT_OF_SCOPE]: 0
+      }
     };
   }
 }
 
+// Singleton instance
 export const responseGenerator = new ResponseGenerator();
+export default responseGenerator;
