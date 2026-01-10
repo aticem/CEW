@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import DCModule from './modules/DCModule.jsx';
 import MC4Module from './modules/MC4Module.jsx';
+import AIAssistant from './components/AIAssistant.jsx';
+import { ProgressProvider, useProgress } from './context/ProgressContext.jsx';
 
 const MODULES = {
   DC: { key: 'DC', label: 'DC CABLE PULLING PROGRESS TRACKING', Component: DCModule },
   MC4: { key: 'MC4', label: 'MC4 Installation', Component: MC4Module },
 };
 
-export default function App() {
+// Inner App component that uses the progress context
+function AppContent() {
   const [activeKey, setActiveKey] = useState(() => {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -19,6 +22,7 @@ export default function App() {
   });
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
+  const { progressData } = useProgress();
 
   useEffect(() => {
     // Keep URL in sync with current module (shareable + supports opening in new tab)
@@ -47,6 +51,14 @@ export default function App() {
   return (
     <>
       <ActiveComponent />
+
+      {/* AI Assistant - floating chat widget with screen context */}
+      <AIAssistant 
+        pageContext={{
+          module: MODULES[activeKey]?.label || activeKey,
+          ...progressData,
+        }} 
+      />
 
       {/* Hamburger menu (only 2 modules: DC + MC4) */}
       <div className="fixed left-3 sm:left-5 top-[calc(var(--cewHeaderH,92px)+8px)] z-[1200]" ref={menuRef}>
@@ -92,4 +104,11 @@ export default function App() {
   );
 }
 
-
+// Main App wrapped with ProgressProvider
+export default function App() {
+  return (
+    <ProgressProvider>
+      <AppContent />
+    </ProgressProvider>
+  );
+}

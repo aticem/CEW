@@ -1,0 +1,23 @@
+# Structured Ingestion Upgrade - Installation Commands
+# Run these commands in PowerShell
+
+# 1. Navigate to ai-service
+cd C:\Users\atila\CEW\ai-service
+
+# 2. Activate virtual environment
+.\venv\Scripts\Activate
+
+# 3. Upgrade dependencies (install pdfplumber)
+pip install pdfplumber==0.11.0
+
+# Alternative: Reinstall all dependencies
+# pip install -r requirements.txt
+
+# 4. Run structured ingestion
+python scripts/ingest.py
+
+# 5. Verify results
+python scripts/inspect_db.py
+
+# 6. (Optional) Inspect all documents
+# python scripts/inspect_db.py --all

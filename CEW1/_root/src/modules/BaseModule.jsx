@@ -5,6 +5,7 @@ import '../App.css';
 import SubmitModal from '../components/SubmitModal';
 import useDailyLog from '../hooks/useDailyLog';
 import { useChartExport } from '../hooks/useChartExport';
+import { useProgress } from '../context/ProgressContext.jsx';
 import Papa from 'papaparse';
 import {
   asLineStrings,
@@ -317,6 +318,9 @@ export default function BaseModule({
   customPanelLogic: _customPanelLogic = null,
   customBoundaryLogic = null,
 }) {
+  // Progress context for AI Assistant (shares real-time data with AIAssistant component)
+  const { updateProgress } = useProgress();
+
   // Global status line used across module load/parsing flows.
   const [status, setStatus] = useState('Loading...');
 
@@ -14857,6 +14861,18 @@ export default function BaseModule({
   const remainingTotal = Math.max(0, overallTotal - completedTotal);
 
   const simpleCounterUnit = typeof activeMode?.simpleCounterUnit === 'string' ? activeMode.simpleCounterUnit : 'm';
+
+  // Update AI Assistant context with real-time progress data
+  useEffect(() => {
+    updateProgress({
+      module: moduleName,
+      total: overallTotal,
+      completed: completedTotal,
+      remaining: remainingTotal,
+      percentage: completedPct,
+      unit: simpleCounterUnit || 'units',
+    });
+  }, [moduleName, overallTotal, completedTotal, remainingTotal, completedPct, simpleCounterUnit, updateProgress]);
   const formatSimpleCounter = (value) => {
     const v = Number(value) || 0;
     return `${v.toFixed(0)}${simpleCounterUnit ? ` ${simpleCounterUnit}` : ''}`;

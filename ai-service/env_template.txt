@@ -1,0 +1,13 @@
+# Rename this file to .env and add your OpenAI API key
+# =====================================================
+
+# OpenAI API Key (required)
+OPENAI_API_KEY=your-openai-api-key-here
+
+# Model Settings (optional)
+LLM_MODEL=gpt-4o
+EMBEDDING_MODEL=text-embedding-3-small
+
+# Server Settings (optional)
+HOST=0.0.0.0
+PORT=8000
