@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import DCModule from './modules/DCModule.jsx';
 import MC4Module from './modules/MC4Module.jsx';
+import AIAssistant from './components/AIAssistant.jsx';
 
 const MODULES = {
   DC: { key: 'DC', label: 'DC CABLE PULLING PROGRESS TRACKING', Component: DCModule },
@@ -48,6 +49,9 @@ export default function App() {
     <>
       <ActiveComponent />
 
+      {/* AI Assistant */}
+      <AIAssistant />
+
       {/* Hamburger menu (only 2 modules: DC + MC4) */}
       <div className="fixed left-3 sm:left-5 top-[calc(var(--cewHeaderH,92px)+8px)] z-[1200]" ref={menuRef}>
         <div className="relative">
@@ -91,5 +95,3 @@ export default function App() {
     </>
   );
 }
-
-

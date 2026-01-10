@@ -1,0 +1,47 @@
+{
+  "name": "cew-ai-service",
+  "version": "1.0.0",
+  "description": "AI Assistant Backend Service for CEW - Local-first RAG system",
+  "main": "src/api/app.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/api/app.js",
+    "dev": "nodemon src/api/app.js",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "ingest": "node scripts/ingest-documents.js",
+    "test-query": "node scripts/test-query.js",
+    "validate": "node scripts/validate.js",
+    "validate:documents": "node scripts/validate.js"
+  },
+  "keywords": [
+    "rag",
+    "ai",
+    "construction",
+    "document-processing"
+  ],
+  "author": "CEW Team",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "express-rate-limit": "^7.1.5",
+    "dotenv": "^16.3.1",
+    "mammoth": "^1.6.0",
+    "pdf-parse": "^1.1.1",
+    "exceljs": "^4.4.0",
+    "openai": "^4.24.1",
+    "@pinecone-database/pinecone": "^2.0.1",
+    "@qdrant/js-client-rest": "^1.7.0",
+    "langchain": "^0.1.0",
+    "winston": "^3.11.0",
+    "joi": "^17.11.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2",
+    "jest": "^29.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
