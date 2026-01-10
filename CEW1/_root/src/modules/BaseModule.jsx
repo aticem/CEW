@@ -5,7 +5,6 @@ import '../App.css';
 import SubmitModal from '../components/SubmitModal';
 import useDailyLog from '../hooks/useDailyLog';
 import { useChartExport } from '../hooks/useChartExport';
-import { sendSnapshotAfterSubmit } from '../utils/snapshotExport';
 import Papa from 'papaparse';
 import {
   asLineStrings,

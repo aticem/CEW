@@ -8,4 +8,3 @@ export default createModule({
   moduleConfig: MC4_MODULE_CONFIG,
 });
 
-
