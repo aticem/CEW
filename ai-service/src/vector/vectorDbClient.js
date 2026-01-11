@@ -51,11 +51,39 @@ export async function upsert(vectors) {
 }
 
 /**
+ * Upsert payloads without vectors (for ingest-time storage)
+ * Vectors will be generated on-demand during queries
+ */
+export async function upsertPayloads(payloads) {
+  const provider = getProvider();
+  return provider.upsertPayloads(payloads);
+}
+
+/**
  * Search for similar vectors
  */
 export async function search(queryVector, options) {
   const provider = getProvider();
   return provider.search(queryVector, options);
+}
+
+/**
+ * Search with on-demand embedding generation
+ * Since ingest uses zero-vector placeholders, we retrieve all chunks,
+ * generate embeddings on-demand, and compute similarity locally
+ */
+export async function searchWithOnDemandEmbeddings(queryVector, options) {
+  const provider = getProvider();
+  return provider.searchWithOnDemandEmbeddings(queryVector, options);
+}
+
+/**
+ * Keyword-based search using BM25 (NO API calls)
+ * Pure lexical search - API-free retrieval
+ */
+export async function searchKeywordBM25(query, options) {
+  const provider = getProvider();
+  return provider.searchKeywordBM25(query, options);
 }
 
 /**

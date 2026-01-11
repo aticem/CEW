@@ -14,11 +14,21 @@ export const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   logLevel: process.env.LOG_LEVEL || 'info',
 
-  // OpenAI configuration
+  // Anthropic configuration (for LLM)
+  anthropic: {
+    apiKey: process.env.ANTHROPIC_API_KEY,
+    // Preferred model (will fallback if unavailable)
+    preferredModel: process.env.ANTHROPIC_PREFERRED_MODEL || 'claude-sonnet-4-5',
+    // Fallback model (guaranteed to be available)
+    fallbackModel: process.env.ANTHROPIC_FALLBACK_MODEL || 'claude-3-5-sonnet-20241022',
+    // Legacy support for ANTHROPIC_MODEL (deprecated)
+    model: process.env.ANTHROPIC_MODEL || process.env.ANTHROPIC_PREFERRED_MODEL || 'claude-sonnet-4-5',
+  },
+
+  // OpenAI configuration (for embeddings only)
   openai: {
     apiKey: process.env.OPENAI_API_KEY,
     embeddingModel: process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small',
-    llmModel: process.env.OPENAI_LLM_MODEL || 'gpt-4-turbo-preview',
   },
 
   // Vector database configuration
@@ -62,8 +72,8 @@ export const config = {
 export function validateConfig() {
   const errors = [];
 
-  if (!config.openai.apiKey && config.nodeEnv !== 'test') {
-    errors.push('OPENAI_API_KEY is required');
+  if (!config.anthropic.apiKey && config.nodeEnv !== 'test') {
+    errors.push('ANTHROPIC_API_KEY is required');
   }
 
   if (config.vectorDb.provider === 'pinecone') {

@@ -3,12 +3,14 @@ import { join, extname, basename } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../utils/logger.js';
 import config from '../config/env.js';
-import { parseWordDocument, detectWordHeadings } from './parsers/wordParser.js';
+import { parseWordDocument, buildDocumentTree } from './parsers/wordParser.js';
 import { parsePDFDocument, detectPDFHeadings } from './parsers/pdfParser.js';
 import { parseExcelDocument } from './parsers/excelParser.js';
-import { chunkWordText, chunkPDFText } from './chunking/textChunker.js';
+import { chunkStructuredDocument } from './chunking/sectionAwareChunker.js';
+import { chunkPDFText } from './chunking/textChunker.js';
 import { chunkExcel } from './chunking/excelChunker.js';
-import { batchGenerateEmbeddings } from './embeddings/embeddingService.js';
+// REMOVED: No embedding generation during ingest (100% local/deterministic)
+// import { batchGenerateEmbeddings } from './embeddings/embeddingService.js';
 import * as vectorDb from '../vector/vectorDbClient.js';
 
 /**
@@ -107,8 +109,17 @@ export async function ingestDocument(file) {
     case '.doc':
       parseResult = await parseWordDocument(buffer, metadata);
       if (parseResult.status === 'SUCCESS') {
-        headings = detectWordHeadings(parseResult.paragraphs);
-        chunks = chunkWordText(parseResult.paragraphs, headings);
+        // Use section-aware chunking with full structure preservation
+        chunks = chunkStructuredDocument(parseResult.structure, {
+          maxTokens: 300,  // Smaller chunks for better retrieval
+          minTokens: 50,
+          includeHeadings: true,
+        });
+        logger.info('Word document processed with section-aware chunking', {
+          file: file.name,
+          elements: parseResult.structure.length,
+          chunks: chunks.length,
+        });
       }
       break;
 
@@ -152,44 +163,50 @@ export async function ingestDocument(file) {
     chunks: chunks.length,
   });
 
-  // Generate embeddings for chunks
-  const texts = chunks.map(c => c.text);
-  const embeddings = await batchGenerateEmbeddings(texts);
-
-  // Create vectors for database
-  const vectors = chunks.map((chunk, index) => ({
-    id: `${metadata.doc_id}_chunk_${index}`,
-    values: embeddings[index],
-    metadata: {
+  // NO EMBEDDINGS GENERATED DURING INGEST (100% local/deterministic)
+  // Embeddings will be generated on-demand during query time
+  
+  // Store chunks as payload-only (no vectors at ingest time)
+  const payloads = chunks.map((chunk, index) => ({
+    // Use UUID for Qdrant ID (Qdrant prefers UUID or numeric IDs)
+    id: uuidv4(),
+    payload: {
       doc_id: metadata.doc_id,
       doc_name: metadata.doc_name,
       doc_type: metadata.doc_type,
       chunk_index: index,
       chunk_text: chunk.text,
       token_count: chunk.tokenCount,
+      // Enhanced section-aware metadata
+      section_title: chunk.section || 'Document',
+      section_path: chunk.sectionPath || chunk.section || 'Document',
       // Document-specific metadata
       page: chunk.pageNumber || null,
-      section: chunk.section || null,
+      section: chunk.section || null,  // Keep for backwards compatibility
       sheet_name: chunk.sheetName || null,
       row_number: chunk.rowNumber || null,
+      // Chunk type indicators (for better understanding)
+      is_table_chunk: chunk.isTableChunk || false,
+      is_list_chunk: chunk.isListChunk || false,
+      element_types: chunk.elementTypes ? chunk.elementTypes.join(',') : null,
       // Timestamps
       ingested_at: new Date().toISOString(),
     },
   }));
 
-  // Upsert to vector database
-  await vectorDb.upsert(vectors);
+  // Store payloads to vector database (no vectors yet)
+  await vectorDb.upsertPayloads(payloads);
 
   logger.info('Document ingested successfully', {
     file: file.name,
     chunks: chunks.length,
-    vectors: vectors.length,
+    payloads: payloads.length,
   });
 
   return {
     success: true,
     chunksCreated: chunks.length,
-    vectorsUpserted: vectors.length,
+    vectorsUpserted: payloads.length,
   };
 }
 
@@ -241,7 +258,49 @@ function getDocumentType(extension) {
   return typeMap[extension] || 'UNKNOWN';
 }
 
+/**
+ * IngestPipeline class for document ingestion
+ */
+export class IngestPipeline {
+  constructor() {
+    this.initialized = false;
+  }
+
+  /**
+   * Initialize the pipeline (vector database connection)
+   */
+  async initialize() {
+    if (this.initialized) return;
+    await vectorDb.initialize();
+    this.initialized = true;
+    logger.info('IngestPipeline initialized');
+  }
+
+  /**
+   * Process a single document file
+   */
+  async processDocument(filePath) {
+    const fileName = basename(filePath);
+    const extension = extname(filePath).toLowerCase();
+
+    const file = {
+      name: fileName,
+      path: filePath,
+      extension: extension,
+    };
+
+    const result = await ingestDocument(file);
+    
+    return {
+      chunksCreated: result.chunksCreated || 0,
+      embeddingsGenerated: result.chunksCreated || 0,
+      vectorsStored: result.vectorsUpserted || 0,
+    };
+  }
+}
+
 export default {
   ingestDocuments,
   ingestDocument,
+  IngestPipeline,
 };

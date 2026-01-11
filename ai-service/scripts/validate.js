@@ -7,8 +7,13 @@
  * and updates the VALIDATION_DOCUMENT_READING.md file with results.
  */
 
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Get __dirname equivalent in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Validation questions organized by category
 const validationQuestions = [
@@ -367,6 +372,24 @@ function validateResponse(response, validationRules) {
   return { pass: false, reason: 'Response does not match expected answer' };
 }
 
+// Check if response has sources
+function hasSourceReferences(response) {
+  if (!response) return false;
+  
+  // Check if sources array exists and has items
+  if (response.sources && Array.isArray(response.sources) && response.sources.length > 0) {
+    return true;
+  }
+  
+  // Check if answer mentions sources
+  const answer = response.answer || '';
+  if (answer.includes('Source:') || answer.includes('[Source]') || answer.includes('document')) {
+    return true;
+  }
+  
+  return false;
+}
+
 // Run validation loop
 async function runValidation() {
   console.log('🚀 Starting Validation Loop...\n');
@@ -375,9 +398,10 @@ async function runValidation() {
   const results = [];
   let passCount = 0;
   let failCount = 0;
+  let missingSourcesCount = 0;
 
   for (const q of validationQuestions) {
-    console.log(`\n📝 Question ${q.id}/40: ${q.question}`);
+    console.log(`\n📝 Question ${q.id}/40 [Category ${q.category}]: ${q.question}`);
     
     const response = await queryAI(q.question);
     
@@ -387,23 +411,44 @@ async function runValidation() {
         ...q,
         aiResponse: 'No response',
         pass: false,
-        reason: 'Service unavailable'
+        reason: 'Service unavailable',
+        hasSources: false
       });
       failCount++;
       continue;
     }
 
+    // Check answer validity
     const validation = validateResponse(response, q.validationRules);
     
-    if (validation.pass) {
-      console.log(`✅ PASS: ${validation.reason}`);
-      console.log(`   AI Answer: ${response.answer.substring(0, 100)}...`);
+    // Check for source references
+    const hasSources = hasSourceReferences(response);
+    
+    let statusIcon = '✅';
+    let statusText = 'PASS';
+    
+    if (!validation.pass) {
+      statusIcon = '❌';
+      statusText = 'FAIL';
+      failCount++;
+    } else if (!hasSources && !q.validationRules.includes('not_found')) {
+      statusIcon = '⚠️';
+      statusText = 'PASS (No Sources)';
+      missingSourcesCount++;
       passCount++;
     } else {
-      console.log(`❌ FAIL: ${validation.reason}`);
-      console.log(`   AI Answer: ${response.answer.substring(0, 100)}...`);
+      passCount++;
+    }
+    
+    console.log(`${statusIcon} ${statusText}: ${validation.reason}`);
+    console.log(`   Answer: ${response.answer.substring(0, 120)}${response.answer.length > 120 ? '...' : ''}`);
+    
+    if (!hasSources && !q.validationRules.includes('not_found')) {
+      console.log(`   ⚠️  Warning: No source references found`);
+    }
+    
+    if (!validation.pass) {
       console.log(`   Expected: ${q.expectedAnswer}`);
-      failCount++;
     }
 
     results.push({
@@ -411,7 +456,8 @@ async function runValidation() {
       aiResponse: response.answer,
       sources: response.sources || [],
       pass: validation.pass,
-      reason: validation.reason
+      reason: validation.reason,
+      hasSources: hasSources
     });
 
     // Small delay to avoid overwhelming the service
@@ -424,6 +470,9 @@ async function runValidation() {
   console.log(`Total Questions: 40`);
   console.log(`✅ Passed: ${passCount}`);
   console.log(`❌ Failed: ${failCount}`);
+  if (missingSourcesCount > 0) {
+    console.log(`⚠️  Passed but missing sources: ${missingSourcesCount}`);
+  }
   console.log(`Pass Rate: ${((passCount / 40) * 100).toFixed(1)}%`);
   console.log('═══════════════════════════════════════════════════════\n');
 
@@ -432,7 +481,7 @@ async function runValidation() {
   fs.writeFileSync(resultsPath, JSON.stringify(results, null, 2));
   console.log(`✅ Results saved to: ${resultsPath}\n`);
 
-  return { results, passCount, failCount };
+  return { results, passCount, failCount, missingSourcesCount };
 }
 
 // Check if service is available
@@ -461,10 +510,13 @@ async function main() {
 
   console.log('✅ AI service is available\n');
 
-  const { results, passCount, failCount } = await runValidation();
+  const { results, passCount, failCount, missingSourcesCount } = await runValidation();
 
   if (failCount === 0) {
     console.log('🎉 ALL VALIDATION TESTS PASSED! System is ready for production.');
+    if (missingSourcesCount > 0) {
+      console.log(`⚠️  Note: ${missingSourcesCount} answers were missing source references.`);
+    }
     process.exit(0);
   } else {
     console.log('⚠️  Some validation tests failed. Review the results and fix issues.');
@@ -472,12 +524,13 @@ async function main() {
   }
 }
 
-// Run if executed directly
-if (require.main === module) {
+// Run if executed directly (ES module equivalent of require.main === module)
+if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch(error => {
     console.error('Fatal error:', error);
     process.exit(1);
   });
 }
 
-module.exports = { runValidation, validationQuestions };
+// Export for use in other modules
+export { runValidation, validationQuestions };

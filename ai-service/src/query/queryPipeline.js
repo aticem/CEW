@@ -38,18 +38,13 @@ export async function processQuery(question, options = {}) {
       };
     }
 
-    // Step 1: Generate embedding for question
-    logger.debug('Step 1: Generating query embedding');
-    const queryEmbedding = await generateEmbedding(question);
-
-    // Step 2: Retrieve relevant chunks from vector database
-    logger.debug('Step 2: Retrieving relevant chunks');
-    const searchOptions = {
-      limit: options.limit || 5,
-      scoreThreshold: options.scoreThreshold || 0.7,
-    };
-
-    const results = await vectorDb.search(queryEmbedding, searchOptions);
+    // Step 1: Retrieve relevant chunks using BM25 keyword search (API-free)
+    logger.info('Step 1: Retrieving chunks using BM25 keyword search (API-free)');
+    
+    const results = await vectorDb.searchKeywordBM25(question, {
+      limit: options.limit || 10, // Retrieve top 10 for better coverage
+      minScore: 0, // No minimum score - let BM25 rank naturally
+    });
 
     if (results.length === 0) {
       logger.info('No relevant documents found for query');
@@ -60,11 +55,15 @@ export async function processQuery(question, options = {}) {
         metadata: {
           chunksRetrieved: 0,
           durationMs: Date.now() - startTime,
+          retrievalMethod: 'BM25_KEYWORD',
         },
       };
     }
 
-    logger.info('Retrieved chunks', { count: results.length });
+    logger.info('Retrieved chunks via BM25', { 
+      count: results.length,
+      sections: results.map(r => r.metadata.section_title || r.metadata.section || 'N/A').slice(0, 5),
+    });
 
     // Step 3: Build context from retrieved chunks
     logger.debug('Step 3: Building context');
@@ -132,12 +131,24 @@ function buildContext(results) {
     if (metadata.page) {
       source += ` (Page ${metadata.page})`;
     }
-    if (metadata.section) {
+    // Use section_title (new field from ingestion improvements) or fallback to section
+    if (metadata.section_title) {
+      source += ` - ${metadata.section_title}`;
+    } else if (metadata.section) {
       source += ` - ${metadata.section}`;
     }
     if (metadata.sheet_name) {
       source += ` - Sheet: ${metadata.sheet_name}`;
     }
+
+    // Debug log each chunk being used
+    logger.debug('Context chunk', {
+      index: index + 1,
+      score: result.score?.toFixed(4),
+      section: metadata.section_title || metadata.section || 'N/A',
+      docName: metadata.doc_name,
+      textPreview: metadata.chunk_text?.substring(0, 100),
+    });
 
     return `${source}\n${metadata.chunk_text}\n`;
   });
