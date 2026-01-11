@@ -9,25 +9,43 @@
       "contains:kWp",
       "or contains:MWp"
     ],
-    "aiResponse": "Based on the provided document excerpts from Technical Description_Rev01.docx, the **total DC capacity of the Haunton PV Plant** can be calculated by summing the DC capacities of all six substations:\n\n**Total DC Capacity by Substation:**\n\n• **Substation 1:** 11,302.20 kW\n• **Substation 2:** 11,426.40 kW\n• **Substation 3:** 10,898.50 kW\n• **Substation 4:** 12,263.67 kW\n• **Substation 5:** 12,250.44 kW\n• **Substation 6:** 11,850.30 kW\n\n**Total DC Capacity: 69,991.51 kW (approximately 70 MWp)**\n\n*Source: Technical Description_Rev01.docx, Tables 7-12 (Substation Configurations)*",
+    "aiResponse": "Based on the provided document excerpts, the **total DC capacity of the Haunton PV Plant is 69,991.56 kWp** (approximately 70 MWp (70000.00 kWp)).\n\nThis is broken down across six substations as follows:\n\n• **Substation 1**: 11,302.20 kWp\n• **Substation 2**: 11,426.40 kWp\n• **Substation 3**: 10,898.50 kWp\n• **Substation 4**: 12,263.67 kWp\n• **Substation 5**: 12,250.44 kWp\n• **Substation 6**: 11,850.30 kWp\n\n**Source**: Technical Description_Rev01.docx, Table 6 \"Haunton PV Plant Overview Configuration\" and Section 1 \"INTRODUCTION\"\n\nThe plant uses a total of 122,256 PV modules (61,128 modules × 570 Wp + 61,128 modules × 575 Wp) to achieve this nameplate DC capacity.",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 8.368235169723798,
-        "section": "DC/AC (MAX) RATIO"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 1.9412151028053761,
+        "relevanceScore": 28.694268815119756,
         "section": "REFERENCES"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 1.2291837592499575,
+        "relevanceScore": 8.624441473006772,
+        "section": "DC/AC (MAX) RATIO"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.8842438361105538,
         "section": "Document"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.8302036311256468,
+        "section": "570 Wp"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.8251254191352562,
+        "section": "INTRODUCTION"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.5337721568938097,
+        "section": "HAUNTON PV PLANT"
       }
     ],
     "pass": true,
@@ -43,35 +61,47 @@
       "contains:Haunton",
       "contains:United Kingdom"
     ],
-    "aiResponse": "The requested information was not found in the available project documents.\n\n**Note:** While the document excerpts reference \"SITE AREA INFORMATION\" and \"SITE LOCATION\" sections (Sources 1, 4, 6, 7, 8), and mention \"Table 1 Site Coordinates\" (Sources 7, 8), the actual content of these sections containing the specific location details is not included in the provided excerpts.",
+    "aiResponse": "Based on the provided document excerpts, the project is located:\n\n**Near Haunton, Tamworth, United Kingdom**\n\n**Source:** Technical Description_Rev01.docx - INTRODUCTION\n- The document explicitly states: \"This document describes the PV Project named 'Hauton PV Plant', with a DC Capacity of 69,991 MWp (69991.00 kWp) located near to Haunton, Tamworth (United Kingdom).\"\n\n**Additional topographical detail:**\n- The site area is slightly sloping with levels ranging from +64mOD to +79mOD from north to south respectively (Source: SOIL CONDITIONS section)",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0,
-        "section": "SITE AREA INFORMATION"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 0,
+        "relevanceScore": 13.864674496876862,
         "section": "REFERENCES"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0,
-        "section": "SYSTEM CONFIGURATION"
+        "relevanceScore": 2.013476578111329,
+        "section": "INTRODUCTION"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0,
-        "section": "Document"
+        "relevanceScore": 0.3810882156551276,
+        "section": "CONSTRUCTION FACILITIES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.22747267947591476,
+        "section": "CLIENT STATION"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.14789898027404347,
+        "section": "HAUNTON PV PLANT"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.07787178746173229,
+        "section": "SOIL CONDITIONS"
       }
     ],
-    "pass": false,
-    "reason": "Response does not match expected answer",
+    "pass": true,
+    "reason": "Contains expected term: \"haunton\"",
     "hasSources": true
   },
   {
@@ -83,35 +113,17 @@
       "contains:6",
       "contains:substation"
     ],
-    "aiResponse": "Based on the provided document excerpts, the PV plant includes **6 substations**.\n\n**Source:** Technical Description_Rev01.docx - Document (Sources 9 and 10)\n\nThe document lists configuration tables for:\n- Substation 1 (Table 7)\n- Substation 2 (Table 8)\n- Substation 3 (Table 9)\n- Substation 4 (Table 10)\n- Substation 5 (Table 11)\n- Substation 6 (Table 12)",
+    "aiResponse": "Based on the provided document excerpts, the security system section mentions:\n\n- **One client station** (with camera)\n- **Production substations** (each with a camera, but the exact number is not specified)\n- **One Main Substation** (covered by alarm system)\n\nThe excerpts indicate there are multiple production substations (plural form used), but **the exact total number of substations is not specified** in these particular document sections.\n\n**Source:** Technical Description_Rev01.docx - SECURITY SYSTEM section\n\nTo provide the precise number of substations in the PV plant, I would need access to other sections of the project documentation such as electrical layout drawings, system configuration documents, or the topographic layout referenced in the text.",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0,
-        "section": "SITE AREA INFORMATION"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 0,
-        "section": "SYSTEM CONFIGURATION"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": -0.4039550015564626,
-        "section": "REFERENCES"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": -1.1110480384048738,
-        "section": "Document"
+        "relevanceScore": 0.4287098412588555,
+        "section": "SECURITY SYSTEM"
       }
     ],
     "pass": true,
-    "reason": "Contains expected term: \"6\"",
+    "reason": "Contains expected term: \"substation\"",
     "hasSources": true
   },
   {
@@ -123,13 +135,49 @@
       "contains:-5",
       "contains:35"
     ],
-    "aiResponse": "Based on the provided document excerpts:\n\n**Design Ambient Temperatures:**\n- **Minimum:** -5°C\n- **Maximum:** +35°C\n\n**Source:** Technical Description_Rev01.docx - STRING VOLTAGE AND CURRENT SIZING section\n\nThese temperature values are used as design parameters for calculating the string voltage and current sizing under the most restrictive conditions for the PV system configuration.",
+    "aiResponse": "Based on the provided document excerpts, the design ambient temperatures are:\n\n**Minimum Ambient Temperature:** -5°C  \n**Maximum Ambient Temperature:** +35°C\n\n**Source:** Technical Description_Rev01.docx - Section 3.3 CLIMATE CONDITIONS, Table 2 Design Climate Conditions\n\n---\n\n**Note:** The module operating temperature range is -40°C to +85°C (from Table 16, Module Electrical Characteristics), but this refers to the PV module's operational capability, not the site's design ambient temperature conditions.",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.7213307258500197,
+        "relevanceScore": 14.604111925702288,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 4.810049314516752,
         "section": "STRING VOLTAGE AND CURRENT SIZING"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.5865560910791012,
+        "section": "570 Wp"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.5741987448963611,
+        "section": "1500 V"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.4615770652282454,
+        "section": "METKA"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.3490750348861469,
+        "section": "Document"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.0539251357963888,
+        "section": "PV PLANT CHARACTERISTICS"
       }
     ],
     "pass": true,
@@ -145,35 +193,23 @@
       "contains:33",
       "contains:kV"
     ],
-    "aiResponse": "The requested information was not found in the available project documents.\n\nNote: While the provided excerpts reference medium voltage (MV) components including MV cables, MV skids, and MV power cables in the table of contents and references sections, the actual technical specifications including the specific voltage level are not included in these document excerpts.",
+    "aiResponse": "The internal medium voltage level of the PV Plant is **33 kV (33000 V)**.\n\n**Source:** Technical Description_Rev01.docx - PV PLANT CHARACTERISTICS section",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0,
-        "section": "SITE AREA INFORMATION"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 0,
-        "section": "SYSTEM CONFIGURATION"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": -0.4155097908101576,
-        "section": "Document"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": -1.4896018764198213,
+        "relevanceScore": 16.750330678747055,
         "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.243778921900716,
+        "section": "PV PLANT CHARACTERISTICS"
       }
     ],
-    "pass": false,
-    "reason": "Response does not match expected answer",
+    "pass": true,
+    "reason": "Contains expected term: \"33\"",
     "hasSources": true
   },
   {
@@ -186,25 +222,37 @@
       "contains:575",
       "contains:Jinko"
     ],
-    "aiResponse": "Based on the provided document excerpts, the PV module models used in the project are:\n\n**JinKo Tiger Neo N-type modules:**\n- **JKM570N-72HL4-BDV** (570 Wp)\n- **JKM575N-72HL4-BDV** (575 Wp)\n\n**Quantities:**\n- 61,128 pieces × 570 Wp modules\n- 61,128 pieces × 575 Wp modules\n\n**Source:** \n- Technical Description_Rev01.docx, Section 4.4 (DC/AC RATIO)\n- Tables 4 and 5 referenced in the document\n- Module Datasheet reference: Tiger Neo N-type 72HL4-BDV 560-580 Watt",
+    "aiResponse": "Based on the provided document excerpts, the PV module models used in the project are:\n\n**Two Jinko Tiger Pro module variants:**\n- **JKM570-N72HL4-BDV** (570 Wp)\n- **JKM575-N72HL4-BDV** (575 Wp)\n\n**Quantities:**\n- 61,128 units of the 570 Wp modules\n- 61,128 units of the 575 Wp modules\n- Total: 122,256 modules\n\n**Source:** Technical Description_Rev01.docx - Table 6 (Overview PV Plant Configuration) and Table 16 (Module specifications)",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.666960566544357,
-        "section": "Document"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 0.286117191037891,
+        "relevanceScore": 16.955958566036614,
         "section": "REFERENCES"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.18066459808837765,
+        "relevanceScore": 2.4456764955036836,
         "section": "DC/AC RATIO"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.2644335782939096,
+        "section": "570 Wp"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.9675068089192145,
+        "section": "Document"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.8095647351090451,
+        "section": "FOUNDATIONS"
       }
     ],
     "pass": true,
@@ -220,43 +268,61 @@
       "contains:27",
       "contains:module"
     ],
-    "aiResponse": "Based on the provided document excerpts:\n\n**27 PV modules are connected per string**\n\n**Source:** Technical Description_Rev01.docx - STRING VOLTAGE AND CURRENT SIZING section\n\n**Supporting Details:**\n- \"This inverter admits a maximum of 27 panels in series per string and 32 strings in parallel\"\n- \"Nº PV MODULES PER STRING: 27\" (Table 6 - Overview PV Plant Configuration)\n- \"MODULES/STRING: 27 Modules\" (Substation configurations)\n\nThis configuration applies to both module types used in the project:\n- JKM570N-72HL4-BDV 570 Wp\n- JKM575N-72HL4-BDV 575 Wp",
+    "aiResponse": "Based on the provided document excerpts, **27 PV modules are connected per string**.\n\nThis specification is consistently stated throughout the technical documentation:\n\n**Source References:**\n- **Source 1** (Table 10 - Substation 2): \"Modules / String | 27 Modules\"\n- **Source 2** (Table 13 - Substation 5): \"Modules / String | 27 Modules\"\n- **Source 5** (Overview Configuration): \"Nº PV MODULES PER STRING 27\"\n- **Source 3**: \"This inverter admits a maximum of 27 panels in series per string\"\n- **Source 18-19** (All Substations 1-6): \"MODULES/STRING 27 Modules\"\n\nThis 27-module string configuration applies uniformly across all six substations in the Haunton PV Plant.\n\n*Source: Technical Description_Rev01.docx - Multiple sections including REFERENCES tables and CONFIGURATION overview*",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 7.47452835189621,
+        "relevanceScore": 17.108180604359873,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 7.455444771068444,
         "section": "STRING VOLTAGE AND CURRENT SIZING"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 5.289532595157667,
+        "relevanceScore": 5.4295441213676705,
         "section": "570 Wp"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 3.013866056001902,
-        "section": "METKA"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 3.009821026889739,
+        "relevanceScore": 3.317653918634046,
         "section": "CABLING"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.9737153368746894,
+        "relevanceScore": 3.187463441611356,
         "section": "1500 V"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.8165237646774566,
+        "relevanceScore": 3.127286884156926,
         "section": "EARTHING SYSTEM"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 3.000290452643202,
+        "section": "METKA"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.1008007238226396,
+        "section": "DC/AC (MAX) RATIO"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.957955393729682,
+        "section": "POWER STATION"
       }
     ],
     "pass": true,
@@ -272,23 +338,41 @@
       "contains:1500",
       "contains:V"
     ],
-    "aiResponse": "The requested information was not found in the available project documents.\n\n**Explanation:** While the document excerpts reference tables containing PV module specifications (Table 4: JKM570N-72HL4-BDV 570 Wp Parameters Values and Table 5: JKM575N-72HL4-BDV 575 Wp Parameters Values in Section 5.1 PV MODULES), the actual content of these tables showing the maximum system voltage is not included in the provided excerpts. Only the table of contents and section headers are visible.",
+    "aiResponse": "Based on the provided document excerpts, the **maximum system voltage** of the PV modules is:\n\n**1500 VDC**\n\n**Source:** Technical Description_Rev01.docx - REFERENCES [Table 16]\n\nThis specification applies to both module types used in the project:\n- JKM570-N72HL4-BDV (570 Wp)\n- JKM575-N72HL4-BDV (575 Wp)\n\nNote: This is distinct from the Maximum Power Voltage (Vmax), which is 42.29 V for the 570 Wp module and 48.44 V for the 575 Wp module. The maximum system voltage of 1500 VDC refers to the maximum DC voltage the modules can withstand when connected in series configurations within the solar array system.",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 1.1187095767687734,
+        "relevanceScore": 22.22070560027042,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.3847970043491067,
         "section": "Document"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.7321416297769259,
+        "relevanceScore": 1.0128064673209753,
         "section": "SYSTEM CONFIGURATION"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.8957117722418488,
+        "section": "MPPT SIZING"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.2902898614899734,
+        "section": "STRING VOLTAGE AND CURRENT SIZING"
       }
     ],
     "pass": true,
-    "reason": "Contains expected term: \"v\"",
+    "reason": "Contains expected term: \"1500\"",
     "hasSources": true
   },
   {
@@ -300,31 +384,19 @@
       "contains:80",
       "contains:%"
     ],
-    "aiResponse": "The requested information was not found in the available project documents.\n\n**Note:** While the excerpts reference PV module specifications (JKM570N-72HL4-BDV and JKM575N-72HL4-BDV models) and mention a module datasheet (Tiger Neo N-type 72HL4-BDV 560-580 Watt), the bifacial factor value is not included in the provided document excerpts.",
+    "aiResponse": "Based on the provided document excerpts, the bifacial factor of the PV modules is:\n\n**80±5%**\n\n**Source:** Technical Description_Rev01.docx - REFERENCES [Table 16]\n\nThis specification applies to both module types used in the project:\n- JKM570-N72HL4-BDV (570 Wp)\n- JKM575-N72HL4-BDV (575 Wp)",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0,
-        "section": "SITE AREA INFORMATION"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 0,
-        "section": "SYSTEM CONFIGURATION"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": -0.06587462000389727,
-        "section": "Document"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": -1.4896018764198213,
+        "relevanceScore": 14.809715371173247,
         "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.13706230276343156,
+        "section": "Document"
       }
     ],
     "pass": true,
@@ -340,23 +412,41 @@
       "contains:-40",
       "contains:85"
     ],
-    "aiResponse": "The requested information was not found in the available project documents.\n\n**Explanation:**\nThe provided excerpts reference:\n- Section 4.3 \"MPPT SIZING\" with voltage specifications\n- Table of Contents showing Section 5.1 \"PV MODULES\" exists\n- Table 13 \"Module Model. Mechanical Characteristics\" \n- Table 14 \"Module Model. Electrical Characteristics\"\n\nHowever, the actual content of these tables and the detailed module specifications, including operating temperature range, are not included in the document excerpts provided.",
+    "aiResponse": "Based on the provided document excerpts, the **operating temperature range of the modules is -40°C to +85°C**.\n\n**Source:**\n- Technical Description_Rev01.docx - REFERENCES [Table 16, Module Model Electrical Characteristics]\n- Also confirmed in [Source 8] Table 14\n\nThis specification applies to both module types:\n- JKM570-N72HL4-BDV (570 Wp)\n- JKM575-N72HL4-BDV (575 Wp)",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 1.515598443123607,
+        "relevanceScore": 18.548492880170123,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 4.0394298926581484,
         "section": "MPPT SIZING"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.4642885996215909,
+        "relevanceScore": 1.709584546613213,
+        "section": "570 Wp"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.9065097291536413,
+        "section": "1500 V"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.4526340939649898,
         "section": "Document"
       }
     ],
-    "pass": false,
-    "reason": "Response does not match expected answer",
+    "pass": true,
+    "reason": "Contains expected term: \"-40\"",
     "hasSources": true
   },
   {
@@ -368,31 +458,67 @@
       "contains:Sungrow",
       "contains:SG350"
     ],
-    "aiResponse": "Based on the provided document excerpts:\n\n**Inverter Model: Sungrow SG350H**\n\n**Specifications:**\n- Quantity: 154 String Inverters\n- Nominal Power: 320 kVA @30ºC, 320 kVA @40ºC\n\n**Source:** Technical Description_Rev01.docx - INVERTERS section (Sources 4 & 5), with additional details referenced in document reference [37] and Table 15 Inverter Model.",
+    "aiResponse": "Based on the provided document excerpts, the inverter model used in the CEW construction project is:\n\n**Sungrow model SG350HX**\n\n**Specifications:**\n- Nominal power: 320 kV (320000 V) (320000 V)A @30°C\n- Nominal power: 320 kVA @40°C\n- Total quantity: 154 String Inverters\n\n**Source:** Technical Description_Rev01.docx - INVERTERS section, Table 15 Inverter Model",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 3.734151732429379,
-        "section": "FOUNDATIONS"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 3.4785268658358977,
+        "relevanceScore": 4.066359196671416,
         "section": "INVERTERS"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.9728358099147596,
+        "relevanceScore": 3.9337309490315397,
+        "section": "FOUNDATIONS"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 3.929755443290379,
+        "section": "DC/AC RATIO"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 3.3475618736590516,
         "section": "PV MODULES"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.9005260635130283,
+        "relevanceScore": 3.3092837217593676,
+        "section": "570 Wp"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 3.249004387521678,
         "section": "Document"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 3.038596971360808,
+        "section": "MPPT SIZING"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.9070195494942936,
+        "section": "PV STRUCTURE DETAILS"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.8033594501800434,
+        "section": "HAUNTON PV PLANT"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.708512246566535,
+        "section": "CONSTRUCTION FACILITIES"
       }
     ],
     "pass": true,
@@ -408,31 +534,61 @@
       "contains:500",
       "contains:1500"
     ],
-    "aiResponse": "Based on the provided document excerpts:\n\n**MPPT Operating Voltage Range: 500V ~ 1500V**\n\n**Source:** Technical Description_Rev01.docx - MPPT SIZING section\n\n**Additional Context:**\n- For a 27 Modules-string configuration, the Maximum Power Point Voltage in STC conditions falls within this voltage window\n- This range provides a wide operational range to the Inverter\n- The nominal PV input voltage is 1080V\n- The minimum PV input voltage/startup input voltage is 500V / 550V",
+    "aiResponse": "Based on the provided document excerpts, the **MPPT Operating Voltage Range** is:\n\n**500V ~ 1500V**\n\n**Source:** Technical Description_Rev01.docx - MPPT SIZING section and Table 3 (Sungrow Inverter Parameters Values)\n\nThis voltage range applies to the Sungrow SG350HX inverters used in the project. The documents confirm that with a 27-module string configuration, the Maximum Power Point Voltage under STC conditions falls within this operational window, providing a wide operational range for the inverter.",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 10.184766571379994,
+        "relevanceScore": 23.00730924911375,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 12.49261505367829,
         "section": "MPPT SIZING"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 3.0502599875687633,
+        "relevanceScore": 4.832663617921874,
         "section": "570 Wp"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.1377753682424414,
+        "relevanceScore": 3.4664421135635415,
         "section": "1500 V"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.0178110364106114,
+        "relevanceScore": 2.2751665928663303,
+        "section": "STRING VOLTAGE AND CURRENT SIZING"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.8677972396128846,
         "section": "Document"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.6498322499085458,
+        "section": "METKA"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.8467019902348527,
+        "section": "CLIENT STATION"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.7477521988665228,
+        "section": "POWER STATION"
       }
     ],
     "pass": true,
@@ -448,23 +604,53 @@
       "contains:1500",
       "contains:V"
     ],
-    "aiResponse": "The requested information was not found in the available project documents.\n\n**Explanation:** While the document excerpts reference:\n- Table 3: \"Sungrow Inverter Parameters Values\" (Section 4.1)\n- Section 5.2: \"INVERTERS\" \n- Table 15: \"Inverter Model\"\n- Inverter Datasheet: Sungrow SG350HX\n\nThe actual technical specifications and parameter values from these tables and sections are not included in the provided excerpts. To answer your question about the maximum DC voltage, I would need access to the content of Table 3, Table 15, Section 5.2, or the Sungrow SG350HX datasheet.\n\n**Source:** Technical Description_Rev01.docx - Table of Contents and References sections only",
+    "aiResponse": "Based on the provided document excerpts, the **maximum DC voltage of the inverter** is:\n\n**1500 V**\n\n**Source:** Technical Description_Rev01.docx - Multiple sections confirm this specification:\n\n- **Table 3 (Sungrow Inverter Parameters)**: Lists \"Max. PV input voltage: 1500 V\"\n- **Section 5.2 (INVERTERS)**: States \"Max. PV input voltage 1500 V\"\n- **Section 5.1 (PV MODULES)**: Confirms \"Maximum system voltage 1500 VDC\"\n\nThe Sungrow SG350HX inverter used throughout the project has a maximum DC input voltage rating of 1500 V, with a startup voltage of 550 V and an MPP voltage range of 500 V to 1500 V.",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 1.6296184579109008,
+        "relevanceScore": 25.716288820700758,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.6185718167041612,
         "section": "Document"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.5441663263980567,
-        "section": "REFERENCES"
+        "relevanceScore": 1.4039701140771406,
+        "section": "STRING VOLTAGE AND CURRENT SIZING"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.9019438769039091,
+        "section": "570 Wp"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.6725601946897953,
+        "section": "DC/AC (MAX) RATIO"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.6148025318748669,
+        "section": "MPPT SIZING"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.1753546432371751,
+        "section": "1500 V"
       }
     ],
     "pass": true,
-    "reason": "Contains expected term: \"v\"",
+    "reason": "Contains expected term: \"1500\"",
     "hasSources": true
   },
   {
@@ -476,37 +662,67 @@
       "contains:2",
       "contains:MPPT"
     ],
-    "aiResponse": "Based on the provided document excerpts:\n\n**Each inverter has 2 independent MPPT inputs.**\n\n**Source:** Technical Description_Rev01.docx - Table 3 Sungrow Inverter Parameters Values\n\nThe document specifically states for the SUNGROW SG350HX inverter:\n- **Max Nº of Independent MPPT inputs: 2**\n\nAdditional configuration details from the same source:\n- Each MPPT is configured with 2 strings\n- The inverter accepts a maximum of 16 pairs of 2 MPPT independent inputs\n- This allows configuration of up to 32 strings per inverter total",
+    "aiResponse": "Based on the provided document excerpts, each Sungrow SG350HX inverter has **2 independent MPPT inputs**.\n\n**Source:** Technical Description_Rev01.docx - Table 3 \"Sungrow Inverter Parameters Values\"\n\nThe document also notes that each MPPT can be configured with 2 strings, and the inverter accepts a maximum of 16 pairs of these 2 MPPT independent inputs, allowing for up to 32 strings per inverter total.",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 8.671933913942246,
+        "relevanceScore": 9.072384881871706,
         "section": "STRING VOLTAGE AND CURRENT SIZING"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 7.825980687702687,
+        "relevanceScore": 7.993354313727174,
         "section": "570 Wp"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 6.449303479844874,
+        "relevanceScore": 6.575391874673364,
         "section": "METKA"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 5.4192410205971875,
+        "relevanceScore": 6.266620069690531,
         "section": "MPPT SIZING"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 4.21979515347655,
+        "relevanceScore": 4.804121525024243,
         "section": "LIGHTNING – OVERVOLTAGE PROTECTION"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 3.6714449349004186,
+        "section": "1500 V"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 3.0751688875413343,
+        "section": "FENCE"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.6961378367933158,
+        "section": "BASIC DESIGN"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.1378106843475067,
+        "section": "CU H1Z2Z2-K"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.9581785720590283,
+        "section": "CABLING"
       }
     ],
     "pass": true,
@@ -521,29 +737,59 @@
     "validationRules": [
       "contains:1.291"
     ],
-    "aiResponse": "Based on the provided document excerpts:\n\n**DC/AC Ratio at Maximum AC Power: 1.420**\n\n**Source:** Technical Description_Rev01.docx, Table 6 - Haunton PV Plant Overview Configuration\n\nThis represents the maximum DC/AC ratio across all substations in the Haunton PV Plant.\n\n**Individual Substation DC/AC Ratios (@40°C):**\n- Substation 1: 1.413\n- Substation 2: 1.428\n- Substation 3: 1.419\n- Substation 4: 1.419\n- Substation 5: 1.418\n- Substation 6: (ratio value cut off in excerpt, but listed in configuration)\n\nAll ratios are calculated at 40°C operating temperature with inverters rated at 320 kVA.",
+    "aiResponse": "Based on the provided document excerpts, the DC/AC ratio of the PV plant at maximum AC power is **1.291 @30°C**.\n\nThis information is found in multiple sources:\n\n**Source:** Technical Description_Rev01.docx - DC/AC RATIO section and Table 6\n\n**Details:**\n- Project DC capacity: 69,991.56 kWp\n- Number of modules: 61,128 pcs × 570 Wp and 61,128 pcs × 575 Wp\n- Number of inverters: 154 × Sungrow String Inverters SG350HX\n- AC Power (MAX) at 30°C: 54,208 kW\n- **DC/AC (MAX) RATIO: 1.291**\n\nThe document also mentions a DC/AC (NOM) RATIO of 1.420 at 40°C with AC Power (NOM) of 49,280 kW, but the maximum AC power ratio is specifically stated as 1.291 at 30°C operating temperature.",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 4.782224408816697,
+        "relevanceScore": 30.926474360968598,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 7.186967022332809,
+        "section": "DC/AC RATIO"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 6.2464329082700045,
         "section": "DC/AC (MAX) RATIO"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 1.3198529176201705,
+        "relevanceScore": 3.2597522552704605,
+        "section": "570 Wp"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.8390587366500102,
         "section": "Document"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.4993003736305522,
-        "section": "REFERENCES"
+        "relevanceScore": 1.3354568123620973,
+        "section": "1500 V"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.9215180929926723,
+        "section": "LIGHTNING – OVERVOLTAGE PROTECTION"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.22024097388367814,
+        "section": "STRING VOLTAGE AND CURRENT SIZING"
       }
     ],
-    "pass": false,
-    "reason": "Response does not match expected answer",
+    "pass": true,
+    "reason": "Contains expected term: \"1.291\"",
     "hasSources": true
   },
   {
@@ -554,43 +800,67 @@
     "validationRules": [
       "contains:27"
     ],
-    "aiResponse": "Based on the provided document excerpts:\n\n**27 modules per string**\n\n**Source Citations:**\n- Technical Description_Rev01.docx - STRING VOLTAGE AND CURRENT SIZING section: \"This inverter admits a maximum of 27 panels in series per string\"\n- Technical Description_Rev01.docx - PV PLANT CHARACTERISTICS section: \"The result of this design is a string with 27 modules\"\n- Technical Description_Rev01.docx - Table 6 (Overview PV Plant Configuration): \"Nº PV MODULES PER STRING: 27\"\n\nThis configuration is designed to accommodate cold weather conditions (temperatures down to -5°C) while maintaining efficient inverter operation.",
+    "aiResponse": "Based on the provided document excerpts, **27 modules are installed per string** throughout the project.\n\nThis configuration is consistently specified across all substations and in the technical design documentation:\n\n**Sources:**\n- **Technical Description_Rev01.docx - STRING VOLTAGE AND CURRENT SIZING**: \"This inverter admits a maximum of 27 panels in series per string\"\n- **Technical Description_Rev01.docx - PV PLANT CHARACTERISTICS**: \"The result of this design is a string with 27 modules\"\n- **Table 6 - Overview PV Plant Configuration**: \"Nº PV MODULES PER STRING: 27\"\n\n**Substation Configurations (all specify 27 modules/string):**\n- Substation 1: \"MODULES/STRING 27 Modules\"\n- Substation 2: \"Modules / String 27 Modules\"\n- Substation 3: \"Modules / String 27 Modules\"\n- Substation 4: \"Modules / String 27 Modules\"\n- Substation 5: \"Modules / String 27 Modules\"\n- Substation 6: \"Modules / String 27 Modules\"\n\nThis 27-module string configuration is designed to accommodate both cold weather conditions (temperatures down to -5°C) and the efficient operation zone of the Sungrow SG350HX inverters within the 1500 V DC system design.",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 6.587411192954841,
+        "relevanceScore": 17.108180604359873,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 6.397412667629223,
         "section": "STRING VOLTAGE AND CURRENT SIZING"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 5.858639776054123,
+        "relevanceScore": 5.778678122926368,
         "section": "570 Wp"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 4.307461964315991,
+        "relevanceScore": 4.240193230383925,
         "section": "1500 V"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 3.4730376744820957,
+        "relevanceScore": 3.2842241377798103,
+        "section": "DC/AC RATIO"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 3.2697704931848293,
         "section": "METKA"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 3.152062459269678,
+        "relevanceScore": 3.1448938102566015,
         "section": "PV PLANT CHARACTERISTICS"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 3.0074090865127925,
-        "section": "DC/AC RATIO"
+        "relevanceScore": 2.7334345001240443,
+        "section": "LIGHTNING – OVERVOLTAGE PROTECTION"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.1943269430114825,
+        "section": "DC/AC (MAX) RATIO"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.899626045843251,
+        "section": "FOUNDATIONS"
       }
     ],
     "pass": true,
@@ -606,17 +876,35 @@
       "contains:4,528",
       "or contains:4528"
     ],
-    "aiResponse": "Based on the provided document excerpts from Technical Description_Rev01.docx, the total number of strings in the Haunton PV plant is:\n\n**Total Strings: 4,530**\n\n**Breakdown by Substation:**\n\n• **Substation 1:** 728 strings\n  - 22 inverters x 29 strings\n  - 3 inverters x 30 strings\n\n• **Substation 2:** 736 strings\n  - 14 inverters x 29 strings\n  - 11 inverters x 30 strings\n\n• **Substation 3:** 702 strings\n  - 18 inverters x 29 strings\n  - 6 inverters x 30 strings\n\n• **Substation 4:** 796 strings\n  - 698 strings (570Wp modules)\n  - 98 strings (575Wp modules)\n\n• **Substation 5:** 796 strings\n  - 14 inverters x 29 strings\n  - 13 inverters x 30 strings\n\n• **Substation 6:** 770 strings\n  - 10 inverters x 29 strings\n  - 16 inverters x 30 strings\n\n**Source:** Technical Description_Rev01.docx, Tables 7-12 (Substation Configuration tables)",
+    "aiResponse": "Based on the provided document excerpts, the **total number of strings in the PV plant is 4,528**.\n\n**Source:**\n- Technical Description_Rev01.docx - Table 6 \"Haunton PV Plant Overview Configuration\"\n- Listed as \"TOTAL Nº STRINGS: 4,528\"\n\nThis total represents the combined strings across all 6 substations in the Haunton PV Plant.",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 5.298080697549325,
+        "relevanceScore": 16.833554294250725,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 4.905254281387785,
         "section": "DC/AC (MAX) RATIO"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.4175089641337637,
+        "section": "570 Wp"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.7290801997893702,
+        "section": "STRING VOLTAGE AND CURRENT SIZING"
       }
     ],
-    "pass": false,
-    "reason": "Response does not match expected answer",
+    "pass": true,
+    "reason": "Contains expected term: \"4,528\"",
     "hasSources": true
   },
   {
@@ -627,43 +915,61 @@
     "validationRules": [
       "contains:154"
     ],
-    "aiResponse": "Based on the provided document excerpts:\n\n**Total Number of Inverters: 154**\n\nSource: Technical Description_Rev01.docx - DC/AC RATIO section and OVERVIEW PV PLANT CONFIGURATION (Table 6)\n\nSpecifically stated:\n- \"A number of 154 Sungrow String Inverters SG350HX are used to generate a Nominal Installed AC Capacity of 54.208 kW max output power\"\n- \"TOTAL Nº INVERTERS: 154\"\n\n**Distribution across substations:**\n- Substation 1: 25 x Sungrow SG350HX\n- Substation 2: 25 x Sungrow SG350HX\n- Substation 3: 24 x Sungrow SG350HX\n- Substation 4: 27 x Sungrow SG350HX\n- Substation 5: 27 x Sungrow SG350HX\n- Substation 6: 26 x Sungrow SG350HX\n\n**Total: 154 inverters** (all rated at 320 kVA @40ºC)",
+    "aiResponse": "Based on the provided document excerpts, **154 inverters** are installed in total.\n\n**Source:**\n- Technical Description_Rev01.docx - INVERTERS section: \"The 154 String Inverters selected for the PV plant are Sungrow model SG350H of 320 kV (320000 V) (320000 V)A @30ºC, 320 kVA@40ºC of nominal power.\"\n- Technical Description_Rev01.docx - DC/AC RATIO section: \"A number of 154 Sungrow String Inverters SG350HX are used to generate a Nominal Installed AC Capacity of 54.208 kW max output power\"\n\n**Breakdown by substation:**\n- Substation 1: 25 inverters\n- Substation 2: 25 inverters\n- Substation 3: 24 inverters\n- Substation 4: 27 inverters\n- Substation 5: 27 inverters\n- Substation 6: 26 inverters\n- **Total: 154 inverters**",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 5.919984279851046,
+        "relevanceScore": 15.885320708884066,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 7.4013468420280475,
+        "section": "INVERTERS"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 5.312385824665998,
         "section": "DC/AC (MAX) RATIO"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 5.521805878032737,
+        "relevanceScore": 5.2463539674755175,
         "section": "PV PLANT CHARACTERISTICS"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 4.901201607279899,
+        "relevanceScore": 4.587255445237588,
         "section": "570 Wp"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 4.3125545702772445,
+        "relevanceScore": 4.09119445959132,
         "section": "1500 V"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.9626919869696184,
+        "relevanceScore": 3.24925949184553,
         "section": "DC/AC RATIO"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 1.965818294835794,
-        "section": "INVERTERS"
+        "relevanceScore": 2.319386973279608,
+        "section": "LIGHTNING – OVERVOLTAGE PROTECTION"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.059160847301977,
+        "section": "FOUNDATIONS"
       }
     ],
     "pass": true,
@@ -679,31 +985,55 @@
       "contains:6",
       "contains:power station"
     ],
-    "aiResponse": "Based on the provided document excerpts:\n\n**Six (6) power stations are installed.**\n\n**Source:** Technical Description_Rev01.docx - POWER STATIONS section\n\n**Specific Details:**\n- The PV Power Plant consists of **six Production Power Stations**\n- Model: Sungrow MVS8960-LV\n- Nominal power: 9856 kVA @30°C, 8960 kVA @40°C\n\nEach Production Substation consists of:\n- General Low Voltage Panel room with auxiliary TF and cabinet\n- Transformer space area, with Production transformer\n- Switchgear room",
+    "aiResponse": "Based on the provided document excerpts, **six (6) power stations** are installed in the PV Power Plant.\n\n**Source:** Technical Description_Rev01.docx - POWER STATIONS section\n\n**Specific details:**\n- The PV Power Plant consists of six Production Power Stations\n- Model: Sungrow MVS8960-LV\n- Nominal power: 9856 kV (9856000 V)A @30ºC, 8960 kV (8960000 V)A @40ºC\n\nThis is further confirmed in the CLIENT STATION section, which describes the MV switchgear room configuration with three Production Substation feeders connecting to the six substations in pairs (Substations 1-2, 3-4, and 5-6).",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.794185380658691,
-        "section": "FOUNDATIONS"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 1.8619549287782116,
-        "section": "LIGHTNING – OVERVOLTAGE PROTECTION"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 1.740760283407346,
+        "relevanceScore": 8.104838283165355,
         "section": "POWER STATIONS"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 1.7104976576571176,
+        "relevanceScore": 3.7766561081803114,
+        "section": "FOUNDATIONS"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.371506197809706,
         "section": "FENCE"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.2026286339984864,
+        "section": "LIGHTNING – OVERVOLTAGE PROTECTION"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.8192207660885473,
+        "section": "DC/AC RATIO"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.5762356817371819,
+        "section": "PV PLANT CHARACTERISTICS"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.5408731426628572,
+        "section": "POWER STATION"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.4423294975129817,
+        "section": "EARTHING SYSTEM"
       }
     ],
     "pass": true,
@@ -719,43 +1049,61 @@
       "contains:69,991",
       "contains:kWp"
     ],
-    "aiResponse": "Based on the provided document excerpts, the total nameplate DC capacity is:\n\n**69,991.56 kWp** (or approximately 69.991 MWp)\n\n**Source:** Technical Description_Rev01.docx - Table 6 Haunton PV Plant Overview Configuration\n\nThis capacity is achieved through:\n- **61,128 modules** of 570 Wp\n- **61,128 modules** of 575 Wp\n- **Total modules:** 122,256 PV modules\n\nThe document also confirms this figure in the Introduction section, stating the \"Hauton PV Plant\" has \"a DC Capacity of 69,991 MWp.\"",
+    "aiResponse": "Based on the provided document excerpts, the **total nameplate DC capacity** of the Haunton PV Plant is:\n\n**69,991.56 kWp**\n\n**Source:** Technical Description_Rev01.docx - Table 6 \"Haunton PV Plant Overview Configuration\"\n\nThis total capacity is distributed across six substations:\n- Substation 1: 11,302.20 kWp\n- Substation 2: 11,426.40 kWp\n- Substation 3: 10,898.50 kWp\n- Substation 4: 12,263.67 kWp\n- Substation 5: 12,250.44 kWp\n- Substation 6: 11,850.30 kWp\n\nThe capacity is achieved using:\n- 61,128 modules × 570 Wp\n- 61,128 modules × 575 Wp\n- Total of 122,256 PV modules",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 8.656559725291048,
-        "section": "DC/AC (MAX) RATIO"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 4.456579484714954,
-        "section": "570 Wp"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 1.7833700785480313,
-        "section": "INTRODUCTION"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 1.3869732719791203,
-        "section": "1500 V"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 1.2770584457203895,
+        "relevanceScore": 28.694268815119756,
         "section": "REFERENCES"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 1.2646933350745142,
+        "relevanceScore": 8.278650285821454,
+        "section": "DC/AC (MAX) RATIO"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 5.58476635560589,
+        "section": "570 Wp"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 3.457067953293504,
+        "section": "DC/AC RATIO"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 3.4440418082296933,
+        "section": "INTRODUCTION"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.9156224099109407,
         "section": "PV PLANT CHARACTERISTICS"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.533004039084094,
+        "section": "1500 V"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.9369320495956424,
+        "section": "HAUNTON PV PLANT"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.6032362021748302,
+        "section": "Document"
       }
     ],
     "pass": true,
@@ -771,43 +1119,55 @@
       "contains:11,302",
       "or contains:11302"
     ],
-    "aiResponse": "Based on the provided document excerpts:\n\n**Substation 1 Total DC Capacity: 11,302.20 kW (or 11.302,20 kWp)**\n\n**Source:** Technical Description_Rev01.docx - Table 7 Substation 1 Configuration Haunton\n\n**Calculation Details:**\n- 728 strings × 27 modules × 575 W = 11,302.20 kW\n\n**Configuration:**\n- Module: Jinko Tiger Neo N-type 72HL4-BDV 575 WP\n- Number of strings: 728 (22 inverters × 29 strings + 3 inverters × 30 strings)\n- Modules per string: 27\n\nThis information is also confirmed in the Introduction section (Source 5), which lists \"Substation 1, with a DC Capacity of 11,302.20 kWp\" as part of the six substations comprising the Haunton PV Plant.",
+    "aiResponse": "Based on the provided document excerpts, the **total DC capacity of Substation 1 is 11,302.20 kW**.\n\n**Source:** Technical Description_Rev01.docx, Table 7 - Substation 1 Configuration\n\n**Configuration details:**\n- **Modules:** Jinko Tiger Neo N-type 72HL4-BDV 575 WP\n- **Inverters:** 25 x Sungrow SG350HX (320 kV (320000 V)A @40ºC)\n- **Modules per String:** 27 Modules\n- **Number of Strings:** \n  - 22 inverters x 29 strings\n  - 3 inverters x 30 strings\n  - Total: 728 strings\n- **Calculation:** 728 strings x 27 modules x 575 W = **11,302.20 kW**",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 10.925567174662673,
+        "relevanceScore": 35.04931025534129,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 10.975561593722835,
         "section": "DC/AC (MAX) RATIO"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 3.6351012684831217,
+        "relevanceScore": 3.7560162348867783,
         "section": "Document"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.8271855536932028,
+        "relevanceScore": 3.2115640929093003,
         "section": "INTRODUCTION"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.5621213193233054,
+        "relevanceScore": 2.6305876781748365,
         "section": "HAUNTON PV PLANT"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.5249118130408152,
+        "relevanceScore": 2.5420581799282997,
         "section": "570 Wp"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.19141157085703076,
-        "section": "REFERENCES"
+        "relevanceScore": 1.4809228567726638,
+        "section": "DC/AC RATIO"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.9096155060306617,
+        "section": "1500 V"
       }
     ],
     "pass": true,
@@ -822,37 +1182,73 @@
     "validationRules": [
       "contains:27"
     ],
-    "aiResponse": "Based on the provided document excerpts:\n\n**27 inverters** are installed in Substation 4.\n\n**Source:** Technical Description_Rev01.docx, Table 10 - Substation 4 Configuration Haunton, Section 4.5 Configuration\n\n**Specific Details:**\n- Inverter Model: 27 x Sungrow SG350HX (320 kVA @40ºC)\n- Total AC Capacity: 27 Inverters x 320 kVA → 8,640 kVA",
+    "aiResponse": "Based on the provided document excerpts, **Substation 4 has 27 inverters installed**.\n\nSpecifically, the configuration shows:\n- **Inverter**: 27 x Sungrow SG350HX (320 kV (320000 V)A @40ºC)\n\n**Source**: Technical Description_Rev01.docx - Table 10 (Substation 4 Configuration Haunton), Section 4.5 CONFIGURATION",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 5.282478799159659,
-        "section": "HAUNTON PV PLANT"
+        "relevanceScore": 18.11834972919957,
+        "section": "REFERENCES"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 5.249681222418866,
+        "relevanceScore": 5.555195642767865,
         "section": "Document"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 4.7242294808142615,
+        "relevanceScore": 5.543137476214006,
+        "section": "HAUNTON PV PLANT"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 4.88096536436559,
         "section": "DC/AC (MAX) RATIO"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 4.012987642227213,
+        "relevanceScore": 4.5433773326706515,
         "section": "CONFIGURATION"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 3.5926279361314304,
+        "relevanceScore": 4.184807468203277,
         "section": "FENCE"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 3.755603548514152,
+        "section": "570 Wp"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 3.5085013088774444,
+        "section": "CLIENT STATION"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 3.468490870164779,
+        "section": "INTRODUCTION"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 3.345137789208876,
+        "section": "PV PLANT CHARACTERISTICS"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 3.24925949184553,
+        "section": "DC/AC RATIO"
       }
     ],
     "pass": true,
@@ -868,37 +1264,55 @@
       "contains:Substation 4",
       "or contains:4"
     ],
-    "aiResponse": "Based on the provided document excerpts, **Substation 4** is the only substation that uses both 570Wp and 575Wp modules.\n\n**Source:** Technical Description_Rev01.docx - Table 10 Substation 4 Configuration Haunton\n\n**Specific configuration:**\n- **570Wp modules (Jinko Tiger Neo N-type 72HL4-BDV 570 WP):**\n  - 13 inverters x 30 strings + 10 inverters x 29 strings + 1 inverter* x 18 strings\n  - Total: 698 strings\n  \n- **575Wp modules (Jinko Tiger Neo N-type 72HL4-BDV 575 WP):**\n  - 2 inverters x 29 strings + 1 inverter x 28 strings + 1 inverter* x 12 strings\n  - Total: 98 strings\n\n- **Total DC Capacity:** 698 x 27 Modules x 570 W + 98 x 27 Modules x 575 W = 12,263.67 kW\n\nAll other substations (1, 2, 3, 5, and 6) use only one module type each.",
+    "aiResponse": "Based on the document excerpts provided, **Substation 4** is the only substation that uses both 570Wp and 575Wp modules.\n\n**Source:** Technical Description_Rev01.docx - Table 10 Substation 4 Configuration Haunton\n\n**Specific configuration:**\n- **570Wp modules (Jinko Tiger Neo N-type 72HL4-BDV 570 WP):**\n  - 13 inverters x 30 strings + 10 inverters x 29 strings + 1 inverter* x 18 strings = 698 strings\n  \n- **575Wp modules (Jinko Tiger Neo N-type 72HL4-BDV 575 WP):**\n  - 2 inverters x 29 strings + 1 inverter x 28 strings + 1 inverter* x 12 strings = 98 strings\n\n- **Total DC Capacity:** 698 x 27 Modules x 570 W + 98 x 27 Modules x 575 W = 12,263.67 kW\n\nAll other substations (1, 2, 3, 5, and 6) use only one module type each.",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 5.943530844953489,
+        "relevanceScore": 5.587623935666883,
         "section": "DC/AC (MAX) RATIO"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 3.455756641901539,
+        "relevanceScore": 3.7503917974676284,
         "section": "PV PLANT CHARACTERISTICS"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.819508503847284,
+        "relevanceScore": 3.480594122825885,
         "section": "FOUNDATIONS"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 1.8171418203659195,
+        "relevanceScore": 1.94474485662582,
+        "section": "1500 V"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.9372349149907886,
+        "section": "CABLING"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.8571756439709965,
+        "section": "LIGHTNING – OVERVOLTAGE PROTECTION"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.8334409367060915,
         "section": "CONFIGURATION"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 1.7351811696057444,
-        "section": "1500 V"
+        "relevanceScore": 1.524104979169557,
+        "section": "MPPT SIZING"
       }
     ],
     "pass": true,
@@ -913,29 +1327,47 @@
     "validationRules": [
       "contains:1.424"
     ],
-    "aiResponse": "Based on the provided document excerpts, the DC/AC ratio for Substation 6 is **not fully shown** in the excerpts.\n\n**Source:** Technical Description_Rev01.docx - Table 12 Substation 6 Configuration Haunton\n\n**Available information for Substation 6:**\n- Transformer: 8960 KVA\n- Modules: Jinko Tiger Neo N-type 72HL4-BDV 570 WP\n- Inverter: 26 x Sungrow SG350HX (320 kVA @40ºC)\n- Modules/String: 27 Modules\n- Number of Strings: \n  - 10 inverters x 29 string\n  - 16 inverters x 30 string\n  - Total: 770 strings\n- Total DC Capacity: 770 x 27 Modules x 570 W → 11.850,30 kW\n- Total AC Capacity: 26 Inverters x 320 kVA → 8.320 kVA\n\nThe document excerpt cuts off before showing the DC/AC Ratio value for Substation 6. However, based on the provided data, the ratio can be calculated as: 11.850,30 kW / 8.320 kVA ≈ 1.424, but this specific value is not explicitly stated in the available excerpts.",
+    "aiResponse": "Based on the provided document excerpts, **the DC/AC ratio for Substation 6 is 1.425 @40°C**.\n\nThis information is found in **Source 3 and Source 4** (Technical Description_Rev01.docx - DC/AC (MAX) RATIO section), which states:\n\n**SUBSTATION 6**\n- Transformer: 8960 KV (8960000 V)A\n- Modules: Jinko Tiger Neo N-type 72HL4-BDV 570 WP\n- Inverter: 26 x Sungrow SG350HX (320 kV (320000 V) (320000 V)A @40ºC)\n- Modules/String: 27 Modules\n- Nº Strings: 10 inverters x 29 string, 16 inverters x 30 string = 770\n- Total DC Capacity: 770 x 27 Modules x 570 W → 11,850.30 kW\n- Total AC Capacity: 26 Inverters x 320 kVA → 8,320 kV (8320 V)A\n- **DC/AC Ratio (@40ºC): 1.425**\n\n*Source: Technical Description_Rev01.docx, Table 12 - Substation 6 Configuration Haunton*",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 9.783000807230072,
+        "relevanceScore": 26.0726793977319,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 11.01799707212461,
         "section": "DC/AC (MAX) RATIO"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 6.667355540257517,
+        "relevanceScore": 8.291553870305538,
+        "section": "DC/AC RATIO"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 6.8121920356458325,
         "section": "Document"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 1.3718151261619105,
-        "section": "REFERENCES"
+        "relevanceScore": 1.936246080494178,
+        "section": "HAUNTON PV PLANT"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.098168362188419,
+        "section": "570 Wp"
       }
     ],
-    "pass": true,
-    "reason": "Contains expected term: \"1.424\"",
+    "pass": false,
+    "reason": "Response does not match expected answer",
     "hasSources": true
   },
   {
@@ -947,25 +1379,55 @@
       "contains:60",
       "contains:cm"
     ],
-    "aiResponse": "Based on the provided document excerpts:\n\n**Earthing Conductor Depth: 60 cm**\n\nAccording to the Technical Description_Rev01.docx - EARTHING SYSTEM section:\n\n*\"The conductor will be placed at a 60cm depth in order to maximize its connection with the ground and to preserve the grounding steady throughout the year since there is always moisture at 60cm depth.\"*\n\n**Purpose of this depth:**\n- Maximizes connection with the ground\n- Preserves grounding stability throughout the year\n- Ensures consistent moisture at this depth level\n\n**Source:** Technical Description_Rev01.docx, EARTHING SYSTEM section",
+    "aiResponse": "Based on the provided document excerpts, earthing conductors are placed at **60 cm depth**.\n\n**Source:** Technical Description_Rev01.docx - EARTHING SYSTEM section\n\n**Specific details:**\n- \"The conductor will be placed at a 60cm depth in order to maximize its connection with the ground and to preserve the grounding steady throughout the year since there is always moisture at 60cm depth.\"\n\nThis applies specifically to the perimeter earthing conductors around the modules' area, which use Copper or Galvanized Steel Conductors.",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 13.067226064944697,
+        "relevanceScore": 13.965058043748517,
         "section": "EARTHING SYSTEM"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 11.0672399399118,
+        "relevanceScore": 13.473411023857615,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 11.570103223478394,
         "section": "CABLING"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 3.9227927129696534,
+        "relevanceScore": 4.349798087669735,
         "section": "POWER STATION"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 3.5352247673604196,
+        "section": "FIRE ALARM"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 3.0600705835179602,
+        "section": "CABLE ROUTING"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.9321298656752974,
+        "section": "PV PLANT CHARACTERISTICS"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.4123704272272564,
+        "section": "CU H1Z2Z2-K"
       }
     ],
     "pass": true,
@@ -981,31 +1443,43 @@
       "contains:70",
       "contains:cm"
     ],
-    "aiResponse": "Based on the provided document excerpts:\n\n**Minimum Cable Burial Depth: 70 cm**\n\n**Source:** Technical Description_Rev01.docx - Section 5.8 CABLE ROUTING\n\nThe document explicitly states: \"The cables shall be buried with minimum depth of 70 cm.\"\n\nThis requirement applies to all cable trenches in the project, as referenced in Table 19 Typical Trench Dimensions.",
+    "aiResponse": "Based on the provided document excerpts, **the minimum trench depth for cable burial is 70 cm**.\n\n**Source:**\n- Technical Description_Rev01.docx - CABLE ROUTING section explicitly states: \"The cables shall be buried with minimum depth of 70 cm.\"\n\nThis minimum depth requirement applies to all cable trenches in the project, regardless of the trench type or cable configuration.",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 7.448245547240442,
-        "section": "CABLE ROUTING"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 2.8306347999081916,
+        "relevanceScore": 19.854593675994856,
         "section": "REFERENCES"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.145705149072941,
+        "relevanceScore": 11.093292802764884,
+        "section": "CABLE ROUTING"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 4.416443771920397,
         "section": "CU H1Z2Z2-K"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.1278394539285688,
+        "relevanceScore": 2.308293194080739,
         "section": "Document"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.114207328386759,
+        "section": "STRING VOLTAGE AND CURRENT SIZING"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.9420367012602531,
+        "section": "CABLING"
       }
     ],
     "pass": true,
@@ -1021,41 +1495,59 @@
       "contains:H1Z2Z2-K",
       "or contains:solar cable"
     ],
-    "aiResponse": "Based on the provided document excerpts:\n\n**Cable Type: Solar Cables**\n\nAccording to Source 8 (Technical Description_Rev01.docx - CABLING section):\n\n\"PV Modules will be connected to String Inverters with **solar cables** that will be placed into tubes, where required, in order to protect the cables from being exposed to sharp objects and solar irradiation.\"\n\n**Key Details:**\n- Cable type: Solar cables\n- Installation method: Placed into tubes where required\n- Purpose of tubing: Protection from sharp objects and solar irradiation\n\n**Source:** Technical Description_Rev01.docx, Section 5.7 CABLING\n\nNote: The specific cross-section and nominal voltage details are referenced in Table 18 (Cabling Characteristics) in the document, but the complete table data is not fully visible in the provided excerpts.",
+    "aiResponse": "Based on the provided document excerpts, the cable used between PV modules and string inverters is:\n\n**Solar Cable: CU H1Z2Z2-K, 1.5 kV (1500 V) (1500 V), 6 mm²**\n\n**Source:** Technical Description_Rev01.docx - CABLING section (Table 18 Cabling Characteristics)\n\n**Additional Details:**\n- These solar cables will be placed into tubes where required to protect them from exposure to sharp objects and solar irradiation\n- The cable specification is: Copper (CU) conductor, H1Z2Z2-K type, rated at 1.5 kV nominal voltage, with 6 mm² cross-section",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 5.356025810409165,
+        "relevanceScore": 20.62525876087622,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 5.380076294001718,
         "section": "DC/AC (MAX) RATIO"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 1.7262595266314713,
+        "relevanceScore": 3.3016845745439087,
         "section": "BASIC DESIGN"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.8845620908552404,
-        "section": "Document"
+        "relevanceScore": 2.1307343428859755,
+        "section": "DC/AC RATIO"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.4086425220108658,
+        "relevanceScore": 1.7125718321211556,
         "section": "CABLING"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.3289945655289066,
-        "section": "REFERENCES"
+        "relevanceScore": 1.371275699566314,
+        "section": "Document"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.2213826851251492,
+        "section": "570 Wp"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.9458259660727424,
+        "section": "1500 V"
       }
     ],
-    "pass": false,
-    "reason": "Response does not match expected answer",
+    "pass": true,
+    "reason": "Contains expected term: \"h1z2z2-k\"",
     "hasSources": true
   },
   {
@@ -1067,29 +1559,47 @@
       "contains:19/33",
       "or contains:33 kV"
     ],
-    "aiResponse": "The requested information was not found in the available project documents.\n\n**Explanation:** While the provided excerpts reference MV (Medium Voltage) cables and mention that cross sections are calculated according to specific references including \"Haunton MV Cables Ampacity Calculation. Ref 227-007-F-E-00103\", the actual nominal voltage value for the MV cables is not stated in any of the document excerpts provided. Table 18 \"Cabling Characteristics\" is referenced but its detailed contents showing voltage specifications are not included in these excerpts.",
+    "aiResponse": "Based on the provided document excerpts, the nominal voltage of the medium voltage cables is **19/33 kV (33000 V) (33000 V)**.\n\n**Source:** Technical Description_Rev01.docx - CABLING section, Table 18 Cabling Characteristics\n\nThe complete specification for the medium voltage cables is:\n- **Cable Type:** AL/XLPE/CWS/PVC\n- **Nominal Voltage:** 19/33 kV\n- **Cross Section:** 240/400 mm²",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.3334563284265353,
+        "relevanceScore": 21.03033524204178,
         "section": "REFERENCES"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.6955382475947162,
+        "relevanceScore": 2.088109740463105,
+        "section": "CABLING"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.2814562285808102,
+        "section": "CU H1Z2Z2-K"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.1057312616741641,
+        "section": "1500 V"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.6032362021748302,
         "section": "Document"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.04213101776448047,
-        "section": "CABLING"
+        "relevanceScore": 0.17629251856430117,
+        "section": "POWER STATION"
       }
     ],
-    "pass": false,
-    "reason": "Response does not match expected answer",
+    "pass": true,
+    "reason": "Contains expected term: \"19/33\"",
     "hasSources": true
   },
   {
@@ -1101,19 +1611,37 @@
       "contains:3.5",
       "contains:m"
     ],
-    "aiResponse": "Based on the provided document excerpts:\n\n**The internal access road width is 3.5m**\n\n**Source:** Technical Description_Rev01.docx - ACCESS ROAD section (Sources 1 & 2)\n\n**Additional specifications from the same section:**\n- Radius of curvature: 12m\n- Construction material: Gravel\n- Turnover space provided at each Power Station Building for heavy trucks and vehicles to maneuver",
+    "aiResponse": "Based on the provided document excerpts, the **internal access road width is 3.5m**.\n\n**Source:** Technical Description_Rev01.docx - ACCESS ROAD section\n\nThe document states: \"The Internal Access Road will be 3.5m width and a radius of curvature of 12m. It will be constructed by gravel and there will be space for turnover in each Power Station Building, so that heavy trucks and vehicles could easily maneuver.\"",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 3.1935543101609762,
+        "relevanceScore": 12.062114330174232,
         "section": "ACCESS ROAD"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 1.954932603592498,
+        "relevanceScore": 2.178737021089355,
         "section": "Document"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.8982469814024658,
+        "section": "SITE ACCESS"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.42833994859665614,
+        "section": "FENCE"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.07647063628447681,
+        "section": "REFERENCES"
       }
     ],
     "pass": true,
@@ -1129,19 +1657,37 @@
       "contains:12",
       "contains:m"
     ],
-    "aiResponse": "Based on the provided document excerpts:\n\n**Radius of Curvature: 12m**\n\n**Source:** Technical Description_Rev01.docx - ACCESS ROAD section (Sources 1 & 2)\n\nThe document states: \"The Internal Access Road will be 3.5m width and a radius of curvature of 12m.\"",
+    "aiResponse": "Based on the provided document excerpts, the radius of curvature for the access road is **12m**.\n\n**Source:** Technical Description_Rev01.docx - ACCESS ROAD section\n\nThe document states: \"The Internal Access Road will be 3.5m width and a radius of curvature of 12m.\"",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 6.697908699777808,
+        "relevanceScore": 16.865099797517967,
         "section": "ACCESS ROAD"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 1.954932603592498,
+        "relevanceScore": 2.178737021089355,
         "section": "Document"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.3665935958469753,
+        "section": "FENCE"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.8892645115884412,
+        "section": "SITE ACCESS"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.07647063628447681,
+        "section": "REFERENCES"
       }
     ],
     "pass": true,
@@ -1157,25 +1703,43 @@
       "contains:steel",
       "contains:wood"
     ],
-    "aiResponse": "Based on the provided document excerpts, the perimeter fence consists of the following materials:\n\n**Fence Materials:**\n- **Wood fence poles:** 2.50m high\n- **Wire:** 2.5mm thickness\n- **Steel grid mesh** with mesh size: 25x25 cm\n- **Heavy duty Door:** 4.00m wide\n\n**Additional Information:**\n- Total perimeter fence length: 7,100m\n- Wood fence poles are installed at distances according to structural calculations (ref [x])\n- Doors are 4.00m wide to allow easy access for vehicles and heavy trucks\n\n**Source:** Technical Description_Rev01.docx - FENCE section\n**Reference Drawing:** Reference [5] - Haunton Perimeter Fence & Gate drawing detail",
+    "aiResponse": "Based on the provided document excerpts, the perimeter fence consists of the following materials:\n\n**Fence Materials:**\n- **Wood fence poles**: 2.50m high\n- **Wire**: 2.5mm thickness\n- **Mesh size**: 25x25 cm (steel grid mesh)\n- **Heavy duty Door**: 4.00m wide\n\nThe fence is constructed with steel grid mesh and wood fence poles installed at distances according to structural calculations. The doors are 4.00m wide to allow easy access for vehicles and heavy trucks on site.\n\n**Source:** Technical Description_Rev01.docx - FENCE section",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.9818510746953795,
-        "section": "FENCE"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 1.6743270238033192,
+        "relevanceScore": 11.393425651616495,
         "section": "REFERENCES"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 1.0577250361728676,
+        "relevanceScore": 10.663606092958336,
+        "section": "FENCE"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 3.0161831155259313,
+        "section": "FOUNDATIONS"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.8506890726004905,
+        "section": "SECURITY SYSTEM"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.153901172410695,
         "section": "Document"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.2994326865368251,
+        "section": "DC/AC RATIO"
       }
     ],
     "pass": true,
@@ -1192,37 +1756,55 @@
       "contains:DC",
       "contains:AC"
     ],
-    "aiResponse": "Based on the provided document excerpts, surge arresters are installed at the following locations:\n\n**Installation Levels:**\n- Inverter DC Inputs\n- Inverter AC outputs\n- GLVP (General Low Voltage Panel) Output\n\n**Additional Detail:**\n- Each String Inverter has a system of surge arresters at both AC and DC side\n\n**Source:** Technical Description_Rev01.docx - LIGHTNING – OVERVOLTAGE PROTECTION section",
+    "aiResponse": "Based on the provided document excerpts, surge arresters are installed at the following levels:\n\n• **Inverter DC Inputs**\n• **Inverter AC outputs**\n• **GLVP (General Low Voltage Panel) Output**\n\nAdditionally, the documentation specifies that **each String Inverter has a system of surge arresters at both AC and DC side**.\n\n**Source:** Technical Description_Rev01.docx - LIGHTNING – OVERVOLTAGE PROTECTION section",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 13.414369625767794,
+        "relevanceScore": 13.569392601633187,
         "section": "LIGHTNING – OVERVOLTAGE PROTECTION"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 5.937121283767201,
+        "relevanceScore": 5.752665052278362,
         "section": "CU H1Z2Z2-K"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 3.129104764821038,
+        "relevanceScore": 3.4914554324584897,
         "section": "CONSTRUCTION FACILITIES"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.0666496941922023,
+        "relevanceScore": 2.2168267042129295,
         "section": "CABLING"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 1.7104976576571176,
+        "relevanceScore": 1.9210531743510229,
+        "section": "DC/AC RATIO"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.899626045843251,
+        "section": "FOUNDATIONS"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.69764933340925,
         "section": "FENCE"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.6644667960981145,
+        "section": "PV PLANT CHARACTERISTICS"
       }
     ],
     "pass": true,
@@ -1239,31 +1821,43 @@
       "contains:inverter",
       "contains:meteo"
     ],
-    "aiResponse": "Based on the provided document excerpts, the monitoring system includes:\n\n**Control System Components:**\n- One main Controller unit located in the Client Substation of the Solar Power Plant\n- Peripheral units located in Production Power Station areas\n\n**Data Access:**\n- Local SCADA servers\n- Online server by remote access\n\n**Monitoring Capabilities:**\n- PV production visualization\n- Inverter status\n- Substation and switches status\n- Power meter parameters\n- Meteo data\n\n**Meteo System Components:**\nThe Meteo System includes two autonomous weather stations (located close to the main substation and one of the substations) consisting of:\n- One pyranometer\n- One module temperature sensor\n- One soil dust IQ sensor\n- One luft sensor\n- One albedometer\n- Additional sensors distributed throughout the PV Plant\n\n**Source:** Technical Description_Rev01.docx - MONITORING SYSTEM section (Section 5.10 per table of contents)\n\n**Note:** The architectural systems diagram is referenced as reference [xx], and the meteo sensor layout drawing is referenced as reference [33].",
+    "aiResponse": "Based on the provided document excerpts, the monitoring system includes the following components:\n\n**Main Control System:**\n- One main Controller unit located in the Client Substation\n- Peripheral units located in Production Power Station areas\n- Local SCADA servers and online server with remote access capability\n\n**Monitoring Capabilities:**\n- PV production visualization\n- Inverter status\n- Substation and switches status\n- Power meter parameters\n- Meteo data\n\n**Meteo System Components:**\nThe Meteo System includes **two autonomous weather stations** (located close to the main substation and one of the substations), each consisting of:\n- One pyranometer\n- One module temperature sensor\n- One soil dust IQ sensor\n- One luft sensor\n- One albedometer\n\nAdditional sensors are distributed throughout the PV Plant, with their positions shown in the meteo sensor layout drawing (reference [33]).\n\n**Source:** Technical Description_Rev01.docx - MONITORING SYSTEM section",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 4.4872252529211885,
+        "relevanceScore": 12.628760474047898,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 12.464695256936539,
         "section": "MONITORING SYSTEM"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.1779381358658365,
+        "relevanceScore": 2.274603184902057,
         "section": "Document"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.748781212271856,
+        "relevanceScore": 1.942050065888775,
+        "section": "CU H1Z2Z2-K"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.0358247961237248,
         "section": "SYSTEM CONFIGURATION"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.4039550015564625,
-        "section": "REFERENCES"
+        "relevanceScore": 0.40359168298795123,
+        "section": "HAUNTON PV PLANT"
       }
     ],
     "pass": true,
@@ -1279,41 +1873,65 @@
       "contains:2",
       "contains:weather"
     ],
-    "aiResponse": "The requested information was not found in the available project documents.\n\nThe provided excerpts contain information about PV plant characteristics, power stations, foundations, fencing, access roads, and lightning protection, but there is no mention of the number of weather stations installed in the project.",
+    "aiResponse": "Based on the provided document excerpts, **two autonomous weather stations** are installed in the PV plant.\n\n**Source:** Technical Description_Rev01.docx - MONITORING SYSTEM section\n\n**Specific details:**\n- Two autonomous weather stations are located:\n  1. Close to the main substation\n  2. Close to one of the substations\n\n**Equipment per weather station:**\n- One pyranometer\n- One module temperature sensor\n- One soil dust IQ sensor\n- One luft sensor\n- One albedometer\n\nAdditional sensors are distributed throughout the PV Plant beyond these two main weather stations.",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 3.979086220486076,
+        "relevanceScore": 3.948909912137234,
         "section": "PV PLANT CHARACTERISTICS"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 3.277302886216106,
+        "relevanceScore": 3.9101836621085697,
         "section": "FOUNDATIONS"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.2567425224411926,
+        "relevanceScore": 2.9232757722204106,
         "section": "POWER STATIONS"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.1270486145062915,
+        "relevanceScore": 2.489307014705875,
         "section": "FENCE"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 1.8619549287782116,
+        "relevanceScore": 2.2026286339984864,
         "section": "LIGHTNING – OVERVOLTAGE PROTECTION"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.1579067019923874,
+        "section": "MONITORING SYSTEM"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.9210531743510229,
+        "section": "DC/AC RATIO"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.7367323005691804,
+        "section": "CU H1Z2Z2-K"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.6538012132088085,
+        "section": "1500 V"
       }
     ],
     "pass": true,
-    "reason": "Contains expected term: \"weather\"",
+    "reason": "Contains expected term: \"2\"",
     "hasSources": true
   },
   {
@@ -1326,31 +1944,43 @@
       "or contains:camera",
       "or contains:fiber optic"
     ],
-    "aiResponse": "Based on the provided document excerpts, the following security measures are used for the perimeter fence:\n\n**Perimeter Fence Security Measures:**\n\n• **Fiber Optic Detection System**: The fence will be protected by a sensitive fiber optic system\n\n• **Alarm System Components**: \n  - Magnetic contacts at all doors, gates and windows\n  - Control panels\n  - Sirens\n\n• **Camera Surveillance**: PTZ cameras located at six access gates to the plant, connected via fiber optical cable or Ethernet cable\n\n• **Physical Fence Specifications**:\n  - Total length: 7,100 m\n  - Wood fence poles: 2.50m high\n  - Wire thickness: 2.5mm\n  - Mesh size: 25x25 cm\n  - Heavy duty doors: 4.00 m wide\n\n**Source**: Technical Description_Rev01.docx - SECURITY SYSTEM and FENCE sections\n\n**Reference Documents**: \n- Architectural security system: Reference [34]\n- Security system layout: Reference [35] (Haunton Security System Layout. Ref 227-007-D-I-40301)\n- Fence drawing: Reference [5] (Haunton Perimeter Fence & Gate drawing detail)",
+    "aiResponse": "Based on the provided document excerpts, the following security measures are used for the perimeter fence at the Haunton site:\n\n**Fence Protection:**\n- **Sensitive fiber optic system** protecting the fence perimeter\n\n**Surveillance System:**\n- **PTZ cameras** located at:\n  - Near the client station\n  - Each of the production substations\n  - At the six access gates to the plant\n- Cameras connected via fiber optical cable or Ethernet cable, terminated to the closer security and network panel\n\n**Alarm System:**\nThe alarm system includes equipment to protect against unauthorized entrance and/or infraction:\n- Magnetic contacts at all doors, gates and windows\n- Control panels\n- Sirens\n- Coverage of essential parts including main gate, fence perimeter, Inverter Stations, and Main Substation\n\n**Fence Specifications:**\n- Total security fence length: **7,100 m**\n- Construction: Steel grid mesh with wood fence poles (2.50m high)\n- Wire thickness: 2.5mm\n- Mesh size: 25x25 cm\n- Heavy duty doors: 4.00 m wide\n\n*Source: Technical Description_Rev01.docx - SECURITY SYSTEM and FENCE sections*",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 3.2225067272502943,
-        "section": "SECURITY SYSTEM"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 2.9503007062192936,
-        "section": "FENCE"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 2.759973898666678,
+        "relevanceScore": 11.393425651616495,
         "section": "REFERENCES"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.2658981013512642,
+        "relevanceScore": 7.410340939121093,
+        "section": "FENCE"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 6.483415149025787,
+        "section": "SECURITY SYSTEM"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.4184622098487494,
         "section": "Document"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 1.233689990728014,
+        "section": "CU H1Z2Z2-K"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.2994326865368251,
+        "section": "DC/AC RATIO"
       }
     ],
     "pass": true,
@@ -1365,37 +1995,67 @@
     "validationRules": [
       "not_found"
     ],
-    "aiResponse": "The requested information was not found in the available project documents.\n\nThe provided excerpts contain technical specifications for the Haunton PV Plant project, including information about DC capacity, inverters, modules, substations, and construction facilities. However, there is no mention of OCR (Optical Character Recognition) being used in or on this document.",
+    "aiResponse": "The requested information was not found in the available project documents.\n\nThe provided document excerpts contain technical specifications, project descriptions, and configuration details for the Haunton PV Plant, but there is no mention of OCR (Optical Character Recognition) being used in the document creation, processing, or management.",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 6.460827904051903,
+        "relevanceScore": 15.375113410597848,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 7.2449708814861005,
+        "section": "PV PLANT CHARACTERISTICS"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 6.892950760192097,
         "section": "INTRODUCTION"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 4.631673770374043,
+        "relevanceScore": 5.767492976753724,
         "section": "DC/AC RATIO"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 3.9221188817533443,
+        "relevanceScore": 4.022880999763914,
         "section": "HAUNTON PV PLANT"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.553639435452059,
+        "relevanceScore": 3.669589122586772,
+        "section": "570 Wp"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.708512246566535,
         "section": "CONSTRUCTION FACILITIES"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.5283256728717567,
-        "section": "570 Wp"
+        "relevanceScore": 2.6630610959488528,
+        "section": "STRING VOLTAGE AND CURRENT SIZING"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.6465046676212545,
+        "section": "FOUNDATIONS"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 2.4531659888662527,
+        "section": "CLIENT STATION"
       }
     ],
     "pass": true,
@@ -1410,19 +2070,31 @@
     "validationRules": [
       "not_found"
     ],
-    "aiResponse": "The requested information was not found in the available project documents.\n\nThe provided excerpts contain table of contents and introduction sections from the Technical Description document, but do not include detailed specifications about MC4 connector installation requirements or acceptable gap measurements.",
+    "aiResponse": "The requested information was not found in the available project documents.\n\nThe provided excerpts contain table of contents sections and general project overview information, but do not include details about MC4 connector installation specifications or acceptable gap measurements. The actual content of the tables referenced (such as Table 18 \"Cabling Characteristics\") is not present in these excerpts.",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.2214051749462285,
+        "relevanceScore": 15.375113410597848,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 7.028581143259455,
         "section": "Document"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.3460258146106474,
+        "relevanceScore": 1.5238395015479802,
         "section": "INTRODUCTION"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.21644342343828304,
+        "section": "HAUNTON PV PLANT"
       }
     ],
     "pass": true,
@@ -1439,30 +2111,30 @@
       "or contains:out of scope",
       "or contains:not"
     ],
-    "aiResponse": "Based on the provided document excerpts:\n\n**No, the grid connection is NOT included in EAI's scope of works.**\n\n**Source:**\n- Technical Description_Rev01.docx - INVOLVED PARTIES INFORMATION section explicitly states: \"Grid is out of EAI's scope of works.\"",
+    "aiResponse": "No, the grid connection is **not included in EAI's scope of works**.\n\n**Source:**\nTechnical Description_Rev01.docx - Section 2 (PARTIES INFORMATION) explicitly states:\n\n> \"Grid is out of EAI's scope of works.\"\n\nThis is clearly documented in the project's preliminary design information provided by METKA-EGN to EAI.",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 9.151587356907369,
-        "section": "INVOLVED PARTIES INFORMATION"
+        "relevanceScore": 5.645951343506587,
+        "section": "GRID CONNECTION"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 1.6207327978961528,
-        "section": "Document"
-      },
-      {
-        "docName": "Technical Description_Rev01.docx",
-        "docType": "WORD",
-        "relevanceScore": 1.3737679392377111,
+        "relevanceScore": 4.93954499378578,
         "section": "METKA"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.3707202199987458,
+        "relevanceScore": 1.9001910939675797,
+        "section": "Document"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.872281754881505,
         "section": "REFERENCES"
       }
     ],
@@ -1478,19 +2150,31 @@
     "validationRules": [
       "not_found"
     ],
-    "aiResponse": "The requested information was not found in the available project documents.\n\nThe provided excerpts from the Technical Description document contain table of contents, section headings, and an introduction describing the Haunton PV Plant project. There is no mention of NCR (Non-Conformance Report) procedures in any of the available excerpts.",
+    "aiResponse": "The requested information was not found in the available project documents.\n\nThe provided excerpts are from a General Technical Description document (227-007-F-E-00015) for the Haunton PV Plant, which covers technical specifications, system configuration, and equipment details. There is no mention of NCR (Non-Conformance Report) procedures in any of the retrieved document sections.",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.3560357916096364,
+        "relevanceScore": 15.375113410597848,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 7.151525454972149,
         "section": "Document"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.3460258146106474,
+        "relevanceScore": 1.5238395015479802,
         "section": "INTRODUCTION"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.21644342343828304,
+        "section": "HAUNTON PV PLANT"
       }
     ],
     "pass": true,
@@ -1505,31 +2189,49 @@
     "validationRules": [
       "not_found"
     ],
-    "aiResponse": "Based on the provided document excerpts, if information is not present, the AI should respond EXACTLY with:\n\n**\"The requested information was not found in the available project documents.\"**\n\n**Source:** The instructions state: \"If the information is not in the provided chunks, respond EXACTLY with: 'The requested information was not found in the available project documents.'\"",
+    "aiResponse": "Based on the system instructions provided in the document excerpts, if information is not present, the AI should respond with:\n\n**\"The requested information was not found in the available project documents.\"**\n\nHowever, this response should ONLY be used when:\n- Information is **COMPLETELY absent from ALL retrieved chunks**\n- This applies to negative control questions only\n\nThe instructions emphasize that the AI should:\n- **NEVER refuse if ANY relevant information exists** in the retrieved chunks\n- **AGGRESSIVELY EXTRACT** information if it's present anywhere in the context\n- Check ALL retrieved chunks, including cross-references, tables, summaries, and different sections before refusing\n- Extract information even if it's incomplete or appears in table references\n\nThe refusal response is meant to be used strictly and conservatively - only when information is genuinely absent from all available sources.\n\n**Source:** Technical Description_Rev01.docx - System instructions section (implied from the question context)",
     "sources": [
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 4.909636587974295,
+        "relevanceScore": 16.700877770366866,
+        "section": "REFERENCES"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 4.897641177482263,
         "section": "SITE AREA INFORMATION"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.4384291575480717,
+        "relevanceScore": 3.531762745680097,
         "section": "CABLING"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 2.3755716372165905,
+        "relevanceScore": 2.211712233769505,
         "section": "Document"
       },
       {
         "docName": "Technical Description_Rev01.docx",
         "docType": "WORD",
-        "relevanceScore": 0.40555751793622097,
+        "relevanceScore": 1.6818687459135657,
         "section": "HAUNTON PV PLANT"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.8556770636357038,
+        "section": "METKA"
+      },
+      {
+        "docName": "Technical Description_Rev01.docx",
+        "docType": "WORD",
+        "relevanceScore": 0.2121464764096852,
+        "section": "STRING VOLTAGE AND CURRENT SIZING"
       }
     ],
     "pass": true,

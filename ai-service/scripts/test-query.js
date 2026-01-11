@@ -54,7 +54,7 @@ async function main() {
     logger.info('🤖 Processing query with BM25 keyword retrieval...\n');
     const startTime = Date.now();
     
-    const result = await processQuery(query, { limit: 10 });
+    const result = await processQuery(query, { limit: 20 }); // Match validation limit
     
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 

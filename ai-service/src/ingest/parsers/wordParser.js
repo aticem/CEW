@@ -1,5 +1,6 @@
 import mammoth from 'mammoth';
 import logger from '../../utils/logger.js';
+import { extractTablesFromHTML, findTableTitle, tableToText, detectTableEntityTypes, detectTableUnits } from './tableExtractor.js';
 
 /**
  * Parse Word document (.docx, .doc) with FULL STRUCTURE PRESERVATION
@@ -23,8 +24,11 @@ export async function parseWordDocument(buffer, metadata) {
       };
     }
 
-    // Parse HTML to extract structured content
-    const structure = parseHTMLStructure(htmlResult.value);
+    // Extract tables FIRST (atomic units)
+    const tables = extractTablesFromHTML(htmlResult.value);
+    
+    // Parse HTML to extract structured content (excluding tables for now)
+    const structure = parseHTMLStructure(htmlResult.value, tables);
 
     // Calculate word count
     const fullText = structure.map(item => item.text).join(' ');
@@ -37,7 +41,8 @@ export async function parseWordDocument(buffer, metadata) {
       headings: structure.filter(s => s.type.startsWith('heading')).length,
       paragraphs: structure.filter(s => s.type === 'paragraph').length,
       lists: structure.filter(s => s.type === 'list_item').length,
-      tables: structure.filter(s => s.type === 'table_cell').length,
+      tables: structure.filter(s => s.type === 'table').length,
+      atomicTables: tables.length,
     });
 
     return {
@@ -45,6 +50,7 @@ export async function parseWordDocument(buffer, metadata) {
       status: 'SUCCESS',
       text: fullText,
       structure,
+      tables, // Atomic tables
       wordCount,
       messages: htmlResult.messages || [],
     };
@@ -69,24 +75,62 @@ export async function parseWordDocument(buffer, metadata) {
 /**
  * Parse HTML structure to extract semantic elements
  * Handles multi-line HTML and nested tags from mammoth
+ * Tables are extracted separately and inserted as atomic units
  */
-function parseHTMLStructure(html) {
+function parseHTMLStructure(html, atomicTables = []) {
   const structure = [];
   let currentSection = null;
   let sectionHierarchy = [];
+  let tableIndex = 0;
+
+  // Remove tables from HTML to parse separately
+  let htmlWithoutTables = html.replace(/<table[^>]*>.*?<\/table>/gis, `__TABLE_PLACEHOLDER_${tableIndex++}__`);
 
   // Remove line breaks within tags to make parsing easier
-  const normalizedHtml = html.replace(/\n\s*/g, ' ');
+  const normalizedHtml = htmlWithoutTables.replace(/\n\s*/g, ' ');
 
   // Extract all HTML tags with their content
-  const tagRegex = /<(h[1-6]|p|li|td|th|tr|table)(?:\s[^>]*)?>(.+?)<\/\1>/gi;
+  const tagRegex = /<(h[1-6]|p|li)(?:\s[^>]*)?>(.+?)<\/\1>/gi;
   let match;
+  tableIndex = 0;
 
   while ((match = tagRegex.exec(normalizedHtml)) !== null) {
     const tagName = match[1].toLowerCase();
     const content = match[2];
+    
+    // Check if this content contains a table placeholder
+    const tablePlaceholderMatch = content.match(/__TABLE_PLACEHOLDER_(\d+)__/);
+    if (tablePlaceholderMatch) {
+      const placeholderIndex = parseInt(tablePlaceholderMatch[1]);
+      if (atomicTables[placeholderIndex]) {
+        const table = atomicTables[placeholderIndex];
+        const tableTitle = findTableTitle(html, table.originalHTML) || `Table ${placeholderIndex + 1}`;
+        const tableText = tableToText(table, tableTitle);
+        
+        // Detect semantic metadata
+        const entityTypes = detectTableEntityTypes(table, tableTitle);
+        const units = detectTableUnits(table, tableTitle);
+        
+        structure.push({
+          type: 'table',
+          text: tableText,
+          section: currentSection || 'Document',
+          sectionPath: sectionHierarchy.join(' > ') || 'Document',
+          tableTitle,
+          tableIndex: placeholderIndex,
+          headers: table.headers,
+          rows: table.rows,
+          rowCount: table.rowCount,
+          columnCount: table.columnCount,
+          entityTypes,
+          units,
+          isAtomic: true, // CRITICAL: Never split this chunk
+        });
+      }
+      continue;
+    }
+    
     const text = stripHtmlTags(content).trim();
-
     if (!text || text.length === 0) continue;
 
     // Handle headings
@@ -124,13 +168,33 @@ function parseHTMLStructure(html) {
         sectionPath: sectionHierarchy.join(' > ') || 'Document',
       });
     }
-    // Handle table cells
-    else if (tagName === 'td' || tagName === 'th') {
+  }
+
+  // Insert any remaining tables that weren't caught in the first pass
+  for (let i = 0; i < atomicTables.length; i++) {
+    // Check if table is already in structure
+    const alreadyAdded = structure.some(s => s.type === 'table' && s.tableIndex === i);
+    if (!alreadyAdded) {
+      const table = atomicTables[i];
+      const tableTitle = `Table ${i + 1}`;
+      const tableText = tableToText(table, tableTitle);
+      const entityTypes = detectTableEntityTypes(table, tableTitle);
+      const units = detectTableUnits(table, tableTitle);
+      
       structure.push({
-        type: 'table_cell',
-        text,
+        type: 'table',
+        text: tableText,
         section: currentSection || 'Document',
         sectionPath: sectionHierarchy.join(' > ') || 'Document',
+        tableTitle,
+        tableIndex: i,
+        headers: table.headers,
+        rows: table.rows,
+        rowCount: table.rowCount,
+        columnCount: table.columnCount,
+        entityTypes,
+        units,
+        isAtomic: true,
       });
     }
   }

@@ -188,7 +188,17 @@ export async function ingestDocument(file) {
       // Chunk type indicators (for better understanding)
       is_table_chunk: chunk.isTableChunk || false,
       is_list_chunk: chunk.isListChunk || false,
+      is_atomic: chunk.isAtomic || false, // CRITICAL: Never split atomic chunks
       element_types: chunk.elementTypes ? chunk.elementTypes.join(',') : null,
+      // Semantic metadata enrichment (NEW)
+      entity_types: chunk.entityTypes ? chunk.entityTypes.join(',') : null,
+      units: chunk.units ? chunk.units.join(',') : null,
+      table_title: chunk.tableTitle || null,
+      // Table structure data (for atomic tables)
+      table_headers: chunk.tableData?.headers ? JSON.stringify(chunk.tableData.headers) : null,
+      table_rows: chunk.tableData?.rows ? JSON.stringify(chunk.tableData.rows) : null,
+      table_row_count: chunk.tableData?.rowCount || null,
+      table_column_count: chunk.tableData?.columnCount || null,
       // Timestamps
       ingested_at: new Date().toISOString(),
     },

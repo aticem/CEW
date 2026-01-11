@@ -58,6 +58,31 @@ export function chunkStructuredDocument(structure, options = {}) {
       continue;
     }
 
+    // CRITICAL: Tables are ATOMIC - they get their own chunk, never split
+    if (element.type === 'table' && element.isAtomic) {
+      // Flush any pending chunk first
+      if (currentChunk.length > 0) {
+        chunks.push(createChunk(
+          currentChunk,
+          currentSection,
+          currentSectionPath,
+          chunkIndex++
+        ));
+        currentChunk = [];
+        currentTokenCount = 0;
+      }
+      
+      // Create atomic table chunk (never combined with other content)
+      chunks.push(createChunk(
+        [element],
+        currentSection,
+        currentSectionPath,
+        chunkIndex++
+      ));
+      
+      continue;
+    }
+
     // Calculate tokens for this element
     const elementTokens = countTokens(element.text);
 
@@ -110,8 +135,40 @@ function createChunk(elements, section, sectionPath, index) {
 
   // Determine chunk type
   const types = elements.map(e => e.type);
-  const isTableChunk = types.some(t => t === 'table_cell');
+  const isTableChunk = types.some(t => t === 'table');
   const isListChunk = types.some(t => t === 'list_item');
+  
+  // Check if any element is atomic (like tables)
+  const hasAtomicElement = elements.some(e => e.isAtomic);
+  
+  // Gather semantic metadata from elements
+  const entityTypes = new Set();
+  const units = new Set();
+  let tableTitle = null;
+  let tableData = null;
+  
+  for (const element of elements) {
+    // Collect entity types
+    if (element.entityTypes) {
+      element.entityTypes.forEach(et => entityTypes.add(et));
+    }
+    
+    // Collect units
+    if (element.units) {
+      element.units.forEach(u => units.add(u));
+    }
+    
+    // Preserve table data for atomic tables
+    if (element.type === 'table') {
+      tableTitle = element.tableTitle;
+      tableData = {
+        headers: element.headers,
+        rows: element.rows,
+        rowCount: element.rowCount,
+        columnCount: element.columnCount,
+      };
+    }
+  }
 
   return {
     text,
@@ -122,6 +179,12 @@ function createChunk(elements, section, sectionPath, index) {
     elementTypes: types,
     isTableChunk,
     isListChunk,
+    isAtomic: hasAtomicElement,
+    // Semantic metadata
+    entityTypes: entityTypes.size > 0 ? Array.from(entityTypes) : null,
+    units: units.size > 0 ? Array.from(units) : null,
+    tableTitle,
+    tableData,
   };
 }
 
