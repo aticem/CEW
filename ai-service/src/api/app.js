@@ -97,7 +97,7 @@ app.use((err, req, res, next) => {
 // Start server
 const PORT = config.port;
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   logger.info('AI Service started', {
     port: PORT,
     nodeEnv: config.nodeEnv,

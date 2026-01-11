@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 
-const API_BASE_URL = 'http://localhost:3001';
+const API_BASE_URL = (import.meta.env.VITE_AI_API_URL || 'http://localhost:3001').replace(/\/$/, '');
 
 export default function AIAssistant() {
   const [isOpen, setIsOpen] = useState(false);
@@ -73,7 +73,7 @@ export default function AIAssistant() {
       const errorMessage = {
         id: Date.now() + 1,
         type: 'error',
-        content: `Error: ${error.message}. Make sure the AI service is running on port 3001.`,
+        content: `Error: ${error.message}. Make sure the AI service is reachable at ${API_BASE_URL}.`,
         timestamp: new Date().toISOString(),
       };
 
