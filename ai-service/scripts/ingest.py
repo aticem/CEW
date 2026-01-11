@@ -26,6 +26,14 @@ import time
 import re
 import uuid
 
+# Fix Windows console encoding for Unicode
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        # If stdout cannot be reconfigured (rare), continue without crashing.
+        pass
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -127,10 +135,14 @@ def parse_pdf_structured(filepath: Path) -> List[Dict[str, Any]]:
         List of dicts with page, table_num (if any), and text
     """
     results = []
+    pdf_kind = "UNKNOWN"
+    text_page_count = 0
+    total_pages = 0
     
     try:
         with pdfplumber.open(filepath) as pdf:
             for page_num, page in enumerate(pdf.pages, start=1):
+                total_pages += 1
                 # Try table extraction first
                 tables = page.extract_tables()
                 
@@ -183,6 +195,8 @@ def parse_pdf_structured(filepath: Path) -> List[Dict[str, Any]]:
                 text = page.extract_text()
                 
                 if text:
+                    if len(text.strip()) > 200:
+                        text_page_count += 1
                     # Clean and structure the text
                     text = clean_text(text)
                     
@@ -199,6 +213,20 @@ def parse_pdf_structured(filepath: Path) -> List[Dict[str, Any]]:
                             "page": page_num,
                             "text": structured_text
                         })
+        
+        # Classify PDF kind based on text density
+        if total_pages > 0:
+            text_ratio = text_page_count / total_pages
+            if text_ratio > 0.8:
+                pdf_kind = "TEXT_PDF"
+            elif text_ratio < 0.2:
+                pdf_kind = "SCANNED_PDF"
+            else:
+                pdf_kind = "DRAWING_PDF"
+
+        # Attach pdf_kind to each result for downstream metadata
+        for r in results:
+            r["pdf_kind"] = pdf_kind
         
         return results
         
@@ -339,18 +367,25 @@ def process_document(filepath: Path) -> List[Dict[str, Any]]:
     """
     suffix = filepath.suffix.lower()
     doc_name = filepath.name
+    doc_type = "unknown"
+    pdf_kind = None
     
     print(f"      📄 Parsing: {doc_name}")
     
     # Parse based on file type with structured extraction
     try:
         if suffix == ".pdf":
+            doc_type = "pdf"
             sections = parse_pdf_structured(filepath)
             print(f"         ✓ Extracted {len(sections)} structured sections (tables + text)")
+            if sections:
+                pdf_kind = sections[0].get("pdf_kind")
         elif suffix in {".xlsx", ".xls"}:
+            doc_type = "excel"
             sections = parse_excel_structured(filepath)
             print(f"         ✓ Extracted {len(sections)} rows as structured data")
         elif suffix == ".docx":
+            doc_type = "word"
             sections = parse_word_structured(filepath)
             print(f"         ✓ Extracted {len(sections)} sections (paragraphs + tables)")
         else:
@@ -384,6 +419,12 @@ def process_document(filepath: Path) -> List[Dict[str, Any]]:
                 "chunk_index": i,
                 "text": chunk_text_content
             }
+            
+            # Add doc_type/pdf_kind metadata for downstream filtering/analytics
+            if doc_type:
+                chunk_data["doc_type"] = doc_type
+            if pdf_kind:
+                chunk_data["pdf_kind"] = pdf_kind
             
             # Add metadata from section
             if "page" in section:

@@ -1,0 +1,1133 @@
+{
+  "doc_name": "Technical Description_Rev01.docx",
+  "count": 80,
+  "tests": [
+    {
+      "id": "TD-REV01-001",
+      "mode": "general",
+      "question_en": "What is the value of 'Tilt'?",
+      "question_tr": "'Tilt' değeri nedir?",
+      "expected_keywords": [
+        "20"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Tilt",
+      "value": "±20°"
+    },
+    {
+      "id": "TD-REV01-002",
+      "mode": "general",
+      "question_en": "What is the value of 'Layout'?",
+      "question_tr": "'Layout' değeri nedir?",
+      "expected_keywords": [
+        "2",
+        "a",
+        "V"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Layout",
+      "value": "2 Portrait 2Vx14 (1 String x 27 modules)"
+    },
+    {
+      "id": "TD-REV01-003",
+      "mode": "general",
+      "question_en": "What is the value of 'Layout'?",
+      "question_tr": "'Layout' değeri nedir?",
+      "expected_keywords": [
+        "2",
+        "a",
+        "V"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Layout",
+      "value": "2 Portrait 2Vx27 (2 Strings x 54 modules)"
+    },
+    {
+      "id": "TD-REV01-004",
+      "mode": "general",
+      "question_en": "What is the value of 'Cable Type'?",
+      "question_tr": "'Cable Type' değeri nedir?",
+      "expected_keywords": [
+        "1",
+        "H1Z2Z2-K"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Cable Type",
+      "value": "CU H1Z2Z2-K"
+    },
+    {
+      "id": "TD-REV01-005",
+      "mode": "general",
+      "question_en": "What is the value of 'Dimensions'?",
+      "question_tr": "'Dimensions' değeri nedir?",
+      "expected_keywords": [
+        "16.188",
+        "m"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Dimensions",
+      "value": "16.188x4.576 m"
+    },
+    {
+      "id": "TD-REV01-006",
+      "mode": "general",
+      "question_en": "What is the value of 'Dimensions'?",
+      "question_tr": "'Dimensions' değeri nedir?",
+      "expected_keywords": [
+        "31.242",
+        "m"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Dimensions",
+      "value": "31.242x4.576 m"
+    },
+    {
+      "id": "TD-REV01-007",
+      "mode": "general",
+      "question_en": "What is the value of 'Project Issue'?",
+      "question_tr": "'Project Issue' değeri nedir?",
+      "expected_keywords": [
+        "1"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Project Issue",
+      "value": "1"
+    },
+    {
+      "id": "TD-REV01-008",
+      "mode": "general",
+      "question_en": "What is the value of 'Structure Type'?",
+      "question_tr": "'Structure Type' değeri nedir?",
+      "expected_keywords": [
+        "1"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Structure Type",
+      "value": "1"
+    },
+    {
+      "id": "TD-REV01-009",
+      "mode": "general",
+      "question_en": "What is the value of 'Structure Type'?",
+      "question_tr": "'Structure Type' değeri nedir?",
+      "expected_keywords": [
+        "2"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Structure Type",
+      "value": "2"
+    },
+    {
+      "id": "TD-REV01-010",
+      "mode": "general",
+      "question_en": "What is the value of 'Nominal Voltage'?",
+      "question_tr": "'Nominal Voltage' değeri nedir?",
+      "expected_keywords": [
+        "1.5",
+        "V"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Nominal Voltage",
+      "value": "1.5 kV"
+    },
+    {
+      "id": "TD-REV01-011",
+      "mode": "general",
+      "question_en": "What is the value of 'Nominal Voltage'?",
+      "question_tr": "'Nominal Voltage' değeri nedir?",
+      "expected_keywords": [
+        "19",
+        "V",
+        "19/33"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Nominal Voltage",
+      "value": "19/33 kV"
+    },
+    {
+      "id": "TD-REV01-012",
+      "mode": "general",
+      "question_en": "What is the value of 'Nominal Voltage'?",
+      "question_tr": "'Nominal Voltage' değeri nedir?",
+      "expected_keywords": [
+        "0.6",
+        "V"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Nominal Voltage",
+      "value": "0.6/1 kV"
+    },
+    {
+      "id": "TD-REV01-013",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM570-N72HL4-BDV'?",
+      "question_tr": "'JKM570-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "0"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM570-N72HL4-BDV",
+      "value": "0"
+    },
+    {
+      "id": "TD-REV01-014",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM575-N72HL4-BDV'?",
+      "question_tr": "'JKM575-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "0"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM575-N72HL4-BDV",
+      "value": "0"
+    },
+    {
+      "id": "TD-REV01-015",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM570-N72HL4-BDV'?",
+      "question_tr": "'JKM570-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "13"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM570-N72HL4-BDV",
+      "value": "13"
+    },
+    {
+      "id": "TD-REV01-016",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM575-N72HL4-BDV'?",
+      "question_tr": "'JKM575-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "13"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM575-N72HL4-BDV",
+      "value": "13"
+    },
+    {
+      "id": "TD-REV01-017",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM570-N72HL4-BDV'?",
+      "question_tr": "'JKM570-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "22"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM570-N72HL4-BDV",
+      "value": "22"
+    },
+    {
+      "id": "TD-REV01-018",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM575-N72HL4-BDV'?",
+      "question_tr": "'JKM575-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "22"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM575-N72HL4-BDV",
+      "value": "22"
+    },
+    {
+      "id": "TD-REV01-019",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM570-N72HL4-BDV'?",
+      "question_tr": "'JKM570-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "0"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM570-N72HL4-BDV",
+      "value": "-0"
+    },
+    {
+      "id": "TD-REV01-020",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM575-N72HL4-BDV'?",
+      "question_tr": "'JKM575-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "0"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM575-N72HL4-BDV",
+      "value": "-0"
+    },
+    {
+      "id": "TD-REV01-021",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM570-N72HL4-BDV'?",
+      "question_tr": "'JKM570-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "51"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM570-N72HL4-BDV",
+      "value": "51"
+    },
+    {
+      "id": "TD-REV01-022",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM575-N72HL4-BDV'?",
+      "question_tr": "'JKM575-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "51"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM575-N72HL4-BDV",
+      "value": "51"
+    },
+    {
+      "id": "TD-REV01-023",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM570-N72HL4-BDV'?",
+      "question_tr": "'JKM570-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "14"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM570-N72HL4-BDV",
+      "value": "14"
+    },
+    {
+      "id": "TD-REV01-024",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM575-N72HL4-BDV'?",
+      "question_tr": "'JKM575-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "14"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM575-N72HL4-BDV",
+      "value": "14"
+    },
+    {
+      "id": "TD-REV01-025",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM570-N72HL4-BDV'?",
+      "question_tr": "'JKM570-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "42"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM570-N72HL4-BDV",
+      "value": "42"
+    },
+    {
+      "id": "TD-REV01-026",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM575-N72HL4-BDV'?",
+      "question_tr": "'JKM575-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "48"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM575-N72HL4-BDV",
+      "value": "48"
+    },
+    {
+      "id": "TD-REV01-027",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM570-N72HL4-BDV'?",
+      "question_tr": "'JKM570-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "30",
+        "A"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM570-N72HL4-BDV",
+      "value": "30A"
+    },
+    {
+      "id": "TD-REV01-028",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM575-N72HL4-BDV'?",
+      "question_tr": "'JKM575-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "30",
+        "A"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM575-N72HL4-BDV",
+      "value": "30A"
+    },
+    {
+      "id": "TD-REV01-029",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM570-N72HL4-BDV'?",
+      "question_tr": "'JKM570-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "0",
+        "%"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM570-N72HL4-BDV",
+      "value": "0±3%"
+    },
+    {
+      "id": "TD-REV01-030",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM575-N72HL4-BDV'?",
+      "question_tr": "'JKM575-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "0",
+        "%"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM575-N72HL4-BDV",
+      "value": "0±3%"
+    },
+    {
+      "id": "TD-REV01-031",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM570-N72HL4-BDV'?",
+      "question_tr": "'JKM570-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "80",
+        "%"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM570-N72HL4-BDV",
+      "value": "80±5%"
+    },
+    {
+      "id": "TD-REV01-032",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM575-N72HL4-BDV'?",
+      "question_tr": "'JKM575-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "80",
+        "%"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM575-N72HL4-BDV",
+      "value": "80±5%"
+    },
+    {
+      "id": "TD-REV01-033",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM570-N72HL4-BDV'?",
+      "question_tr": "'JKM570-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "570",
+        "W"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM570-N72HL4-BDV",
+      "value": "570 Wp"
+    },
+    {
+      "id": "TD-REV01-034",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM575-N72HL4-BDV'?",
+      "question_tr": "'JKM575-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "575",
+        "W"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM575-N72HL4-BDV",
+      "value": "575 Wp"
+    },
+    {
+      "id": "TD-REV01-035",
+      "mode": "general",
+      "question_en": "What is the value of 'CLASIFICATION MZH'?",
+      "question_tr": "'CLASIFICATION MZH' değeri nedir?",
+      "expected_keywords": [
+        "1"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "CLASIFICATION MZH",
+      "value": "1 /.pdf"
+    },
+    {
+      "id": "TD-REV01-036",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM570-N72HL4-BDV'?",
+      "question_tr": "'JKM570-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "1500",
+        "V"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM570-N72HL4-BDV",
+      "value": "1500 VDC"
+    },
+    {
+      "id": "TD-REV01-037",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM575-N72HL4-BDV'?",
+      "question_tr": "'JKM575-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "1500",
+        "V"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM575-N72HL4-BDV",
+      "value": "1500 VDC"
+    },
+    {
+      "id": "TD-REV01-038",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM570-N72HL4-BDV'?",
+      "question_tr": "'JKM570-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "40"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM570-N72HL4-BDV",
+      "value": "-40 +85ºC"
+    },
+    {
+      "id": "TD-REV01-039",
+      "mode": "general",
+      "question_en": "What is the value of 'JKM575-N72HL4-BDV'?",
+      "question_tr": "'JKM575-N72HL4-BDV' değeri nedir?",
+      "expected_keywords": [
+        "40"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "JKM575-N72HL4-BDV",
+      "value": "-40 +85ºC"
+    },
+    {
+      "id": "TD-REV01-040",
+      "mode": "general",
+      "question_en": "What is the value of 'Project 12-07-2023'?",
+      "question_tr": "'Project 12-07-2023' değeri nedir?",
+      "expected_keywords": [
+        "12",
+        "12-07-2023"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Project 12-07-2023",
+      "value": "12-07-2023"
+    },
+    {
+      "id": "TD-REV01-041",
+      "mode": "general",
+      "question_en": "What is the value of 'Cross Section (mm2)'?",
+      "question_tr": "'Cross Section (mm2)' değeri nedir?",
+      "expected_keywords": [
+        "6",
+        "mm2"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Cross Section (mm2)",
+      "value": "6 mm2"
+    },
+    {
+      "id": "TD-REV01-042",
+      "mode": "general",
+      "question_en": "What is the value of 'Cross Section (mm2)'?",
+      "question_tr": "'Cross Section (mm2)' değeri nedir?",
+      "expected_keywords": [
+        "400",
+        "mm2"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Cross Section (mm2)",
+      "value": "400 mm2"
+    },
+    {
+      "id": "TD-REV01-043",
+      "mode": "general",
+      "question_en": "What is the value of 'Cross Section (mm2)'?",
+      "question_tr": "'Cross Section (mm2)' değeri nedir?",
+      "expected_keywords": [
+        "240",
+        "mm2",
+        "240/400"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Cross Section (mm2)",
+      "value": "240/400 mm2"
+    },
+    {
+      "id": "TD-REV01-044",
+      "mode": "general",
+      "question_en": "What is the value of 'Cross Section (mm2)'?",
+      "question_tr": "'Cross Section (mm2)' değeri nedir?",
+      "expected_keywords": [
+        "3",
+        "mm2"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Cross Section (mm2)",
+      "value": "3x120 + 70 mm2"
+    },
+    {
+      "id": "TD-REV01-045",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 1 MODULE'?",
+      "question_tr": "'SUBSTATION 1 MODULE' değeri nedir?",
+      "expected_keywords": [
+        "72",
+        "V",
+        "W",
+        "72HL4-BDV"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 1 MODULE",
+      "value": "Jinko Tiger Neo N-type 72HL4-BDV 575 WP"
+    },
+    {
+      "id": "TD-REV01-046",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 4 Modules'?",
+      "question_tr": "'SUBSTATION 4 Modules' değeri nedir?",
+      "expected_keywords": [
+        "72",
+        "V",
+        "W",
+        "72HL4-BDV"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 4 Modules",
+      "value": "Jinko Tiger Neo N-type 72HL4-BDV 575 WP"
+    },
+    {
+      "id": "TD-REV01-047",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 2 Modules'?",
+      "question_tr": "'SUBSTATION 2 Modules' değeri nedir?",
+      "expected_keywords": [
+        "72",
+        "V",
+        "W",
+        "72HL4-BDV"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 2 Modules",
+      "value": "Jinko Tiger Neo N-type 72HL4-BDV 575 WP"
+    },
+    {
+      "id": "TD-REV01-048",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 4 Modules'?",
+      "question_tr": "'SUBSTATION 4 Modules' değeri nedir?",
+      "expected_keywords": [
+        "72",
+        "V",
+        "W",
+        "72HL4-BDV"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 4 Modules",
+      "value": "Jinko Tiger Neo N-type 72HL4-BDV 570 WP"
+    },
+    {
+      "id": "TD-REV01-049",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 6 Modules'?",
+      "question_tr": "'SUBSTATION 6 Modules' değeri nedir?",
+      "expected_keywords": [
+        "72",
+        "V",
+        "W",
+        "72HL4-BDV"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 6 Modules",
+      "value": "Jinko Tiger Neo N-type 72HL4-BDV 570 WP"
+    },
+    {
+      "id": "TD-REV01-050",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 5 Modules'?",
+      "question_tr": "'SUBSTATION 5 Modules' değeri nedir?",
+      "expected_keywords": [
+        "72",
+        "V",
+        "W",
+        "72HL4-BDV"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 5 Modules",
+      "value": "Jinko Tiger Neo N-type 72HL4-BDV 570 WP"
+    },
+    {
+      "id": "TD-REV01-051",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 3 Modules'?",
+      "question_tr": "'SUBSTATION 3 Modules' değeri nedir?",
+      "expected_keywords": [
+        "72",
+        "V",
+        "W",
+        "72HL4-BDV"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 3 Modules",
+      "value": "Jinko Tiger Neo N-type 72HL4-BDV 575 WP"
+    },
+    {
+      "id": "TD-REV01-052",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 2 Inverter'?",
+      "question_tr": "'SUBSTATION 2 Inverter' değeri nedir?",
+      "expected_keywords": [
+        "25",
+        "w",
+        "V",
+        "SG350HX"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 2 Inverter",
+      "value": "25 x Sungrow SG350HX (320 kVA @40ºC)"
+    },
+    {
+      "id": "TD-REV01-053",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 4 Inverter'?",
+      "question_tr": "'SUBSTATION 4 Inverter' değeri nedir?",
+      "expected_keywords": [
+        "27",
+        "w",
+        "V",
+        "SG350HX"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 4 Inverter",
+      "value": "27 x Sungrow SG350HX (320 kVA @40ºC)"
+    },
+    {
+      "id": "TD-REV01-054",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 6 Inverter'?",
+      "question_tr": "'SUBSTATION 6 Inverter' değeri nedir?",
+      "expected_keywords": [
+        "26",
+        "w",
+        "V",
+        "SG350HX"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 6 Inverter",
+      "value": "26 x Sungrow SG350HX (320 kVA @40ºC)"
+    },
+    {
+      "id": "TD-REV01-055",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 3 Inverter'?",
+      "question_tr": "'SUBSTATION 3 Inverter' değeri nedir?",
+      "expected_keywords": [
+        "24",
+        "w",
+        "V",
+        "SG350HX"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 3 Inverter",
+      "value": "24 x Sungrow SG350HX (320 kVA @40ºC)"
+    },
+    {
+      "id": "TD-REV01-056",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 5 Inverter'?",
+      "question_tr": "'SUBSTATION 5 Inverter' değeri nedir?",
+      "expected_keywords": [
+        "27",
+        "w",
+        "V",
+        "SG350HX"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 5 Inverter",
+      "value": "27 x Sungrow SG350HX (320 kVA @40ºC)"
+    },
+    {
+      "id": "TD-REV01-057",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 1 INVERTER'?",
+      "question_tr": "'SUBSTATION 1 INVERTER' değeri nedir?",
+      "expected_keywords": [
+        "25",
+        "w",
+        "V",
+        "SG350HX"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 1 INVERTER",
+      "value": "25 x Sungrow SG350HX (320 kVA @40ºC)"
+    },
+    {
+      "id": "TD-REV01-058",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 3 Nº Strings'?",
+      "question_tr": "'SUBSTATION 3 Nº Strings' değeri nedir?",
+      "expected_keywords": [
+        "702"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 3 Nº Strings",
+      "value": "702"
+    },
+    {
+      "id": "TD-REV01-059",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 6 Nº Strings'?",
+      "question_tr": "'SUBSTATION 6 Nº Strings' değeri nedir?",
+      "expected_keywords": [
+        "770"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 6 Nº Strings",
+      "value": "770"
+    },
+    {
+      "id": "TD-REV01-060",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 5 Nº Strings'?",
+      "question_tr": "'SUBSTATION 5 Nº Strings' değeri nedir?",
+      "expected_keywords": [
+        "796"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 5 Nº Strings",
+      "value": "796"
+    },
+    {
+      "id": "TD-REV01-061",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 2 Nº Strings'?",
+      "question_tr": "'SUBSTATION 2 Nº Strings' değeri nedir?",
+      "expected_keywords": [
+        "736"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 2 Nº Strings",
+      "value": "736"
+    },
+    {
+      "id": "TD-REV01-062",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 1 Nº Strings'?",
+      "question_tr": "'SUBSTATION 1 Nº Strings' değeri nedir?",
+      "expected_keywords": [
+        "728"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 1 Nº Strings",
+      "value": "728 Strings"
+    },
+    {
+      "id": "TD-REV01-063",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 1 Nº Strings'?",
+      "question_tr": "'SUBSTATION 1 Nº Strings' değeri nedir?",
+      "expected_keywords": [
+        "3",
+        "v"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 1 Nº Strings",
+      "value": "3 inverters x 30 string"
+    },
+    {
+      "id": "TD-REV01-064",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 3 Nº Strings'?",
+      "question_tr": "'SUBSTATION 3 Nº Strings' değeri nedir?",
+      "expected_keywords": [
+        "6",
+        "v"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 3 Nº Strings",
+      "value": "6 inverters x 30 string"
+    },
+    {
+      "id": "TD-REV01-065",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 3 Nº Strings'?",
+      "question_tr": "'SUBSTATION 3 Nº Strings' değeri nedir?",
+      "expected_keywords": [
+        "18",
+        "v"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 3 Nº Strings",
+      "value": "18 inverters x 29 string"
+    },
+    {
+      "id": "TD-REV01-066",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 2 Nº Strings'?",
+      "question_tr": "'SUBSTATION 2 Nº Strings' değeri nedir?",
+      "expected_keywords": [
+        "11",
+        "v"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 2 Nº Strings",
+      "value": "11 inverters x 30 string"
+    },
+    {
+      "id": "TD-REV01-067",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 1 Nº Strings'?",
+      "question_tr": "'SUBSTATION 1 Nº Strings' değeri nedir?",
+      "expected_keywords": [
+        "22",
+        "v"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 1 Nº Strings",
+      "value": "22 inverters x 29 string"
+    },
+    {
+      "id": "TD-REV01-068",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 6 Nº Strings'?",
+      "question_tr": "'SUBSTATION 6 Nº Strings' değeri nedir?",
+      "expected_keywords": [
+        "16",
+        "v"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 6 Nº Strings",
+      "value": "16 inverters x 30 string"
+    },
+    {
+      "id": "TD-REV01-069",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 5 Nº Strings'?",
+      "question_tr": "'SUBSTATION 5 Nº Strings' değeri nedir?",
+      "expected_keywords": [
+        "13",
+        "v"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 5 Nº Strings",
+      "value": "13 inverters x 30 string"
+    },
+    {
+      "id": "TD-REV01-070",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 5 Nº Strings'?",
+      "question_tr": "'SUBSTATION 5 Nº Strings' değeri nedir?",
+      "expected_keywords": [
+        "14",
+        "v"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 5 Nº Strings",
+      "value": "14 inverters x 29 string"
+    },
+    {
+      "id": "TD-REV01-071",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 6 Nº Strings'?",
+      "question_tr": "'SUBSTATION 6 Nº Strings' değeri nedir?",
+      "expected_keywords": [
+        "10",
+        "v"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 6 Nº Strings",
+      "value": "10 inverters x 29 string"
+    },
+    {
+      "id": "TD-REV01-072",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 2 Nº Strings'?",
+      "question_tr": "'SUBSTATION 2 Nº Strings' değeri nedir?",
+      "expected_keywords": [
+        "14",
+        "v"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 2 Nº Strings",
+      "value": "14 inverters x 29 string"
+    },
+    {
+      "id": "TD-REV01-073",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 3 Transformer'?",
+      "question_tr": "'SUBSTATION 3 Transformer' değeri nedir?",
+      "expected_keywords": [
+        "8960",
+        "V",
+        "A"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 3 Transformer",
+      "value": "8960 KVA"
+    },
+    {
+      "id": "TD-REV01-074",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 2 Transformer'?",
+      "question_tr": "'SUBSTATION 2 Transformer' değeri nedir?",
+      "expected_keywords": [
+        "8960",
+        "V",
+        "A"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 2 Transformer",
+      "value": "8960 KVA"
+    },
+    {
+      "id": "TD-REV01-075",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 5 Transformer'?",
+      "question_tr": "'SUBSTATION 5 Transformer' değeri nedir?",
+      "expected_keywords": [
+        "8960",
+        "V",
+        "A"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 5 Transformer",
+      "value": "8960 KVA"
+    },
+    {
+      "id": "TD-REV01-076",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 4 Transformer'?",
+      "question_tr": "'SUBSTATION 4 Transformer' değeri nedir?",
+      "expected_keywords": [
+        "8960",
+        "V",
+        "A"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 4 Transformer",
+      "value": "8960 KVA"
+    },
+    {
+      "id": "TD-REV01-077",
+      "mode": "general",
+      "question_en": "What is the value of 'SUBSTATION 6 Transformer'?",
+      "question_tr": "'SUBSTATION 6 Transformer' değeri nedir?",
+      "expected_keywords": [
+        "8960",
+        "V",
+        "A"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "SUBSTATION 6 Transformer",
+      "value": "8960 KVA"
+    },
+    {
+      "id": "TD-REV01-078",
+      "mode": "general",
+      "question_en": "What is the value of 'Project 227-007-F-E-00015'?",
+      "question_tr": "'Project 227-007-F-E-00015' değeri nedir?",
+      "expected_keywords": [
+        "227",
+        "227-007-F-E-00015"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Project 227-007-F-E-00015",
+      "value": "227-007-F-E-00015"
+    },
+    {
+      "id": "TD-REV01-079",
+      "mode": "general",
+      "question_en": "What is the value of 'Total Number of Structures'?",
+      "question_tr": "'Total Number of Structures' değeri nedir?",
+      "expected_keywords": [
+        "2"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Total Number of Structures",
+      "value": "2"
+    },
+    {
+      "id": "TD-REV01-080",
+      "mode": "general",
+      "question_en": "What is the value of 'Total Number of Structures'?",
+      "question_tr": "'Total Number of Structures' değeri nedir?",
+      "expected_keywords": [
+        "216"
+      ],
+      "doc_name": "Technical Description_Rev01.docx",
+      "location_hint": "",
+      "key": "Total Number of Structures",
+      "value": "216"
+    }
+  ]
+}

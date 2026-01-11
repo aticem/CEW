@@ -6,14 +6,15 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env file
-load_dotenv()
-
 # Base paths
 BASE_DIR = Path(__file__).parent.parent
 DOCUMENTS_DIR = BASE_DIR / "documents"
 CHROMA_DIR = BASE_DIR / "chroma_db"
 PROMPTS_DIR = BASE_DIR / "app" / "prompts"
+
+# Load .env file (stable path; not dependent on current working directory)
+ENV_PATH = BASE_DIR / ".env"
+load_dotenv(dotenv_path=ENV_PATH, override=True)
 
 # Ensure directories exist
 DOCUMENTS_DIR.mkdir(exist_ok=True)
