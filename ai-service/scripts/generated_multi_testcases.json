@@ -1,0 +1,1493 @@
+{
+  "total_chunks": 363,
+  "documents": [
+    "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+    "Technical Description_Rev01.docx"
+  ],
+  "tests": [
+    {
+      "id": "MULTI-00001",
+      "mode": "general",
+      "question": "kg/acre değeri nedir?",
+      "expected_keywords": [
+        "16"
+      ],
+      "expected_doc_name": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "doc_type": "pdf",
+      "pdf_kind": null,
+      "key": "kg/acre",
+      "value": "16"
+    },
+    {
+      "id": "MULTI-00002",
+      "mode": "general",
+      "question": "Tilt değeri nedir?",
+      "expected_keywords": [
+        "20"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Tilt",
+      "value": "±20°"
+    },
+    {
+      "id": "MULTI-00003",
+      "mode": "general",
+      "question": "VISITS/YEAR değeri nedir?",
+      "expected_keywords": [
+        "1"
+      ],
+      "expected_doc_name": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "doc_type": "pdf",
+      "pdf_kind": null,
+      "key": "VISITS/YEAR",
+      "value": "1"
+    },
+    {
+      "id": "MULTI-00004",
+      "mode": "general",
+      "question": "Layout değeri nedir?",
+      "expected_keywords": [
+        "2"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Layout",
+      "value": "2 Portrait 2Vx14 (1 String x 27 modules)"
+    },
+    {
+      "id": "MULTI-00005",
+      "mode": "general",
+      "question": "pruning unsightly hanging branches and, VISITS/YEAR değeri nedir?",
+      "expected_keywords": [
+        "2"
+      ],
+      "expected_doc_name": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "doc_type": "pdf",
+      "pdf_kind": null,
+      "key": "pruning unsightly hanging branches and, VISITS/YEAR",
+      "value": "2"
+    },
+    {
+      "id": "MULTI-00006",
+      "mode": "general",
+      "question": "Layout (Portrait Strings) değeri nedir?",
+      "expected_keywords": [
+        "2"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Layout",
+      "value": "2 Portrait 2Vx27 (2 Strings x 54 modules)"
+    },
+    {
+      "id": "MULTI-00007",
+      "mode": "general",
+      "question": "litter and leaf fall clearance, topping up, raking and sweeping of mu… değeri nedir?",
+      "expected_keywords": [
+        "6"
+      ],
+      "expected_doc_name": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "doc_type": "pdf",
+      "pdf_kind": null,
+      "key": "litter and leaf fall clearance, topping up, raking and sweeping of mulch to provide a tidy appearance etc., VISITS/YEAR",
+      "value": "6"
+    },
+    {
+      "id": "MULTI-00008",
+      "mode": "general",
+      "question": "Project değeri nedir?",
+      "expected_keywords": [
+        "1"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Project",
+      "value": "1"
+    },
+    {
+      "id": "MULTI-00009",
+      "mode": "general",
+      "question": "in the longer term and in these areas to allow a mosaic habitat of sc… değeri nedir?",
+      "expected_keywords": [
+        "5",
+        "5-10"
+      ],
+      "expected_doc_name": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "doc_type": "pdf",
+      "pdf_kind": null,
+      "key": "in the longer term and in these areas to allow a mosaic habitat of scattered scrub and long grass to become established",
+      "value": "The floristic diversity of the sward to be monitored on an annual basis in early June each year. If there is a decline in species diversity and/or ingress of dock, nettle, thistle or other undesirable ruderal species, a programme of remedial action to be taken. Spot treatment of undesirable ruderal species to be carried out between May and September, as necessary, using glyphosate, to ensure that the growth of these species is restricted to less than approximately 5-10% of the sward coverage. There should be no use of selective herbicides"
+    },
+    {
+      "id": "MULTI-00010",
+      "mode": "general",
+      "question": "Project (tarih) değeri nedir?",
+      "expected_keywords": [
+        "12",
+        "12-07-2023"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Project",
+      "value": "12-07-2023"
+    },
+    {
+      "id": "MULTI-00011",
+      "mode": "general",
+      "question": "t to remove straggling stems, over-vigorous shoots, suckers and dead,… değeri nedir?",
+      "expected_keywords": [
+        "50",
+        "mm"
+      ],
+      "expected_doc_name": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "doc_type": "pdf",
+      "pdf_kind": null,
+      "key": "t to remove straggling stems, over-vigorous shoots, suckers and dead, misshapen, broken or otherwise unhealthy branches.",
+      "value": "Once the last wildflowers to flower have faded and set seed (likely to be late July/August), 50% of the grass should be cut to 50mm. Arisings to be collected and removed from site. The remaining 50% of the grassland are to be left uncut to provide over-wintering habitat for invertebrates"
+    },
+    {
+      "id": "MULTI-00012",
+      "mode": "general",
+      "question": "Dimensions değeri nedir?",
+      "expected_keywords": [
+        "31.242",
+        "m"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Dimensions",
+      "value": "31.242x4.576 m"
+    },
+    {
+      "id": "MULTI-00013",
+      "mode": "general",
+      "question": "Following initial clearance için t to remove straggling stems, over-vigorous shoots, suckers and dead,… değeri nedir?",
+      "expected_keywords": [
+        "2"
+      ],
+      "expected_doc_name": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "doc_type": "pdf",
+      "pdf_kind": null,
+      "key": "t to remove straggling stems, over-vigorous shoots, suckers and dead, misshapen, broken or otherwise unhealthy branches.",
+      "value": "Following initial clearance, the site can be maintained by strimming/mowing operations which will need to be carried out 2-3 times/year to prevent the spread of invasive woody species. Good management practice should continue to involve the careful timing of these operations to ensure that habitats are not"
+    },
+    {
+      "id": "MULTI-00014",
+      "mode": "general",
+      "question": "SUBSTATION 5 değeri nedir?",
+      "expected_keywords": [
+        "796"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 5",
+      "value": "796"
+    },
+    {
+      "id": "MULTI-00015",
+      "mode": "general",
+      "question": "landscape architect and/or ecologist before any work is carried out i… değeri nedir?",
+      "expected_keywords": [
+        "AREAS",
+        "LONGER"
+      ],
+      "expected_doc_name": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "doc_type": "pdf",
+      "pdf_kind": null,
+      "key": "landscape architect and/or ecologist before any work is carried out in this area.",
+      "value": "AREAS OF LONGER GRASS/OPEN HERB LAYER"
+    },
+    {
+      "id": "MULTI-00016",
+      "mode": "general",
+      "question": "SUBSTATION 4 değeri nedir?",
+      "expected_keywords": [
+        "796"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 4",
+      "value": "796"
+    },
+    {
+      "id": "MULTI-00017",
+      "mode": "general",
+      "question": "over-vigorous shoots, suckers and dead, misshapen, broken or otherwis… değeri nedir?",
+      "expected_keywords": [
+        "MANAGEMENT",
+        "AREAS"
+      ],
+      "expected_doc_name": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "doc_type": "pdf",
+      "pdf_kind": null,
+      "key": "over-vigorous shoots, suckers and dead, misshapen, broken or otherwise unhealthy branches.",
+      "value": "MANAGEMENT OF AREAS OF LONGER GRASS/OPEN HERB LAYER"
+    },
+    {
+      "id": "MULTI-00018",
+      "mode": "general",
+      "question": "SUBSTATION 6 değeri nedir?",
+      "expected_keywords": [
+        "770"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 6",
+      "value": "770"
+    },
+    {
+      "id": "MULTI-00019",
+      "mode": "general",
+      "question": "SUBSTATION 3 değeri nedir?",
+      "expected_keywords": [
+        "702"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 3",
+      "value": "702"
+    },
+    {
+      "id": "MULTI-00020",
+      "mode": "general",
+      "question": "SUBSTATION 2 değeri nedir?",
+      "expected_keywords": [
+        "736"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 2",
+      "value": "736"
+    },
+    {
+      "id": "MULTI-00021",
+      "mode": "general",
+      "question": "SUBSTATION 1 değeri nedir?",
+      "expected_keywords": [
+        "1,413"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 1",
+      "value": "1,413"
+    },
+    {
+      "id": "MULTI-00022",
+      "mode": "general",
+      "question": "SUBSTATION 4 (Modules) değeri nedir?",
+      "expected_keywords": [
+        "27"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 4",
+      "value": "27 Modules"
+    },
+    {
+      "id": "MULTI-00023",
+      "mode": "general",
+      "question": "SUBSTATION 6 (Modules) değeri nedir?",
+      "expected_keywords": [
+        "27"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 6",
+      "value": "27 Modules"
+    },
+    {
+      "id": "MULTI-00024",
+      "mode": "general",
+      "question": "SUBSTATION 5 (Modules) değeri nedir?",
+      "expected_keywords": [
+        "27"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 5",
+      "value": "27 Modules"
+    },
+    {
+      "id": "MULTI-00025",
+      "mode": "general",
+      "question": "SUBSTATION 1 (Modules) değeri nedir?",
+      "expected_keywords": [
+        "27"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 1",
+      "value": "27 Modules"
+    },
+    {
+      "id": "MULTI-00026",
+      "mode": "general",
+      "question": "SUBSTATION 2 (Modules) değeri nedir?",
+      "expected_keywords": [
+        "27"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 2",
+      "value": "27 Modules"
+    },
+    {
+      "id": "MULTI-00027",
+      "mode": "general",
+      "question": "SUBSTATION 3 (Modules) değeri nedir?",
+      "expected_keywords": [
+        "27"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 3",
+      "value": "27 Modules"
+    },
+    {
+      "id": "MULTI-00028",
+      "mode": "general",
+      "question": "SUBSTATION 1 (Strings) değeri nedir?",
+      "expected_keywords": [
+        "728"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 1",
+      "value": "728 Strings"
+    },
+    {
+      "id": "MULTI-00029",
+      "mode": "general",
+      "question": "SUBSTATION 4 (Strings) değeri nedir?",
+      "expected_keywords": [
+        "575",
+        "Wp"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 4",
+      "value": "Nº Strings (575Wp)"
+    },
+    {
+      "id": "MULTI-00030",
+      "mode": "general",
+      "question": "SUBSTATION 3 (Ratio) değeri nedir?",
+      "expected_keywords": [
+        "40",
+        "DC/AC"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 3",
+      "value": "DC/AC Ratio (@40ºC)"
+    },
+    {
+      "id": "MULTI-00031",
+      "mode": "general",
+      "question": "SUBSTATION 5 (Ratio) değeri nedir?",
+      "expected_keywords": [
+        "40",
+        "DC/AC"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 5",
+      "value": "DC/AC Ratio (@40ºC)"
+    },
+    {
+      "id": "MULTI-00032",
+      "mode": "general",
+      "question": "SUBSTATION 1 (Ratio) değeri nedir?",
+      "expected_keywords": [
+        "40",
+        "DC/AC"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 1",
+      "value": "DC/AC Ratio (@40ºC)"
+    },
+    {
+      "id": "MULTI-00033",
+      "mode": "general",
+      "question": "SUBSTATION 4 (Ratio) değeri nedir?",
+      "expected_keywords": [
+        "40",
+        "DC/AC"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 4",
+      "value": "DC/AC Ratio (@40ºC)"
+    },
+    {
+      "id": "MULTI-00034",
+      "mode": "general",
+      "question": "SUBSTATION 6 (Ratio) değeri nedir?",
+      "expected_keywords": [
+        "40",
+        "DC/AC"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 6",
+      "value": "DC/AC Ratio (@40ºC)"
+    },
+    {
+      "id": "MULTI-00035",
+      "mode": "general",
+      "question": "SUBSTATION 2 (Ratio) değeri nedir?",
+      "expected_keywords": [
+        "40",
+        "DC/AC"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 2",
+      "value": "DC/AC Ratio (@40ºC)"
+    },
+    {
+      "id": "MULTI-00036",
+      "mode": "general",
+      "question": "SUBSTATION 1 (inverters string) değeri nedir?",
+      "expected_keywords": [
+        "3"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 1",
+      "value": "3 inverters x 30 string"
+    },
+    {
+      "id": "MULTI-00037",
+      "mode": "general",
+      "question": "SUBSTATION 3 (inverters string) değeri nedir?",
+      "expected_keywords": [
+        "6"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 3",
+      "value": "6 inverters x 30 string"
+    },
+    {
+      "id": "MULTI-00038",
+      "mode": "general",
+      "question": "SUBSTATION 2 (inverters string) değeri nedir?",
+      "expected_keywords": [
+        "11"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 2",
+      "value": "11 inverters x 30 string"
+    },
+    {
+      "id": "MULTI-00039",
+      "mode": "general",
+      "question": "SUBSTATION 5 (inverters string) değeri nedir?",
+      "expected_keywords": [
+        "14"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 5",
+      "value": "14 inverters x 29 string"
+    },
+    {
+      "id": "MULTI-00040",
+      "mode": "general",
+      "question": "SUBSTATION 6 (inverters string) değeri nedir?",
+      "expected_keywords": [
+        "16"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 6",
+      "value": "16 inverters x 30 string"
+    },
+    {
+      "id": "MULTI-00041",
+      "mode": "general",
+      "question": "SUBSTATION 4 (Inverters) değeri nedir?",
+      "expected_keywords": [
+        "27",
+        "kVA"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 4",
+      "value": "27 Inverters x 320 kVA -> 8.640 kVA"
+    },
+    {
+      "id": "MULTI-00042",
+      "mode": "general",
+      "question": "SUBSTATION 3 (Inverters) değeri nedir?",
+      "expected_keywords": [
+        "24",
+        "kVA"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 3",
+      "value": "24 Inverters x 320 kVA -> 7.680 kVA"
+    },
+    {
+      "id": "MULTI-00043",
+      "mode": "general",
+      "question": "SUBSTATION 6 (Inverters) değeri nedir?",
+      "expected_keywords": [
+        "26",
+        "kVA"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 6",
+      "value": "26 Inverters x 320 kVA -> 8.320 kVA"
+    },
+    {
+      "id": "MULTI-00044",
+      "mode": "general",
+      "question": "SUBSTATION 5 (Inverters) değeri nedir?",
+      "expected_keywords": [
+        "27",
+        "kVA"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 5",
+      "value": "27 Inverters x 320 kVA -> 8.640 kVA"
+    },
+    {
+      "id": "MULTI-00045",
+      "mode": "general",
+      "question": "SUBSTATION 2 (Inverters) değeri nedir?",
+      "expected_keywords": [
+        "25",
+        "kVA"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 2",
+      "value": "25 Inverters x 320 kVA -> 8.000 kVA"
+    },
+    {
+      "id": "MULTI-00046",
+      "mode": "general",
+      "question": "SUBSTATION 1 (Inverters) değeri nedir?",
+      "expected_keywords": [
+        "25",
+        "kVA"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 1",
+      "value": "25 Inverters x 320 kVA -> 8.000 kVA"
+    },
+    {
+      "id": "MULTI-00047",
+      "mode": "general",
+      "question": "SUBSTATION 4 (Sungrow) değeri nedir?",
+      "expected_keywords": [
+        "27",
+        "kVA",
+        "SG350HX"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 4",
+      "value": "27 x Sungrow SG350HX (320 kVA @40ºC)"
+    },
+    {
+      "id": "MULTI-00048",
+      "mode": "general",
+      "question": "SUBSTATION 5 (Sungrow) değeri nedir?",
+      "expected_keywords": [
+        "27",
+        "kVA",
+        "SG350HX"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 5",
+      "value": "27 x Sungrow SG350HX (320 kVA @40ºC)"
+    },
+    {
+      "id": "MULTI-00049",
+      "mode": "general",
+      "question": "SUBSTATION 2 (Sungrow) değeri nedir?",
+      "expected_keywords": [
+        "25",
+        "kVA",
+        "SG350HX"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 2",
+      "value": "25 x Sungrow SG350HX (320 kVA @40ºC)"
+    },
+    {
+      "id": "MULTI-00050",
+      "mode": "general",
+      "question": "SUBSTATION 1 (Sungrow) değeri nedir?",
+      "expected_keywords": [
+        "25",
+        "kVA",
+        "SG350HX"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 1",
+      "value": "25 x Sungrow SG350HX (320 kVA @40ºC)"
+    },
+    {
+      "id": "MULTI-00051",
+      "mode": "general",
+      "question": "SUBSTATION 6 (Sungrow) değeri nedir?",
+      "expected_keywords": [
+        "26",
+        "kVA",
+        "SG350HX"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 6",
+      "value": "26 x Sungrow SG350HX (320 kVA @40ºC)"
+    },
+    {
+      "id": "MULTI-00052",
+      "mode": "general",
+      "question": "SUBSTATION 3 (Sungrow) değeri nedir?",
+      "expected_keywords": [
+        "24",
+        "kVA",
+        "SG350HX"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 3",
+      "value": "24 x Sungrow SG350HX (320 kVA @40ºC)"
+    },
+    {
+      "id": "MULTI-00053",
+      "mode": "general",
+      "question": "SUBSTATION 2 (Jinko Tiger) değeri nedir?",
+      "expected_keywords": [
+        "72",
+        "WP",
+        "72HL4-BDV"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 2",
+      "value": "Jinko Tiger Neo N-type 72HL4-BDV 575 WP"
+    },
+    {
+      "id": "MULTI-00054",
+      "mode": "general",
+      "question": "SUBSTATION 4 (Jinko Tiger) değeri nedir?",
+      "expected_keywords": [
+        "72",
+        "WP",
+        "72HL4-BDV"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 4",
+      "value": "Jinko Tiger Neo N-type 72HL4-BDV 570 WP"
+    },
+    {
+      "id": "MULTI-00055",
+      "mode": "general",
+      "question": "SUBSTATION 5 (Jinko Tiger) değeri nedir?",
+      "expected_keywords": [
+        "72",
+        "WP",
+        "72HL4-BDV"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 5",
+      "value": "Jinko Tiger Neo N-type 72HL4-BDV 570 WP"
+    },
+    {
+      "id": "MULTI-00056",
+      "mode": "general",
+      "question": "SUBSTATION 1 (Jinko Tiger) değeri nedir?",
+      "expected_keywords": [
+        "72",
+        "WP",
+        "72HL4-BDV"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 1",
+      "value": "Jinko Tiger Neo N-type 72HL4-BDV 575 WP"
+    },
+    {
+      "id": "MULTI-00057",
+      "mode": "general",
+      "question": "SUBSTATION 3 (Jinko Tiger) değeri nedir?",
+      "expected_keywords": [
+        "72",
+        "WP",
+        "72HL4-BDV"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 3",
+      "value": "Jinko Tiger Neo N-type 72HL4-BDV 575 WP"
+    },
+    {
+      "id": "MULTI-00058",
+      "mode": "general",
+      "question": "SUBSTATION 6 (Jinko Tiger) değeri nedir?",
+      "expected_keywords": [
+        "72",
+        "WP",
+        "72HL4-BDV"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 6",
+      "value": "Jinko Tiger Neo N-type 72HL4-BDV 570 WP"
+    },
+    {
+      "id": "MULTI-00059",
+      "mode": "general",
+      "question": "770 x 27 Modules x 570 W -> 11.850 için SUBSTATION 6 değeri nedir?",
+      "expected_keywords": [
+        "770",
+        "W",
+        "kW"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 6",
+      "value": "770 x 27 Modules x 570 W -> 11.850,30 kW"
+    },
+    {
+      "id": "MULTI-00060",
+      "mode": "general",
+      "question": "796 x 27 Modules x 570 W -> 12.250 için SUBSTATION 5 değeri nedir?",
+      "expected_keywords": [
+        "796",
+        "W",
+        "kW"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 5",
+      "value": "796 x 27 Modules x 570 W -> 12.250,44 kW"
+    },
+    {
+      "id": "MULTI-00061",
+      "mode": "general",
+      "question": "702 x 27 Modules x 575 W -> 10.898 için SUBSTATION 3 değeri nedir?",
+      "expected_keywords": [
+        "702",
+        "W",
+        "kW"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 3",
+      "value": "702 x 27 Modules x 575 W -> 10.898,50 kW"
+    },
+    {
+      "id": "MULTI-00062",
+      "mode": "general",
+      "question": "728 x 27 Modules x 575 W -> 11.302 için SUBSTATION 1 değeri nedir?",
+      "expected_keywords": [
+        "728",
+        "W",
+        "kW"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 1",
+      "value": "728 x 27 Modules x 575 W -> 11.302,20 kW"
+    },
+    {
+      "id": "MULTI-00063",
+      "mode": "general",
+      "question": "736 x 27 Modules x 575 W -> 11.426 için SUBSTATION 2 değeri nedir?",
+      "expected_keywords": [
+        "736",
+        "W",
+        "kW"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 2",
+      "value": "736 x 27 Modules x 575 W -> 11.426,40 kW"
+    },
+    {
+      "id": "MULTI-00064",
+      "mode": "general",
+      "question": "698 x 27 Modules x 570 W + 98 x 27 Modules x 575 W -> 12.263 için SUBSTATION 4 değeri nedir?",
+      "expected_keywords": [
+        "698",
+        "W"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 4",
+      "value": "698 x 27 Modules x 570 W + 98 x 27 Modules x 575 W -> 12.263,67 kW"
+    },
+    {
+      "id": "MULTI-00065",
+      "mode": "general",
+      "question": "SUBSTATION 4 (inverters strings) değeri nedir?",
+      "expected_keywords": [
+        "2"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 4",
+      "value": "2 inverters x 29 strings + 1 inverter x 28 strings + 1 inverter* x 12 strings -> 98"
+    },
+    {
+      "id": "MULTI-00066",
+      "mode": "general",
+      "question": "CLASIFICATION değeri nedir?",
+      "expected_keywords": [
+        "1"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "CLASIFICATION",
+      "value": "1"
+    },
+    {
+      "id": "MULTI-00067",
+      "mode": "general",
+      "question": "CLASIFICATION (Design verification) değeri nedir?",
+      "expected_keywords": [
+        "1"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "CLASIFICATION",
+      "value": "Design verification: Not applicable Head of O.U./Supervisor Verifier Level 1 Level 2"
+    },
+    {
+      "id": "MULTI-00068",
+      "mode": "general",
+      "question": "Structure Type değeri nedir?",
+      "expected_keywords": [
+        "2"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Structure Type",
+      "value": "2"
+    },
+    {
+      "id": "MULTI-00069",
+      "mode": "general",
+      "question": "SUNGROW SG350HX değeri nedir?",
+      "expected_keywords": [
+        "2"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUNGROW SG350HX",
+      "value": "2"
+    },
+    {
+      "id": "MULTI-00070",
+      "mode": "general",
+      "question": "Nominal Voltage değeri nedir?",
+      "expected_keywords": [
+        "1.5",
+        "kV"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Nominal Voltage",
+      "value": "1.5 kV"
+    },
+    {
+      "id": "MULTI-00071",
+      "mode": "general",
+      "question": "SUNGROW SG350HX (Optional) değeri nedir?",
+      "expected_keywords": [
+        "12",
+        "14/16"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUNGROW SG350HX",
+      "value": "12 (Optional 14/16)"
+    },
+    {
+      "id": "MULTI-00072",
+      "mode": "general",
+      "question": "JKM570-N72HL4-BDV değeri nedir?",
+      "expected_keywords": [
+        "0"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "JKM570-N72HL4-BDV",
+      "value": "0"
+    },
+    {
+      "id": "MULTI-00073",
+      "mode": "general",
+      "question": "JKM575-N72HL4-BDV değeri nedir?",
+      "expected_keywords": [
+        "30",
+        "A"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "JKM575-N72HL4-BDV",
+      "value": "30A"
+    },
+    {
+      "id": "MULTI-00074",
+      "mode": "general",
+      "question": "Cross Section (mm2) değeri nedir?",
+      "expected_keywords": [
+        "6",
+        "mm2"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Cross Section (mm2)",
+      "value": "6 mm2"
+    },
+    {
+      "id": "MULTI-00075",
+      "mode": "general",
+      "question": "25 A, JKM575-N72HL4-BDV değeri nedir?",
+      "expected_keywords": [
+        "14,31",
+        "A"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "25 A, JKM575-N72HL4-BDV",
+      "value": "14,31 A"
+    },
+    {
+      "id": "MULTI-00076",
+      "mode": "general",
+      "question": "48 A, JKM575-N72HL4-BDV değeri nedir?",
+      "expected_keywords": [
+        "13,55",
+        "A"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "48 A, JKM575-N72HL4-BDV",
+      "value": "13,55 A"
+    },
+    {
+      "id": "MULTI-00077",
+      "mode": "general",
+      "question": "07 %, JKM575-N72HL4-BDV değeri nedir?",
+      "expected_keywords": [
+        "22,26"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "07 %, JKM575-N72HL4-BDV",
+      "value": "22,26 %"
+    },
+    {
+      "id": "MULTI-00078",
+      "mode": "general",
+      "question": "07 V, JKM575-N72HL4-BDV değeri nedir?",
+      "expected_keywords": [
+        "51,27",
+        "V"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "07 V, JKM575-N72HL4-BDV",
+      "value": "51,27 V"
+    },
+    {
+      "id": "MULTI-00079",
+      "mode": "general",
+      "question": "29 V, JKM575-N72HL4-BDV değeri nedir?",
+      "expected_keywords": [
+        "48,44",
+        "V"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "29 V, JKM575-N72HL4-BDV",
+      "value": "48,44 V"
+    },
+    {
+      "id": "MULTI-00080",
+      "mode": "general",
+      "question": "Solar Cable, Cable Type değeri nedir?",
+      "expected_keywords": [
+        "1",
+        "H1Z2Z2-K"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Solar Cable, Cable Type",
+      "value": "CU H1Z2Z2-K"
+    },
+    {
+      "id": "MULTI-00081",
+      "mode": "general",
+      "question": "JKM575N-72HL4-BDV 575 Wp değeri nedir?",
+      "expected_keywords": [
+        "575",
+        "Wp"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "JKM575N-72HL4-BDV 575 Wp",
+      "value": "575 Wp"
+    },
+    {
+      "id": "MULTI-00082",
+      "mode": "general",
+      "question": "JKM570N-72HL4-BDV 570 Wp değeri nedir?",
+      "expected_keywords": [
+        "570",
+        "Wp"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "JKM570N-72HL4-BDV 570 Wp",
+      "value": "570 Wp"
+    },
+    {
+      "id": "MULTI-00083",
+      "mode": "general",
+      "question": "30%/ºC, JKM575-N72HL4-BDV değeri nedir?",
+      "expected_keywords": [
+        "0,30"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "30%/ºC, JKM575-N72HL4-BDV",
+      "value": "-0,30%/ºC"
+    },
+    {
+      "id": "MULTI-00084",
+      "mode": "general",
+      "question": "35%/ºC, JKM575-N72HL4-BDV değeri nedir?",
+      "expected_keywords": [
+        "0,35"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "35%/ºC, JKM575-N72HL4-BDV",
+      "value": "-0,35%/ºC"
+    },
+    {
+      "id": "MULTI-00085",
+      "mode": "general",
+      "question": "Electrical Characteristics değeri nedir?",
+      "expected_keywords": [
+        "2"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Electrical Characteristics",
+      "value": "2"
+    },
+    {
+      "id": "MULTI-00086",
+      "mode": "general",
+      "question": "Total Number of Structures değeri nedir?",
+      "expected_keywords": [
+        "216"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Total Number of Structures",
+      "value": "216"
+    },
+    {
+      "id": "MULTI-00087",
+      "mode": "general",
+      "question": "046%/ºC, JKM575-N72HL4-BDV değeri nedir?",
+      "expected_keywords": [
+        "0,046"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "046%/ºC, JKM575-N72HL4-BDV",
+      "value": "0,046%/ºC"
+    },
+    {
+      "id": "MULTI-00088",
+      "mode": "general",
+      "question": "Mechanical Characteristics değeri nedir?",
+      "expected_keywords": [
+        "68",
+        "IP68"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Mechanical Characteristics",
+      "value": "IP68 Rated"
+    },
+    {
+      "id": "MULTI-00089",
+      "mode": "general",
+      "question": "Dimensions (Width x Depth) değeri nedir?",
+      "expected_keywords": [
+        "67"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Dimensions (Width x Depth)",
+      "value": "67 x 73 to 83 cm"
+    },
+    {
+      "id": "MULTI-00090",
+      "mode": "general",
+      "question": "Electrical Characteristics (optional) değeri nedir?",
+      "expected_keywords": [
+        "12",
+        "14/16"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Electrical Characteristics",
+      "value": "12 (optional 14/16)"
+    },
+    {
+      "id": "MULTI-00091",
+      "mode": "general",
+      "question": "Electrical Characteristics (nominal power) değeri nedir?",
+      "expected_keywords": [
+        "3"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Electrical Characteristics",
+      "value": "< 3% (at nominal power)"
+    },
+    {
+      "id": "MULTI-00092",
+      "mode": "general",
+      "question": "Mechanical Characteristics (Anti Reflection) değeri nedir?",
+      "expected_keywords": [
+        "2,00",
+        "mm"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Mechanical Characteristics",
+      "value": "2,00mm Anti Reflection Coating"
+    },
+    {
+      "id": "MULTI-00093",
+      "mode": "general",
+      "question": "Mechanical Characteristics (Heat Strengthened) değeri nedir?",
+      "expected_keywords": [
+        "2,00",
+        "mm"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Mechanical Characteristics",
+      "value": "2,00mm Heat Strengthened Glass"
+    },
+    {
+      "id": "MULTI-00094",
+      "mode": "general",
+      "question": "Electrical Characteristics (leading lagging) değeri nedir?",
+      "expected_keywords": [
+        "0,99"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Electrical Characteristics",
+      "value": ">0,99 / 0,8 leading-0,8 lagging"
+    },
+    {
+      "id": "MULTI-00095",
+      "mode": "general",
+      "question": "Mechanical Characteristics (inch) değeri nedir?",
+      "expected_keywords": [
+        "2278",
+        "mm",
+        "1134"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Mechanical Characteristics",
+      "value": "2278 x 1134 x 30mm (89 x 44.65 x 1.18 inch)"
+    },
+    {
+      "id": "MULTI-00096",
+      "mode": "general",
+      "question": "Dimensions (Width x Depth) (layers ducts) değeri nedir?",
+      "expected_keywords": [
+        "50"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Dimensions (Width x Depth)",
+      "value": "50 x 70 to 90 cm (one or two layers of ducts)"
+    },
+    {
+      "id": "MULTI-00097",
+      "mode": "general",
+      "question": "Dimensions (Width x Depth) (layers cables) değeri nedir?",
+      "expected_keywords": [
+        "40"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Dimensions (Width x Depth)",
+      "value": "40 to 100 x 140 to 150 cm (one layers of MV cables directly buried)"
+    },
+    {
+      "id": "MULTI-00098",
+      "mode": "general",
+      "question": "OVERVIEW PV PLANT CONFIGURATION değeri nedir?",
+      "expected_keywords": [
+        "27"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "OVERVIEW PV PLANT CONFIGURATION",
+      "value": "27"
+    },
+    {
+      "id": "MULTI-00099",
+      "mode": "general",
+      "question": "OVERVIEW PV PLANT CONFIGURATION (POWER) değeri nedir?",
+      "expected_keywords": [
+        "30",
+        "POWER"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "OVERVIEW PV PLANT CONFIGURATION",
+      "value": "AC POWER (MAX) AT 30ºC"
+    },
+    {
+      "id": "MULTI-00100",
+      "mode": "general",
+      "question": "OVERVIEW PV PLANT CONFIGURATION (TOTAL MODULES) değeri nedir?",
+      "expected_keywords": [
+        "575",
+        "WP",
+        "TOTAL",
+        "MODULES"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "OVERVIEW PV PLANT CONFIGURATION",
+      "value": "TOTAL Nº 575 WP MODULES"
+    },
+    {
+      "id": "MULTI-00101",
+      "mode": "general",
+      "question": "OVERVIEW PV PLANT CONFIGURATION (TOTAL STRUCTURES) değeri nedir?",
+      "expected_keywords": [
+        "2",
+        "TOTAL",
+        "2V14"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "OVERVIEW PV PLANT CONFIGURATION",
+      "value": "TOTAL Nº 2V14 STRUCTURES"
+    },
+    {
+      "id": "MULTI-00102",
+      "mode": "general",
+      "question": "OVERVIEW PV PLANT CONFIGURATION (JINKO TIGER) değeri nedir?",
+      "expected_keywords": [
+        "72",
+        "WP",
+        "JINKO",
+        "TIGER"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "OVERVIEW PV PLANT CONFIGURATION",
+      "value": "JINKO TIGER PRO 72HL4-BDV 575 WP"
+    },
+    {
+      "id": "MULTI-00103",
+      "mode": "general",
+      "question": "Minimum Ambient Temperature (ºC) değeri nedir?",
+      "expected_keywords": [
+        "2"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Minimum Ambient Temperature (ºC)",
+      "value": "Seismic Loads (m/s2)"
+    },
+    {
+      "id": "MULTI-00104",
+      "mode": "general",
+      "question": "GGG, RDL, MZZ, ECU, MDT, CLASIFICATION değeri nedir?",
+      "expected_keywords": [
+        "1"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "GGG, RDL, MZZ, ECU, MDT, CLASIFICATION",
+      "value": "1 /.pdf"
+    },
+    {
+      "id": "MULTI-00105",
+      "mode": "general",
+      "question": "SUBSTATION 1 (MODULES STRING) değeri nedir?",
+      "expected_keywords": [
+        "MODULES/STRING"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "SUBSTATION 1",
+      "value": "MODULES/STRING"
+    },
+    {
+      "id": "MULTI-00106",
+      "mode": "general",
+      "question": "Electrical Characteristics (short circuit) değeri nedir?",
+      "expected_keywords": [
+        "MPPT"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Electrical Characteristics",
+      "value": "Max DC short-circuit current per MPPT"
+    },
+    {
+      "id": "MULTI-00107",
+      "mode": "general",
+      "question": "Medium Voltage Cables, Cable Type değeri nedir?",
+      "expected_keywords": [
+        "AL/XLPE/CWS/PVC"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "Medium Voltage Cables, Cable Type",
+      "value": "AL/XLPE/CWS/PVC"
+    },
+    {
+      "id": "MULTI-00108",
+      "mode": "general",
+      "question": "String Inverter to Transformer, Cable Type değeri nedir?",
+      "expected_keywords": [
+        "AL/XLPE/PVC"
+      ],
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "doc_type": "word",
+      "pdf_kind": null,
+      "key": "String Inverter to Transformer, Cable Type",
+      "value": "AL/XLPE/PVC"
+    }
+  ]
+}

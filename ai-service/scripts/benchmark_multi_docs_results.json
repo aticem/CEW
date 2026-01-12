@@ -1,0 +1,1399 @@
+{
+  "generated_at": "2026-01-12T01:10:18",
+  "base_url": "http://localhost:8000",
+  "input": "C:\\Users\\atila\\CEW\\ai-service\\scripts\\generated_multi_testcases.json",
+  "total": 108,
+  "passed": 99,
+  "pass_rate": 91.66666666666666,
+  "fail_reasons": {
+    "NO_EXPECTED_KEYWORD": 9
+  },
+  "per_doc": {
+    "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf": {
+      "pass": 6,
+      "fail": 3
+    },
+    "Technical Description_Rev01.docx": {
+      "pass": 93,
+      "fail": 6
+    }
+  },
+  "results": [
+    {
+      "id": "MULTI-00001",
+      "question": "kg/acre değeri nedir?",
+      "expected_doc_name": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "expected_keywords": [
+        "16"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "kg/acre değeri 16'dır [Kaynak: Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf, Sayfa 24].",
+      "source": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf (Page 24)"
+    },
+    {
+      "id": "MULTI-00002",
+      "question": "Tilt değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "20"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 18 | ROW: 3 | DATA: Structure Type: 2, Layout: 2 Portrait 2Vx27 (2 Strings x 54 modules), Tilt: ±20°, Dimensions: 31.242x4.576 m, Total Number of Structures: 2,156\" [Source: Technical De…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00003",
+      "question": "VISITS/YEAR değeri nedir?",
+      "expected_doc_name": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "expected_keywords": [
+        "1"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "VISITS/YEAR değeri 6'dır [Kaynak: Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf, Sayfa 16].",
+      "source": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf (Page 16)"
+    },
+    {
+      "id": "MULTI-00004",
+      "question": "Layout değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "2"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 18 | ROW: 2 | DATA: Structure Type: 1, Layout: 2 Portrait 2Vx14 (1 String x 27 modules), Tilt: ±20°, Dimensions: 16.188x4.576 m, Total Number of Structures: 216\"\n\n2. \"SOURCE: Technical D…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00005",
+      "question": "pruning unsightly hanging branches and, VISITS/YEAR değeri nedir?",
+      "expected_doc_name": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "expected_keywords": [
+        "2"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"Manage the scrub and hedgerow edges should focus upon allowing these to grow naturally to provide further screening of the development from the surrounding area, Operations should also ensure healthy future growth. This could involve re…",
+      "source": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf (Page 15)"
+    },
+    {
+      "id": "MULTI-00006",
+      "question": "Layout (Portrait Strings) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "2"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 18 | ROW: 2 | DATA: Structure Type: 1, Layout: 2 Portrait 2Vx14 (1 String x 27 modules), Tilt: ±20°, Dimensions: 16.188x4.576 m, Total Number of Structures: 216\"\n- \"SOURCE: Technical Desc…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00007",
+      "question": "litter and leaf fall clearance, topping up, raking and sweeping of mu… değeri nedir?",
+      "expected_doc_name": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "expected_keywords": [
+        "6"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"Regular maintenance visits should be made at monthly intervals between April and September with at least two visits during the dormant season each year. It will be necessary to undertake general ‘tidying’ e.g. removal and replacement of…",
+      "source": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf (Page 16)"
+    },
+    {
+      "id": "MULTI-00008",
+      "question": "Project değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "1"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "Bu bilgiyi mevcut belgelerde/kayıtlarda bulamıyorum. [Kaynak: Technical Description_Rev01.docx]",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00009",
+      "question": "in the longer term and in these areas to allow a mosaic habitat of sc… değeri nedir?",
+      "expected_doc_name": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "expected_keywords": [
+        "5",
+        "5-10"
+      ],
+      "ok": false,
+      "fail_reason": "NO_EXPECTED_KEYWORD",
+      "answer_preview": "Bu bilgiyi mevcut belgelerde/kayıtlarda bulamıyorum. [Kaynak: Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf (Page 18)]",
+      "source": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf (Page 18)"
+    },
+    {
+      "id": "MULTI-00010",
+      "question": "Project (tarih) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "12",
+        "12-07-2023"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 1 | ROW: 9 | DATA: Project:: Date:, Project:: 12-07-2023, Project:: 12-07-2023\"\n\nSECTION B — FINAL ANSWER\n\nProject (tarih) değeri 12-07-2023'tür [Kaynak: Technical Description_Rev01.docx,…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00011",
+      "question": "t to remove straggling stems, over-vigorous shoots, suckers and dead,… değeri nedir?",
+      "expected_doc_name": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "expected_keywords": [
+        "50",
+        "mm"
+      ],
+      "ok": false,
+      "fail_reason": "NO_EXPECTED_KEYWORD",
+      "answer_preview": "Bu bilgiyi mevcut belgelerde/kayıtlarda bulamıyorum. [Kaynak: Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf (Page 17)]",
+      "source": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf (Page 17)"
+    },
+    {
+      "id": "MULTI-00012",
+      "question": "Dimensions değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "31.242",
+        "m"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"Mechanical Characteristics: Dimensions, Mechanical Characteristics: 2278 x 1134 x 30mm (89 x 44.65 x 1.18 inch)\" [Source: Technical Description_Rev01.docx | TABLE: 15 | ROW: 4]\n\n2. \"Trenches: Medium voltage cables, Dimensions (Width x D…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00013",
+      "question": "Following initial clearance için t to remove straggling stems, over-vigorous shoots, suckers and dead,… değeri nedir?",
+      "expected_doc_name": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "expected_keywords": [
+        "2"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "Bu bilgiyi mevcut belgelerde/kayıtlarda bulamıyorum. [Kaynak: Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf (Page 17)]",
+      "source": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf (Page 17)"
+    },
+    {
+      "id": "MULTI-00014",
+      "question": "SUBSTATION 5 değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "796"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 13 | ROW: 11 | DATA: SUBSTATION 5: DC/AC Ratio (@40ºC), SUBSTATION 5: 1,418\" [Source: Technical Description_Rev01.docx]\n2. \"SOURCE: Technical Description_Rev01.docx | TABLE: 13 | ROW: 2 …",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00015",
+      "question": "landscape architect and/or ecologist before any work is carried out i… değeri nedir?",
+      "expected_doc_name": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "expected_keywords": [
+        "AREAS",
+        "LONGER"
+      ],
+      "ok": false,
+      "fail_reason": "NO_EXPECTED_KEYWORD",
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"landscape architect and/or ecologist before any work is carried out in this area.: Prior to any work taking place, undertake ecological checks of any mature trees undergoing management.\" [Source: Haunton Farmers Solar Project  Landscape…",
+      "source": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf (Page 16)"
+    },
+    {
+      "id": "MULTI-00016",
+      "question": "SUBSTATION 4 değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "796"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 12 | ROW: 12 | DATA: SUBSTATION 4: DC/AC Ratio (@40ºC), SUBSTATION 4: 1,419\" [Source: Technical Description_Rev01.docx]\n2. \"SOURCE: Technical Description_Rev01.docx | TABLE: 12 | ROW: 2 …",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00017",
+      "question": "over-vigorous shoots, suckers and dead, misshapen, broken or otherwis… değeri nedir?",
+      "expected_doc_name": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "expected_keywords": [
+        "MANAGEMENT",
+        "AREAS"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"Pruning to be carried out to remove straggling stems, over-vigorous shoots, suckers and dead, misshapen, broken or otherwise unhealthy branches.\" [Source: Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th Octob…",
+      "source": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf (Page 12)"
+    },
+    {
+      "id": "MULTI-00018",
+      "question": "SUBSTATION 6 değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "770"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 14 | ROW: 2 | DATA: SUBSTATION 6: Transformer, SUBSTATION 6: 8960 KVA\" [Source: Technical Description_Rev01.docx]\n2. \"SOURCE: Technical Description_Rev01.docx | TABLE: 14 | ROW: 11 | DAT…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00019",
+      "question": "SUBSTATION 3 değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "702"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 11 | ROW: 11 | DATA: SUBSTATION 3: DC/AC Ratio (@40ºC), SUBSTATION 3: 1,419\" [Source: Technical Description_Rev01.docx]\n2. \"SOURCE: Technical Description_Rev01.docx | TABLE: 11 | ROW: 2 …",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00020",
+      "question": "SUBSTATION 2 değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "736"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 10 | ROW: 11 | DATA: SUBSTATION 2: DC/AC Ratio (@40ºC), SUBSTATION 2: 1,428\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Description_Rev01.docx | TABLE: 10 | ROW: 2…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00021",
+      "question": "SUBSTATION 1 değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "1,413"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 9 | ROW: 2 | DATA: SUBSTATION 1: POWER STATION, SUBSTATION 1: 8960 KVA\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Description_Rev01.docx | TABLE: 9 | ROW: 11 | DA…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00022",
+      "question": "SUBSTATION 4 (Modules) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "27"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 12 | ROW: 6 | DATA: SUBSTATION 4: Modules / String, SUBSTATION 4: 27 Modules\" [Source: Technical Description_Rev01.docx]\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 4 (Modules) değeri 27 Modul…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00023",
+      "question": "SUBSTATION 6 (Modules) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "27"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 14 | ROW: 5 | DATA: SUBSTATION 6: Modules / String, SUBSTATION 6: 27 Modules\" [Source: Technical Description_Rev01.docx]\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 6 (Modules) değeri 27 Modul…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00024",
+      "question": "SUBSTATION 5 (Modules) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "27"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 13 | ROW: 5 | DATA: SUBSTATION 5: Modules / String, SUBSTATION 5: 27 Modules\" [Source: Technical Description_Rev01.docx]\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 5 (Modules) değeri 27 Module…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00025",
+      "question": "SUBSTATION 1 (Modules) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "27"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 9 | ROW: 5 | DATA: SUBSTATION 1: MODULES/STRING, SUBSTATION 1: 27 Modules\" [Source: Technical Description_Rev01.docx]\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 1 (Modules) değeri 27 Modules'd…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00026",
+      "question": "SUBSTATION 2 (Modules) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "27"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 10 | ROW: 5 | DATA: SUBSTATION 2: Modules / String, SUBSTATION 2: 27 Modules\" [Source: Technical Description_Rev01.docx]\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 2 (Modules) değeri 27 Modul…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00027",
+      "question": "SUBSTATION 3 (Modules) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "27"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 11 | ROW: 5 | DATA: SUBSTATION 3: Modules / String, SUBSTATION 3: 27 Modules\" [Source: Technical Description_Rev01.docx]\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 3 için modül sayısı 27'dir […",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00028",
+      "question": "SUBSTATION 1 (Strings) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "728"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 9 | ROW: 8 | DATA: SUBSTATION 1: Nº Strings, SUBSTATION 1: 728 Strings\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Description_Rev01.docx | TABLE: 9 | ROW: 6 | DAT…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00029",
+      "question": "SUBSTATION 4 (Strings) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "575",
+        "Wp"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 12 | ROW: 9 | DATA: SUBSTATION 4: Nº Strings Total, SUBSTATION 4: 796\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Description_Rev01.docx | TABLE: 12 | ROW: 8 | DAT…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00030",
+      "question": "SUBSTATION 3 (Ratio) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "40",
+        "DC/AC"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SUBSTATION 3 için DC/AC Ratio (@40ºC) değeri 1,419'dur [Kaynak: Technical Description_Rev01.docx, Table: 11, Row: 11].",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00031",
+      "question": "SUBSTATION 5 (Ratio) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "40",
+        "DC/AC"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 13 | ROW: 11 | DATA: SUBSTATION 5: DC/AC Ratio (@40ºC), SUBSTATION 5: 1,418\" [Source: Technical Description_Rev01.docx]\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 5 (Ratio) değeri 1,418'dir [S…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00032",
+      "question": "SUBSTATION 1 (Ratio) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "40",
+        "DC/AC"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 9 | ROW: 11 | DATA: SUBSTATION 1: DC/AC Ratio (@40ºC), SUBSTATION 1: 1,413\" [Source: Technical Description_Rev01.docx]\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 1 (Ratio) değeri 1,413'tür [So…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00033",
+      "question": "SUBSTATION 4 (Ratio) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "40",
+        "DC/AC"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 12 | ROW: 12 | DATA: SUBSTATION 4: DC/AC Ratio (@40ºC), SUBSTATION 4: 1,419\" [Source: Technical Description_Rev01.docx]\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 4 (Ratio) değeri 1,419'dur [S…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00034",
+      "question": "SUBSTATION 6 (Ratio) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "40",
+        "DC/AC"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 14 | ROW: 11 | DATA: SUBSTATION 6: DC/AC Ratio (@40ºC), SUBSTATION 6: 1,424\" [Source: Technical Description_Rev01.docx]\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 6 için DC/AC oranı 1,424'tür …",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00035",
+      "question": "SUBSTATION 2 (Ratio) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "40",
+        "DC/AC"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SUBSTATION 2'nin DC/AC oranı (@40ºC) 1,428'dir [Kaynak: Technical Description_Rev01.docx, Tablo 10, Satır 11].",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00036",
+      "question": "SUBSTATION 1 (inverters string) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "3"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 9 | ROW: 6 | DATA: SUBSTATION 1: Nº Strings, SUBSTATION 1: 22 inverters x 29 string\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Description_Rev01.docx | TABLE: 9 |…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00037",
+      "question": "SUBSTATION 3 (inverters string) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "6"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 11 | ROW: 7 | DATA: SUBSTATION 3: Nº Strings, SUBSTATION 3: 6 inverters x 30 string\"\n2. \"SOURCE: Technical Description_Rev01.docx | TABLE: 11 | ROW: 6 | DATA: SUBSTATION 3: Nº Strings, S…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00038",
+      "question": "SUBSTATION 2 (inverters string) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "11"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 10 | ROW: 7 | DATA: SUBSTATION 2: Nº Strings, SUBSTATION 2: 11 inverters x 30 string\" [Source: Technical Description_Rev01.docx]\n2. \"SOURCE: Technical Description_Rev01.docx | TABLE: 10 …",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00039",
+      "question": "SUBSTATION 5 (inverters string) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "14"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 13 | ROW: 7 | DATA: SUBSTATION 5: Nº Strings, SUBSTATION 5: 13 inverters x 30 string\" [Source: Technical Description_Rev01.docx]\n2. \"SOURCE: Technical Description_Rev01.docx | TABLE: 13 …",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00040",
+      "question": "SUBSTATION 6 (inverters string) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "16"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 14 | ROW: 7 | DATA: SUBSTATION 6: Nº Strings, SUBSTATION 6: 16 inverters x 30 string\" [Source: Technical Description_Rev01.docx]\n2. \"SOURCE: Technical Description_Rev01.docx | TABLE: 14 …",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00041",
+      "question": "SUBSTATION 4 (Inverters) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "27",
+        "kVA"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 12 | ROW: 11 | DATA: SUBSTATION 4: Total AC Capacity, SUBSTATION 4: 27 Inverters x 320 kVA -> 8.640 kVA\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Description_Rev…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00042",
+      "question": "SUBSTATION 3 (Inverters) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "24",
+        "kVA"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 11 | ROW: 10 | DATA: SUBSTATION 3: Total AC Capacity, SUBSTATION 3: 24 Inverters x 320 kVA -> 7.680 kVA\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Description_Rev…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00043",
+      "question": "SUBSTATION 6 (Inverters) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "26",
+        "kVA"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 14 | ROW: 10 | DATA: SUBSTATION 6: Total AC Capacity, SUBSTATION 6: 26 Inverters x 320 kVA -> 8.320 kVA\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Description_Rev…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00044",
+      "question": "SUBSTATION 5 (Inverters) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "27",
+        "kVA"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 13 | ROW: 10 | DATA: SUBSTATION 5: Total AC Capacity, SUBSTATION 5: 27 Inverters x 320 kVA -> 8.640 kVA\" [Source: Technical Description_Rev01.docx]\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 5…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00045",
+      "question": "SUBSTATION 2 (Inverters) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "25",
+        "kVA"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 10 | ROW: 10 | DATA: SUBSTATION 2: Total AC Capacity, SUBSTATION 2: 25 Inverters x 320 kVA -> 8.000 kVA\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Description_Rev…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00046",
+      "question": "SUBSTATION 1 (Inverters) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "25",
+        "kVA"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 9 | ROW: 10 | DATA: SUBSTATION 1: Total AC Capacity, SUBSTATION 1: 25 Inverters x 320 kVA -> 8.000 kVA\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Description_Rev0…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00047",
+      "question": "SUBSTATION 4 (Sungrow) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "27",
+        "kVA",
+        "SG350HX"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 12 | ROW: 5 | DATA: SUBSTATION 4: Inverter, SUBSTATION 4: 27 x Sungrow SG350HX (320 kVA @40ºC)\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Description_Rev01.docx |…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00048",
+      "question": "SUBSTATION 5 (Sungrow) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "27",
+        "kVA",
+        "SG350HX"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 13 | ROW: 4 | DATA: SUBSTATION 5: Inverter, SUBSTATION 5: 27 x Sungrow SG350HX (320 kVA @40ºC)\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Description_Rev01.docx |…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00049",
+      "question": "SUBSTATION 2 (Sungrow) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "25",
+        "kVA",
+        "SG350HX"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 10 | ROW: 4 | DATA: SUBSTATION 2: Inverter, SUBSTATION 2: 25 x Sungrow SG350HX (320 kVA @40ºC)\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Description_Rev01.docx |…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00050",
+      "question": "SUBSTATION 1 (Sungrow) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "25",
+        "kVA",
+        "SG350HX"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 9 | ROW: 4 | DATA: SUBSTATION 1: INVERTER, SUBSTATION 1: 25 x Sungrow SG350HX (320 kVA @40ºC)\" [Source: Technical Description_Rev01.docx]\n- \"SOURCE: Technical Description_Rev01.docx | TAB…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00051",
+      "question": "SUBSTATION 6 (Sungrow) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "26",
+        "kVA",
+        "SG350HX"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 14 | ROW: 4 | DATA: SUBSTATION 6: Inverter, SUBSTATION 6: 26 x Sungrow SG350HX (320 kVA @40ºC)\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Description_Rev01.docx |…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00052",
+      "question": "SUBSTATION 3 (Sungrow) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "24",
+        "kVA",
+        "SG350HX"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SUBSTATION 3: Inverter, SUBSTATION 3: 24 x Sungrow SG350HX (320 kVA @40ºC)\" [Source: Technical Description_Rev01.docx | TABLE: 11 | ROW: 4]\n\n2. \"SUBSTATION 3: Total AC Capacity, SUBSTATION 3: 24 Inverters x 320 kVA -> 7.680 kVA\" [Source…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00053",
+      "question": "SUBSTATION 2 (Jinko Tiger) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "72",
+        "WP",
+        "72HL4-BDV"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 10 | ROW: 3 | DATA: SUBSTATION 2: Modules, SUBSTATION 2: Jinko Tiger Neo N-type 72HL4-BDV 575 WP\" [Source: Technical Description_Rev01.docx]\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 2 (Jinko…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00054",
+      "question": "SUBSTATION 4 (Jinko Tiger) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "72",
+        "WP",
+        "72HL4-BDV"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 12 | ROW: 4 | DATA: SUBSTATION 4: Modules, SUBSTATION 4: Jinko Tiger Neo N-type 72HL4-BDV 575 WP\" [Source: Technical Description_Rev01.docx]\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 4 (Jink…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00055",
+      "question": "SUBSTATION 5 (Jinko Tiger) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "72",
+        "WP",
+        "72HL4-BDV"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 13 | ROW: 3 | DATA: SUBSTATION 5: Modules, SUBSTATION 5: Jinko Tiger Neo N-type 72HL4-BDV 570 WP\"\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 5 (Jinko Tiger) değeri 570 WP'dir [Kaynak: Technica…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00056",
+      "question": "SUBSTATION 1 (Jinko Tiger) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "72",
+        "WP",
+        "72HL4-BDV"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 9 | ROW: 3 | DATA: SUBSTATION 1: MODULE, SUBSTATION 1: Jinko Tiger Neo N-type 72HL4-BDV 575 WP\" [Source: Technical Description_Rev01.docx]\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 1 (Jinko …",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00057",
+      "question": "SUBSTATION 3 (Jinko Tiger) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "72",
+        "WP",
+        "72HL4-BDV"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 11 | ROW: 3 | DATA: SUBSTATION 3: Modules, SUBSTATION 3: Jinko Tiger Neo N-type 72HL4-BDV 575 WP\" [Source: Technical Description_Rev01.docx]\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 3 için …",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00058",
+      "question": "SUBSTATION 6 (Jinko Tiger) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "72",
+        "WP",
+        "72HL4-BDV"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 14 | ROW: 3 | DATA: SUBSTATION 6: Modules, SUBSTATION 6: Jinko Tiger Neo N-type 72HL4-BDV 570 WP\"\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 6 (Jinko Tiger) değeri 570 WP'dir [Kaynak: Technica…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00059",
+      "question": "770 x 27 Modules x 570 W -> 11.850 için SUBSTATION 6 değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "770",
+        "W",
+        "kW"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 14 | ROW: 9 | DATA: SUBSTATION 6: Total DC Capacity, SUBSTATION 6: 770 x 27 Modules x 570 W -> 11.850,30 kW\"\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 6 için toplam DC kapasitesi 11.850,30 k…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00060",
+      "question": "796 x 27 Modules x 570 W -> 12.250 için SUBSTATION 5 değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "796",
+        "W",
+        "kW"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 13 | ROW: 9 | DATA: SUBSTATION 5: Total DC Capacity, SUBSTATION 5: 796 x 27 Modules x 570 W -> 12.250,44 kW\"\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 5 için toplam DC kapasitesi 12.250,44 kW…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00061",
+      "question": "702 x 27 Modules x 575 W -> 10.898 için SUBSTATION 3 değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "702",
+        "W",
+        "kW"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 11 | ROW: 9 | DATA: SUBSTATION 3: Total DC Capacity, SUBSTATION 3: 702 x 27 Modules x 575 W -> 10.898,50 kW\"\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 3 için toplam DC kapasitesi 10.898,50 k…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00062",
+      "question": "728 x 27 Modules x 575 W -> 11.302 için SUBSTATION 1 değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "728",
+        "W",
+        "kW"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 9 | ROW: 9 | DATA: SUBSTATION 1: Total DC Capacity, SUBSTATION 1: 728 x 27 Modules x 575 W -> 11.302,20 kW\"\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 1 için toplam DC kapasitesi 11.302,20 kW…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00063",
+      "question": "736 x 27 Modules x 575 W -> 11.426 için SUBSTATION 2 değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "736",
+        "W",
+        "kW"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 10 | ROW: 9 | DATA: SUBSTATION 2: Total DC Capacity, SUBSTATION 2: 736 x 27 Modules x 575 W -> 11.426,40 kW\"\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 2 için toplam DC kapasitesi 11.426,40 k…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00064",
+      "question": "698 x 27 Modules x 570 W + 98 x 27 Modules x 575 W -> 12.263 için SUBSTATION 4 değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "698",
+        "W"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 12 | ROW: 10 | DATA: SUBSTATION 4: Total DC Capacity, SUBSTATION 4: 698 x 27 Modules x 570 W + 98 x 27 Modules x 575 W -> 12.263,67 kW\"\n\nSECTION B — FINAL ANSWER\n\nSubstation 4's total DC…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00065",
+      "question": "SUBSTATION 4 (inverters strings) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "2"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 12 | ROW: 7 | DATA: SUBSTATION 4: Nº Strings (570Wp), SUBSTATION 4: 13 inverters x 30 strings + 10 inverters x 29 strings + 1 inverter* x 18 strings -> 698\" [Source: Technical Descriptio…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00066",
+      "question": "CLASIFICATION değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "1"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "Bu bilgiyi mevcut belgelerde/kayıtlarda bulamıyorum. [Kaynak: Technical Description_Rev01.docx]",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00067",
+      "question": "CLASIFICATION (Design verification) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "1"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 2 | ROW: 3 | DATA: CLASIFICATION: Design verification: Not applicable Head of O.U./Supervisor Verifier Level 1 Level 2\"\n\nSECTION B — FINAL ANSWER\n\nThe CLASIFICATION (Design verification)…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00068",
+      "question": "Structure Type değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "2"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 18 | ROW: 3 | DATA: Structure Type: 2, Layout: 2 Portrait 2Vx27 (2 Strings x 54 modules), Tilt: ±20°, Dimensions: 31.242x4.576 m, Total Number of Structures: 2,156\"\n- \"SOURCE: Technical D…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00069",
+      "question": "SUNGROW SG350HX değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "2"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 5 | ROW: 4 | DATA: SUNGROW SG350HX: Max. DC Voltage, SUNGROW SG350HX: 1500 V\" [Source: Technical Description_Rev01.docx]\n2. \"SOURCE: Technical Description_Rev01.docx | TABLE: 5 | ROW: 3 …",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00070",
+      "question": "Nominal Voltage değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "1.5",
+        "kV"
+      ],
+      "ok": false,
+      "fail_reason": "NO_EXPECTED_KEYWORD",
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 17 | ROW: 5 | DATA: Electrical Characteristics: Nominal PV input voltage, Electrical Characteristics: 1080 V\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Descriptio…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00071",
+      "question": "SUNGROW SG350HX (Optional) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "12",
+        "14/16"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 5 | ROW: 7 | DATA: SUNGROW SG350HX: Max. Number of input, SUNGROW SG350HX: 12 (Optional 14/16)\" [Source: Technical Description_Rev01.docx]\n\nSECTION B — FINAL ANSWER\n\nThe optional value f…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00072",
+      "question": "JKM570-N72HL4-BDV değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "0"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 16 | ROW: 4 | DATA: Module Type: Maximum Power Voltage (Vmax), JKM570-N72HL4-BDV: 42,29 V, JKM575-N72HL4-BDV: 48,44 V\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical D…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00073",
+      "question": "JKM575-N72HL4-BDV değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "30",
+        "A"
+      ],
+      "ok": false,
+      "fail_reason": "NO_EXPECTED_KEYWORD",
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 16 | ROW: 4 | DATA: Module Type: Maximum Power Voltage (Vmax), JKM570-N72HL4-BDV: 42,29 V, JKM575-N72HL4-BDV: 48,44 V\"\n\n2. \"SOURCE: Technical Description_Rev01.docx | TABLE: 16 | ROW: 6 …",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00074",
+      "question": "Cross Section (mm2) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "6",
+        "mm2"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 19 | ROW: 2 | DATA: : Solar Cable, Cable Type: CU H1Z2Z2-K, Nominal Voltage: 1.5 kV, Cross Section (mm2): 6 mm2\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Descrip…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00075",
+      "question": "25 A, JKM575-N72HL4-BDV değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "14,31",
+        "A"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 16 | ROW: 5 | DATA: Module Type: Maximum Power Current (Imp), JKM575-N72HL4-BDV: 13,55 A\"\n2. \"SOURCE: Technical Description_Rev01.docx | TABLE: 16 | ROW: 7 | DATA: Module Type: Short cir…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00076",
+      "question": "48 A, JKM575-N72HL4-BDV değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "13,55",
+        "A"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 16 | ROW: 5 | DATA: Module Type: Maximum Power Current (Imp), JKM570-N72HL4-BDV: 13,48 A, JKM575-N72HL4-BDV: 13,55 A\"\n\n2. \"SOURCE: Technical Description_Rev01.docx | TABLE: 16 | ROW: 7 |…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00077",
+      "question": "07 %, JKM575-N72HL4-BDV değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "22,26"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 16 | ROW: 8 | DATA: Module Type: Module Efficience STC (%), JKM570-N72HL4-BDV: 22,07 %, JKM575-N72HL4-BDV: 22,26 %\" [Source: Technical Description_Rev01.docx]\n\nSECTION B — FINAL ANSWER\n\n…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00078",
+      "question": "07 V, JKM575-N72HL4-BDV değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "51,27",
+        "V"
+      ],
+      "ok": false,
+      "fail_reason": "NO_EXPECTED_KEYWORD",
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 16 | ROW: 4 | DATA: Module Type: Maximum Power Voltage (Vmax), JKM570-N72HL4-BDV: 42,29 V, JKM575-N72HL4-BDV: 48,44 V\"\n\nSECTION B — FINAL ANSWER\n\nThe Maximum Power Voltage (Vmax) for the…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00079",
+      "question": "29 V, JKM575-N72HL4-BDV değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "48,44",
+        "V"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "JKM575-N72HL4-BDV modülünün maksimum güç voltajı (Vmax) 48,44 V olarak belirtilmiştir [Kaynak: Technical Description_Rev01.docx, Table: 16, Row: 4].",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00080",
+      "question": "Solar Cable, Cable Type değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "1",
+        "H1Z2Z2-K"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 19 | ROW: 2 | DATA: : Solar Cable, Cable Type: CU H1Z2Z2-K, Nominal Voltage: 1.5 kV, Cross Section (mm2): 6 mm2\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: bill of m 227-005…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00081",
+      "question": "JKM575N-72HL4-BDV 575 Wp değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "575",
+        "Wp"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 7 | ROW: 2 | DATA: JKM575N-72HL4-BDV 575 Wp: Max. Power, JKM575N-72HL4-BDV 575 Wp: 575 Wp\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Description_Rev01.docx | TABL…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00082",
+      "question": "JKM570N-72HL4-BDV 570 Wp değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "570",
+        "Wp"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 6 | ROW: 2 | DATA: JKM570N-72HL4-BDV 570 Wp: Max. Power, JKM570N-72HL4-BDV 570 Wp: 570 Wp\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Description_Rev01.docx | TABL…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00083",
+      "question": "30%/ºC, JKM575-N72HL4-BDV değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "0,30"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 16 | ROW: 13 | DATA: Module Type: Temperature coefficients of Pmax, JKM570-N72HL4-BDV: -0,30%/ºC, JKM575-N72HL4-BDV: -0,30%/ºC\"\n\nSECTION B — FINAL ANSWER\n\nThe temperature coefficient of …",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00084",
+      "question": "35%/ºC, JKM575-N72HL4-BDV değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "0,35"
+      ],
+      "ok": false,
+      "fail_reason": "NO_EXPECTED_KEYWORD",
+      "answer_preview": "Bu bilgiyi mevcut belgelerde/kayıtlarda bulamıyorum. [Kaynak: Technical Description_Rev01.docx]",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00085",
+      "question": "Electrical Characteristics değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "2"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"Electrical Characteristics: Input (DC), Electrical Characteristics: Input (DC)\" [Source: Technical Description_Rev01.docx | TABLE: 17 | ROW: 2]\n2. \"Electrical Characteristics: Output (AC), Electrical Characteristics: Output (AC)\" [Sourc…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00086",
+      "question": "Total Number of Structures değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "216"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 18 | ROW: 3 | DATA: Total Number of Structures: 2,156\" [Source: Technical Description_Rev01.docx]\n2. \"SOURCE: Technical Description_Rev01.docx | TABLE: 18 | ROW: 2 | DATA: Total Number o…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00087",
+      "question": "046%/ºC, JKM575-N72HL4-BDV değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "0,046"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 16 | ROW: 15 | DATA: Module Type: Temperature coefficients of Isc, JKM570-N72HL4-BDV: 0,046%/ºC, JKM575-N72HL4-BDV: 0,046%/ºC\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Tec…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00088",
+      "question": "Mechanical Characteristics değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "68",
+        "IP68"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"Mechanical Characteristics: Weight, Mechanical Characteristics: 32kg (70,55 lbs)\" [Source: Technical Description_Rev01.docx | TABLE: 15 | ROW: 5]\n2. \"Mechanical Characteristics: Frame, Mechanical Characteristics: Anodized Aluminum Alloy…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00089",
+      "question": "Dimensions (Width x Depth) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "67"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 20 | ROW: 6 | DATA: Trenches: LV for auxiliary supply + Communication in ducts + Grounding, Dimensions (Width x Depth): 67  x 73 to 83 cm\" [Source: Technical Description_Rev01.docx]\n\n2. …",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00090",
+      "question": "Electrical Characteristics (optional) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "12",
+        "14/16"
+      ],
+      "ok": false,
+      "fail_reason": "NO_EXPECTED_KEYWORD",
+      "answer_preview": "Bu bilgiyi mevcut belgelerde/kayıtlarda bulamıyorum. [Kaynak: Technical Description_Rev01.docx]",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00091",
+      "question": "Electrical Characteristics (nominal power) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "3"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"Electrical Characteristics: THD, Electrical Characteristics: < 3% (at nominal power)\" [Source: Technical Description_Rev01.docx | TABLE: 17 | ROW: 17]\n2. \"Electrical Characteristics: Power factor at nominal power /Adjustable power facto…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00092",
+      "question": "Mechanical Characteristics (Anti Reflection) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "2,00",
+        "mm"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 15 | ROW: 6 | DATA: Mechanical Characteristics: Front Glass, Mechanical Characteristics: 2,00mm Anti Reflection Coating\"\n\nSECTION B — FINAL ANSWER\n\nMechanical Characteristics (Anti Reflec…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00093",
+      "question": "Mechanical Characteristics (Heat Strengthened) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "2,00",
+        "mm"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "Mechanical Characteristics (Heat Strengthened) değeri 2,00mm Heat Strengthened Glass olarak belirtilmiştir [Kaynak: Technical Description_Rev01.docx, Table: 15, Row: 7].",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00094",
+      "question": "Electrical Characteristics (leading lagging) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "0,99"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 17 | ROW: 19 | DATA: Electrical Characteristics: Power factor at nominal power /Adjustable power factor, Electrical Characteristics: >0,99 / 0,8 leading-0,8 lagging\" [Source: Technical De…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00095",
+      "question": "Mechanical Characteristics (inch) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "2278",
+        "mm",
+        "1134"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"Mechanical Characteristics: Dimensions, Mechanical Characteristics: 2278 x 1134 x 30mm (89 x 44.65 x 1.18 inch)\" [Source: Technical Description_Rev01.docx | TABLE: 15 | ROW: 4]\n\nSECTION B — FINAL ANSWER\n\nMechanical Characteristics (inch)…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00096",
+      "question": "Dimensions (Width x Depth) (layers ducts) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "50"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"Trenches: Cu string cables in ducts + Grounding, Dimensions (Width x Depth): 50 x 70 to 90 cm (one or two layers of ducts)\" [Source: Technical Description_Rev01.docx | TABLE: 20 | ROW: 2]\n\n2. \"Trenches: LV AC cable in ducts + Cu string …",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00097",
+      "question": "Dimensions (Width x Depth) (layers cables) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "40"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 20 | ROW: 5 | DATA: Trenches: Medium voltage cables + communication cables, Dimensions (Width x Depth): 40 to 100 x 140 to 150 cm (one layers of MV cables directly buried + one or two la…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00098",
+      "question": "OVERVIEW PV PLANT CONFIGURATION değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "27"
+      ],
+      "ok": false,
+      "fail_reason": "NO_EXPECTED_KEYWORD",
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 8 | ROW: 17 | DATA: OVERVIEW PV PLANT CONFIGURATION: DC/AC (MAX) RATIO, OVERVIEW PV PLANT CONFIGURATION: 1.291\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Descript…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00099",
+      "question": "OVERVIEW PV PLANT CONFIGURATION (POWER) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "30",
+        "POWER"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 8 | ROW: 15 | DATA: OVERVIEW PV PLANT CONFIGURATION: AC POWER (MAX) AT 30ºC, OVERVIEW PV PLANT CONFIGURATION: 54,208 kW\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00100",
+      "question": "OVERVIEW PV PLANT CONFIGURATION (TOTAL MODULES) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "575",
+        "WP",
+        "TOTAL",
+        "MODULES"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 8 | ROW: 10 | DATA: OVERVIEW PV PLANT CONFIGURATION: TOTAL Nº 570 WP MODULES, OVERVIEW PV PLANT CONFIGURATION: 61,128\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical D…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00101",
+      "question": "OVERVIEW PV PLANT CONFIGURATION (TOTAL STRUCTURES) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "2",
+        "TOTAL",
+        "2V14"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 8 | ROW: 9 | DATA: OVERVIEW PV PLANT CONFIGURATION: TOTAL Nº 2V27 STRUCTURES, OVERVIEW PV PLANT CONFIGURATION: 2,156\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical De…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00102",
+      "question": "OVERVIEW PV PLANT CONFIGURATION (JINKO TIGER) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "72",
+        "WP",
+        "JINKO",
+        "TIGER"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 8 | ROW: 2 | DATA: OVERVIEW PV PLANT CONFIGURATION: PV MODULE, OVERVIEW PV PLANT CONFIGURATION: JINKO TIGER PRO 72HL4-BDV 570 WP\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: …",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00103",
+      "question": "Minimum Ambient Temperature (ºC) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "2"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 4 | ROW: 2 | DATA: Minimum Ambient Temperature (ºC): Maximum Ambient Temperature (ºC), -5ºC: +35ºC\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technical Description_Rev01.do…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00104",
+      "question": "GGG, RDL, MZZ, ECU, MDT, CLASIFICATION değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "1"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "Bu bilgiyi mevcut belgelerde/kayıtlarda bulamıyorum. [Kaynak: Technical Description_Rev01.docx]",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00105",
+      "question": "SUBSTATION 1 (MODULES STRING) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "MODULES/STRING"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n- \"SOURCE: Technical Description_Rev01.docx | TABLE: 9 | ROW: 5 | DATA: SUBSTATION 1: MODULES/STRING, SUBSTATION 1: 27 Modules\"\n\nSECTION B — FINAL ANSWER\n\nSUBSTATION 1 (MODULES STRING) değeri 27 Modules'dur [Kaynak: Technical Description_Re…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00106",
+      "question": "Electrical Characteristics (short circuit) değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "MPPT"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 17 | ROW: 10 | DATA: Electrical Characteristics: Max DC short-circuit current per MPPT, Electrical Characteristics: 60 A\" [Source: Technical Description_Rev01.docx]\n\n2. \"SOURCE: Technica…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00107",
+      "question": "Medium Voltage Cables, Cable Type değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "AL/XLPE/CWS/PVC"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 19 | ROW: 5 | DATA: : Medium Voltage Cables, Cable Type: AL/XLPE/CWS/PVC, Nominal Voltage: 19/33 kV, Cross Section (mm2): 240/400 mm2\" [Source: Technical Description_Rev01.docx]\n\nSECTION…",
+      "source": "Technical Description_Rev01.docx"
+    },
+    {
+      "id": "MULTI-00108",
+      "question": "String Inverter to Transformer, Cable Type değeri nedir?",
+      "expected_doc_name": "Technical Description_Rev01.docx",
+      "expected_keywords": [
+        "AL/XLPE/PVC"
+      ],
+      "ok": true,
+      "fail_reason": null,
+      "answer_preview": "SECTION A — RELEVANT EXCERPTS (QUOTED)\n\n1. \"SOURCE: Technical Description_Rev01.docx | TABLE: 19 | ROW: 4 | DATA: : String Inverter to Transformer, Cable Type: AL/XLPE/PVC, Nominal Voltage: 0.6/1 kV, Cross Section (mm2): 400 mm2\"\n\nSECTION B — FINAL ANSWER\n\nString Inverter to Tran…",
+      "source": "bill of m 227-005-L-E-00010 Rev07.xlsx (Sheet: 2 LV DC Cables)"
+    }
+  ]
+}

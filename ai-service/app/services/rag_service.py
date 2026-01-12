@@ -131,11 +131,13 @@ async def process_rag_query(question: str) -> dict:
 
         # Add simple fallback keywords for TR/EN (keeps recall even if extract_keywords is weak)
         raw_tokens = re.findall(r"\b[0-9A-Za-zğüşöçıİĞÜŞÖÇ]+\b", q_lower)
+        allow_short_units = {"m", "mm", "v", "kv", "a", "hz", "%", "wp", "w", "kw", "mw"}
         for t in raw_tokens:
-            if len(t) <= 2:
+            tl = t.lower()
+            # Keep important short units (mm, m, kV, V, %, etc.)
+            if len(tl) <= 2 and tl not in allow_short_units:
                 continue
-            if t.isdigit():
-                continue
+            # Keep numeric tokens too (critical for exact-value questions like 50mm, 5-10, 1080V)
             kws.append(t)
 
         # De-dupe keywords while preserving order
@@ -290,5 +292,10 @@ Answer the question using ONLY the information above. Cite the source document."
         source += f" (Page {page})"
     elif sheet:
         source += f" (Sheet: {sheet})"
-    
+
+    # Enforce citation format: if model forgot, append a citation to the primary source.
+    # This maintains CEW guardrails (still no new facts), but keeps output consistent for validation/UI.
+    if answer and not re.search(r"\[(Source|Kaynak):", answer, flags=re.IGNORECASE):
+        answer = f"{answer.rstrip()} [Kaynak: {source}]"
+
     return {"answer": answer, "source": source}
