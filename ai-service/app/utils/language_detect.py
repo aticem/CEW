@@ -47,7 +47,7 @@ def detect_language(text: str) -> str:
     
     # Check for Turkish question patterns
     turkish_patterns = [
-        r'\b(ne kadar|kaç tane|toplam ne|hangi|nedir)\b',
+        r'\b(ne kadar|kaç tane|kac tane|kac|toplam ne|toplam kac|hangi|nedir)\b',
         r'\b(yapıldı|yapılmış|tamamlandı|bitti)\b',
         r'\b(taşeron|işçi|metre|gün)\b'
     ]

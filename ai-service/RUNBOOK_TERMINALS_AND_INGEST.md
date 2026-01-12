@@ -52,9 +52,36 @@ Remove-Item -Recurse -Force chroma_db -ErrorAction SilentlyContinue
 python scripts/ingest.py
 ```
 
-### 3.3 Incremental re-index (not recommended in this repo yet)
-This repo’s ingestion script clears the collection by design.  
-So it effectively behaves like a full rebuild.
+### 3.3 Incremental ingest (recommended for daily use)
+Use this when you only added/changed a few documents and want a fast update.
+
+What it does:
+- Computes a sha256 hash per file
+- Only ingests new/changed files
+- Keeps a manifest inside `chroma_db/` so it stays tied to the current index
+
+```powershell
+cd C:\Users\atila\CEW\ai-service
+.\venv\Scripts\Activate.ps1
+python scripts/ingest_incremental.py
+```
+
+If you also deleted a document from `documents/` and want it removed from Chroma:
+
+```powershell
+python scripts/ingest_incremental.py --prune-removed
+```
+
+Preview what would happen (no writes):
+
+```powershell
+python scripts/ingest_incremental.py --dry-run --prune-removed
+```
+
+When to prefer full rebuild (`scripts/ingest.py`):
+- You changed chunking/embedding config
+- You changed parsing logic significantly
+- You suspect the index is inconsistent
 
 ## 4) Quick verification after ingest
 

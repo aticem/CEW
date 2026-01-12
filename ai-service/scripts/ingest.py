@@ -546,7 +546,7 @@ def ingest_documents():
         }
         
         # Add optional metadata
-        for key in ["page", "sheet", "section", "table_num"]:
+        for key in ["page", "sheet", "section", "table_num", "row_num", "doc_type", "pdf_kind"]:
             if key in chunk:
                 metadata[key] = chunk[key]
         

@@ -22,8 +22,15 @@ CHROMA_DIR.mkdir(exist_ok=True)
 
 # OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o")  # Enterprise mode: Maximum reasoning capability
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+
+# Provider switches (OpenAI vs Gemini)
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
+EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "openai").lower()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+GEMINI_EMBEDDING_MODEL = os.getenv("GEMINI_EMBEDDING_MODEL", "text-embedding-004")
 
 # ChromaDB
 CHROMA_COLLECTION_NAME = "cew_documents"

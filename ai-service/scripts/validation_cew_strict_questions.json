@@ -1,0 +1,1089 @@
+{
+  "name": "CEW_STRICT_VALIDATION",
+  "policy": {
+    "strict_source_only": true,
+    "pass_on_fallback_when_no_evidence": true
+  },
+  "tests": [
+    {
+      "id": "VAL-0001",
+      "question": "what is mc4",
+      "category": "definition",
+      "expected_behavior": "FALLBACK",
+      "mention_required": true,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0002",
+      "question": "mc4 ne işe yarıyo tam olarak",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0003",
+      "question": "why 1500v dc kullanılmış bu projede",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0004",
+      "question": "string niye 27 panel why not 28",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0005",
+      "question": "sungrow inverter neden seçilmiş",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0006",
+      "question": "mppt kaç tane var sg350hx",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0007",
+      "question": "dc/ac ratio bu projede kaç",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0008",
+      "question": "dc ac ratio high mi low mu",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0009",
+      "question": "max string voltage kaç oluyor",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0010",
+      "question": "-5 derecede voc kaç çıkar",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0011",
+      "question": "mppt current limit neydi",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0012",
+      "question": "why bifacial module kullanılmış",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0013",
+      "question": "570 wp ile 575 wp neden mix",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0014",
+      "question": "inverter ac power kaç kva",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0015",
+      "question": "320 kva mı 350 mi bu inverter",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0016",
+      "question": "mppt voltage window nedir",
+      "category": "definition",
+      "expected_behavior": "FALLBACK",
+      "mention_required": true,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0017",
+      "question": "module temp coefficient ne işe yarar",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0018",
+      "question": "short circuit current neden önemli",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0019",
+      "question": "mppt başına kaç string bağlanmış",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0020",
+      "question": "2v14 vs 2v27 difference ne",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0021",
+      "question": "tilt angle neden 20 derece",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0022",
+      "question": "pv syst analysis neye göre yapılmış",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0023",
+      "question": "shading nasıl avoid edilmiş",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0024",
+      "question": "1500v dc riskli mi değil mi",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0025",
+      "question": "inverter dc side surge var mı",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0026",
+      "question": "ac side protection nasıl yapılmış",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0027",
+      "question": "grounding olmazsa ne olur",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0028",
+      "question": "earthing resistance target kaç",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0029",
+      "question": "lightning protection var mı",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0030",
+      "question": "inverter shutdown scenario nedir",
+      "category": "definition",
+      "expected_behavior": "FALLBACK",
+      "mention_required": true,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0031",
+      "question": "total kaç panel var projede",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0032",
+      "question": "toplam inverter sayısı kaç",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0033",
+      "question": "kaç tane power station mevcut",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0034",
+      "question": "substation sayısı kaç",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0035",
+      "question": "570wp kaç adet kullanılmış",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0036",
+      "question": "575wp kaç adet var",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0037",
+      "question": "total dc capacity kaç mwp",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0038",
+      "question": "total ac capacity kaç mw",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0039",
+      "question": "mv cable kaç mm2",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0040",
+      "question": "solar cable cross section ne",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0041",
+      "question": "lv ac cable kesiti ne",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0042",
+      "question": "trench depth min kaç cm",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0043",
+      "question": "trench width lv için kaç",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0044",
+      "question": "mv trench deeper mı",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0045",
+      "question": "structure toplam kaç adet",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0046",
+      "question": "2v27 kaç tane",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0047",
+      "question": "2v14 kaç tane",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0048",
+      "question": "fencing toplam uzunluk kaç",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0049",
+      "question": "kaç tane gate var",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0050",
+      "question": "access road width kaç",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0051",
+      "question": "turning radius kaç metre",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0052",
+      "question": "gravel mi asfalt mı road",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0053",
+      "question": "grounding conductor copper mı",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0054",
+      "question": "earthing ring var mı",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0055",
+      "question": "weather station kaç tane",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0056",
+      "question": "meteo sensors neler",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0057",
+      "question": "ptz camera var mı",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0058",
+      "question": "fibre optic kullanılmış mı",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0059",
+      "question": "container office var mı",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0060",
+      "question": "compound area nerede",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0061",
+      "question": "grange kim amk",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0062",
+      "question": "tyler grange ne iş yapıyor",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0063",
+      "question": "lemp ne demek",
+      "category": "definition",
+      "expected_behavior": "FALLBACK",
+      "mention_required": true,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0064",
+      "question": "buffer zone kaç metre",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0065",
+      "question": "hedge buffer kaç metre",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0066",
+      "question": "watercourse buffer neden 5m",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0067",
+      "question": "construction exclusion zone ne",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0068",
+      "question": "bramble ne lan",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0069",
+      "question": "bramble nasıl temizleniyor",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0070",
+      "question": "neden 2m strip strip kesiliyor",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0071",
+      "question": "reptile için neden bekleniyor",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0072",
+      "question": "nesting season ne zaman",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0073",
+      "question": "feb to july neden yasak",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0074",
+      "question": "mowing hangi aylarda yapılmaz",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0075",
+      "question": "glyphosate nerede allowed",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0076",
+      "question": "pesticide neden yasak",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0077",
+      "question": "biodiversity net gain ne",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0078",
+      "question": "bat box nereye konuluyor",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0079",
+      "question": "bird box nereye asılıyor",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0080",
+      "question": "wildflower neden ekiliyor",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0081",
+      "question": "emorsgate eh1 nedir",
+      "category": "definition",
+      "expected_behavior": "FALLBACK",
+      "mention_required": true,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0082",
+      "question": "long grass neden bırakılıyor",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0083",
+      "question": "%50 cut %50 leave ne demek",
+      "category": "definition",
+      "expected_behavior": "FALLBACK",
+      "mention_required": true,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0084",
+      "question": "invasive species hangileri",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0085",
+      "question": "dock thistle ragwort ne",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0086",
+      "question": "arable loss neden önemsiz",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0087",
+      "question": "ecological impact report kim yazmış",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0088",
+      "question": "lemp ne zaman başlıyor",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0089",
+      "question": "lemp kim sorumlu",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0090",
+      "question": "lemp uygulanmazsa ne olur",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0091",
+      "question": "mc4 erkek dişi fark eder mi",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0092",
+      "question": "paneli ters bağlarsak what happens",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0093",
+      "question": "inverter yanarsa kim suçlu",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0094",
+      "question": "27 yerine 28 bağlarsak nolur",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0095",
+      "question": "mppt patlarsa sistem çöker mi",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0096",
+      "question": "grounding yok ama çalışıyor olur mu",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0097",
+      "question": "hedge kesersek ceza var mı",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0098",
+      "question": "buffer zone’a kamyon girerse ne olur",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0099",
+      "question": "bramble keserken hayvan çıkarsa",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0100",
+      "question": "july’de mowing yaparsak problem mi",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0101",
+      "question": "glyphosate her yere sıkılır mı",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0102",
+      "question": "bat box koymazsak issue olur mu",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0103",
+      "question": "bird box kırmak illegal mi",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0104",
+      "question": "fencing olmasa site çalışır mı",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0105",
+      "question": "camera çalışmazsa problem mi",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0106",
+      "question": "fibre koparsa scada gider mi",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0107",
+      "question": "dc cable güneş görürse zarar mı",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0108",
+      "question": "mv cable üstünden truck geçerse",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0109",
+      "question": "trench sığ kazılırsa risk ne",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0110",
+      "question": "inverter grounding unutulursa",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0111",
+      "question": "structure yamuk olursa ne olur",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0112",
+      "question": "tilt 25 derece yapsak daha iyi mi",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0113",
+      "question": "dc ac ratio 2 olursa",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0114",
+      "question": "string farklı uzunlukta olursa",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0115",
+      "question": "mppt tek string kalırsa",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0116",
+      "question": "substation offline olursa",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0117",
+      "question": "lemp ignore edersek ne olur",
+      "category": "why_reasoning",
+      "expected_behavior": "FALLBACK",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0118",
+      "question": "ecology rapor yanlış çıkarsa",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0119",
+      "question": "planning condition bozulursa",
+      "category": "doc_fact",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    },
+    {
+      "id": "VAL-0120",
+      "question": "bu soruya cevap yoksa ne yapman lazım",
+      "category": "policy",
+      "expected_behavior": "ANSWER",
+      "mention_required": false,
+      "expected_doc_names": [],
+      "expected_keywords": []
+    }
+  ]
+}

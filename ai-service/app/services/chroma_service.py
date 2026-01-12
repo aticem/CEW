@@ -121,6 +121,25 @@ def clear_collection() -> None:
     get_collection()
 
 
+def delete_by_doc_name(doc_name: str) -> int:
+    """
+    Delete all chunks belonging to a specific source document name.
+
+    Returns:
+        Number of deleted items if available, otherwise 0.
+    """
+    if not doc_name:
+        return 0
+    collection = get_collection()
+    try:
+        # Chroma supports metadata filtering deletes
+        collection.delete(where={"doc_name": doc_name})
+        # Chroma doesn't always return a count; best-effort.
+        return 0
+    except Exception:
+        return 0
+
+
 def get_collection_stats() -> dict:
     """Get statistics about the collection."""
     collection = get_collection()
