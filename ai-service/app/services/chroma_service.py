@@ -4,8 +4,10 @@ Handles all interactions with the local ChromaDB instance.
 """
 import chromadb
 from chromadb.config import Settings
+import re
 
 from app.config import CHROMA_DIR, CHROMA_COLLECTION_NAME
+from app.utils.text_utils import extract_keywords
 
 # ChromaDB client (lazy initialization)
 _chroma_client = None
@@ -35,22 +37,80 @@ def get_collection():
     return _collection
 
 
+def search_documents_keyword(query_text: str, top_k: int = 20) -> list[dict]:
+    """
+    Search documents using keyword matching (lexical search).
+    
+    Args:
+        query_text: Natural language query text
+        top_k: Number of results to return
+        
+    Returns:
+        List of results with text, metadata, and keyword match score
+    """
+    collection = get_collection()
+    
+    # Extract keywords from query (stopwords removed)
+    query_keywords = extract_keywords(query_text)
+    if not query_keywords:
+        return []
+    
+    # Get all documents (limit to first 2000 for performance)
+    # Note: ChromaDB automatically returns ids, don't include it in include parameter
+    all_docs = collection.get(limit=2000, include=["documents", "metadatas"])
+    
+    if not all_docs["ids"]:
+        return []
+    
+    # Score each chunk by keyword matches
+    scored_results = []
+    query_keywords_lower = [kw.lower() for kw in query_keywords]
+    
+    for i, doc_id in enumerate(all_docs["ids"]):
+        doc_text = (all_docs["documents"][i] or "").lower()
+        metadata = all_docs["metadatas"][i] or {}
+        
+        # Count keyword matches
+        matches = sum(1 for kw in query_keywords_lower if kw in doc_text)
+        
+        if matches > 0:
+            # Score: (matched_keywords / total_keywords) * 0.5
+            # (0.5 multiplier keeps keyword scores lower than vector scores)
+            score = (matches / len(query_keywords_lower)) * 0.5
+            
+            scored_results.append({
+                "id": doc_id,
+                "text": all_docs["documents"][i],
+                "metadata": metadata,
+                "score": score
+            })
+    
+    # Sort by score descending and return top_k
+    scored_results.sort(key=lambda x: x["score"], reverse=True)
+    return scored_results[:top_k]
+
+
 def search_documents(
     query_embedding: list[float], 
-    top_k: int = 5
+    top_k: int = 5,
+    hybrid: bool = True,
+    query_text: str = ""
 ) -> list[dict]:
     """
-    Search for similar documents using embedding.
+    Search for similar documents using embedding (and optionally keyword search).
     
     Args:
         query_embedding: Query vector from embedding service
         top_k: Number of results to return
+        hybrid: If True, combine vector and keyword search results
+        query_text: Original query text (required if hybrid=True)
         
     Returns:
         List of results with text, metadata, and similarity score
     """
     collection = get_collection()
     
+    # Vector search (always performed)
     results = collection.query(
         query_embeddings=[query_embedding],
         n_results=top_k,
@@ -59,23 +119,50 @@ def search_documents(
     
     # Handle empty results
     if not results["ids"] or not results["ids"][0]:
-        return []
+        vector_results = []
+    else:
+        # Convert to list of dicts with similarity scores
+        vector_results = []
+        for i, doc_id in enumerate(results["ids"][0]):
+            # ChromaDB returns distances, convert to similarity (1 - distance for cosine)
+            distance = results["distances"][0][i]
+            similarity = 1 - distance
+            
+            vector_results.append({
+                "id": doc_id,
+                "text": results["documents"][0][i],
+                "metadata": results["metadatas"][0][i],
+                "score": similarity
+            })
     
-    # Convert to list of dicts with similarity scores
-    output = []
-    for i, doc_id in enumerate(results["ids"][0]):
-        # ChromaDB returns distances, convert to similarity (1 - distance for cosine)
-        distance = results["distances"][0][i]
-        similarity = 1 - distance
+    # If hybrid mode, combine with keyword search
+    if hybrid and query_text:
+        keyword_results = search_documents_keyword(query_text, top_k=top_k * 2)
         
-        output.append({
-            "id": doc_id,
-            "text": results["documents"][0][i],
-            "metadata": results["metadatas"][0][i],
-            "score": similarity
-        })
+        # Merge results: deduplicate by ID, combine scores
+        result_dict = {}
+        
+        # Add vector results (weight: 1.0)
+        for r in vector_results:
+            result_dict[r["id"]] = r
+        
+        # Add keyword results (weight: 0.3, merge if exists)
+        for r in keyword_results:
+            if r["id"] in result_dict:
+                # Merge: add weighted keyword score to existing vector score
+                result_dict[r["id"]]["score"] += r["score"] * 0.3
+            else:
+                # New result from keyword search
+                r["score"] *= 0.3  # Scale down keyword-only results
+                result_dict[r["id"]] = r
+        
+        # Convert back to list and sort by score
+        output = list(result_dict.values())
+        output.sort(key=lambda x: x["score"], reverse=True)
+        return output[:top_k]
     
-    return output
+    # Non-hybrid mode: return vector results only
+    return vector_results
 
 
 def add_documents(documents: list[dict]) -> int:

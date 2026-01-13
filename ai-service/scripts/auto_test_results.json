@@ -1,0 +1,344 @@
+{
+  "timestamp": "2026-01-13T19:09:11.417091",
+  "total": 20,
+  "passed": 20,
+  "failed": 0,
+  "pass_rate": 100.0,
+  "fail_reasons": {
+    "NO_EXPECTED_KEYWORD": 1
+  },
+  "results": [
+    {
+      "question": "ITEM nedir?",
+      "answer": "ITEM, Landscape and Ecological Management Plan belgesinde yer alan bir tablo başlığıdır ve belirli proje faaliyetlerini veya açıklamalarını numaralandırmak için kullanılır; örneğin \"ITEM 1.0\" ifadesi \"SETTING-OUT\" (aplikasyon/yer tespiti) açıklamasını temsil etmektedir [Kaynak: Haunton Farmers Solar",
+      "source": "Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "item"
+      ],
+      "expected_keywords": [
+        "item",
+        "4.0"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "ITEM kaçtır?",
+      "answer": "Belgelerde \"ITEM\" veya madde numarası olarak belirtilen değerler şunlardır:\n\n*   \"SETTING-OUT\" açıklaması için ITEM değeri 1.0 [Kaynak: Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf (Page 15)]",
+      "source": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf (Page 15)",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "item"
+      ],
+      "expected_keywords": [
+        "item",
+        "4.0"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "What is ITEM?",
+      "answer": "ITEM 1.0 is SETTING-OUT [Source: Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf, Page 15].",
+      "source": "Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "item"
+      ],
+      "expected_keywords": [
+        "item",
+        "4.0"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "What is the value of ITEM?",
+      "answer": "ors]`\n        *   `ROW: 8 | DATA: Unnamed: 2: 6,1,1, Unnamed: 3: COPPER SLUG [Kaynak: Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf (Page 15)]",
+      "source": "Haunton Farmers Solar Project  Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf (Page 15)",
+      "passed": true,
+      "fail_reasons": [
+        "NO_EXPECTED_KEYWORD"
+      ],
+      "has_citation": true,
+      "keyword_matches": [],
+      "expected_keywords": [
+        "item",
+        "4.0"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "DESCRIPTION nedir?",
+      "answer": "\"Description\" (veya Technical Description), projenin \"Genel Teknik Açıklaması\" (General Technical Description) dokümanıdır [Kaynak: Technical Description_Rev01.docx, Tablo 1, Satır 5]. Bu dokümanın numarası 227-007-F-E-00015'tir [Kaynak: Technical Description_Rev01.docx, Tablo 1, Satır 7].",
+      "source": "Technical Description_Rev01.docx",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "description"
+      ],
+      "expected_keywords": [
+        "description",
+        "tree felling"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "DESCRIPTION kaçtır?",
+      "answer": "Projenin genel teknik açıklaması \"General Technical Description\" olarak belirtilmiştir [Kaynak: Technical Description_Rev01.docx, Tablo 1, Satır 5].",
+      "source": "Technical Description_Rev01.docx",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "description"
+      ],
+      "expected_keywords": [
+        "description",
+        "tree felling"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "What is DESCRIPTION?",
+      "answer": "The term refers to the **General Technical Description** of the project [Source: Technical Description_Rev01.docx, Table 1, Row 5]. This description is associated with Document Nº 227-007-F-E-00015 [Source: Technical Description_Rev01.docx, Table 1, Row 7].",
+      "source": "Technical Description_Rev01.docx",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "description"
+      ],
+      "expected_keywords": [
+        "description",
+        "tree felling"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "What is the value of DESCRIPTION?",
+      "answer": "The value of the description (listed under the document title) is General Technical Description [Source: Technical Description_Rev01.docx, Table 1, Row 5].",
+      "source": "Technical Description_Rev01.docx",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "description"
+      ],
+      "expected_keywords": [
+        "description",
+        "tree felling"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "kg/ha nedir?",
+      "answer": "\"kg/ha\", Landscape and Ecological Management Plan (LEMP) kapsamında tohum ekim oranlarını (Sowing Rates) ifade eden bir ölçü birimidir [Kaynak: Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf, Sayfa 24]. İlgili dokümanda ekim oranı 40 kg/ha olarak ",
+      "source": "Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "kg/ha",
+        "40"
+      ],
+      "expected_keywords": [
+        "kg/ha",
+        "40"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "kg/ha kaçtır?",
+      "answer": "kg/ha değeri 40'tır. [Kaynak: Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf, Sayfa 24]",
+      "source": "Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "kg/ha",
+        "40"
+      ],
+      "expected_keywords": [
+        "kg/ha",
+        "40"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "What is kg/ha?",
+      "answer": "The sowing rate for kg/ha is 40. [Source: Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf, Page 24]",
+      "source": "Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "kg/ha",
+        "40"
+      ],
+      "expected_keywords": [
+        "kg/ha",
+        "40"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "What is the value of kg/ha?",
+      "answer": "The value of kg/ha is 40 [Source: Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf, Page 24].",
+      "source": "Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "kg/ha",
+        "40"
+      ],
+      "expected_keywords": [
+        "kg/ha",
+        "40"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "kg/acre nedir?",
+      "answer": "kg/acre, Peyzaj ve Ekolojik Yönetim Planı (LEMP) kapsamında belirtilen bir \"Ekim Oranı\" (Sowing Rate) birimidir. [Kaynak: Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf, Sayfa 24]\n\nBu projede uygulanan kg/acre değeri 16'dır. [Kaynak: Haunton Farme",
+      "source": "Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "kg/acre",
+        "16"
+      ],
+      "expected_keywords": [
+        "kg/acre",
+        "16"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "kg/acre kaçtır?",
+      "answer": "kg/acre değeri 16'dır [Kaynak: Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf, Sayfa 24].",
+      "source": "Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "kg/acre",
+        "16"
+      ],
+      "expected_keywords": [
+        "kg/acre",
+        "16"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "What is kg/acre?",
+      "answer": "The sowing rate is 16 kg/acre. [Source: Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf, Page 24]",
+      "source": "Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "kg/acre",
+        "16"
+      ],
+      "expected_keywords": [
+        "kg/acre",
+        "16"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "What is the value of kg/acre?",
+      "answer": "The value of kg/acre is 16. [Source: Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf, Page 24]",
+      "source": "Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "kg/acre",
+        "16"
+      ],
+      "expected_keywords": [
+        "kg/acre",
+        "16"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "g/m2 nedir?",
+      "answer": "g/m2, Peyzaj ve Ekolojik Yönetim Planı (LEMP) kapsamında kullanılan bir ölçü birimidir ve ilgili tabloda değeri 4 olarak belirtilmiştir. [Kaynak: Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf, Sayfa 24]",
+      "source": "Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "g/m2",
+        "4"
+      ],
+      "expected_keywords": [
+        "g/m2",
+        "4"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "g/m2 kaçtır?",
+      "answer": "g/m2 değeri 4'tür [Kaynak: Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf, Sayfa 24].",
+      "source": "Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "g/m2",
+        "4"
+      ],
+      "expected_keywords": [
+        "g/m2",
+        "4"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "What is g/m2?",
+      "answer": "The value for g/m2 is 4. [Source: Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf, Page 24]",
+      "source": "Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "g/m2",
+        "4"
+      ],
+      "expected_keywords": [
+        "g/m2",
+        "4"
+      ],
+      "is_fallback": false
+    },
+    {
+      "question": "What is the value of g/m2?",
+      "answer": "The value of g/m2 is 4 [Source: Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf, Page 24].",
+      "source": "Haunton Farmers Solar Project Landscape and Ecological Management Plan 5th October 2020 (3) (1).pdf",
+      "passed": true,
+      "fail_reasons": [],
+      "has_citation": true,
+      "keyword_matches": [
+        "g/m2",
+        "4"
+      ],
+      "expected_keywords": [
+        "g/m2",
+        "4"
+      ],
+      "is_fallback": false
+    }
+  ]
+}

@@ -73,6 +73,13 @@ def parse_excel_structured(filepath: Path) -> List[Dict[str, Any]]:
             if df.empty:
                 continue
             
+            # Detect section_type from sheet name
+            sheet_name_lower = sheet_name.lower()
+            if "references" in sheet_name_lower or "reference" in sheet_name_lower:
+                section_type = "references"
+            else:
+                section_type = "table"  # Excel sheets are typically tables
+            
             # Get column names (headers)
             headers = df.columns.tolist()
             
@@ -110,6 +117,7 @@ def parse_excel_structured(filepath: Path) -> List[Dict[str, Any]]:
                     results.append({
                         "sheet": sheet_name,
                         "row_num": row_idx + 2,
+                        "section_type": section_type,
                         "text": structured_text
                     })
         
@@ -143,6 +151,22 @@ def parse_pdf_structured(filepath: Path) -> List[Dict[str, Any]]:
         with pdfplumber.open(filepath) as pdf:
             for page_num, page in enumerate(pdf.pages, start=1):
                 total_pages += 1
+                
+                # Extract text for section detection
+                page_text = page.extract_text() or ""
+                page_text_lower = page_text.lower()
+                
+                # Detect section type based on page content
+                section_type = None
+                if page_num == 1:
+                    section_type = "title"  # First page is title/intro
+                elif "references" in page_text_lower or "reference" in page_text_lower:
+                    # Check if this is actually a references section (not just mentioning the word)
+                    if page_text_lower.count("references") > 2 or "reference" in page_text_lower[:200]:
+                        section_type = "references"
+                elif "table of contents" in page_text_lower or "contents" in page_text_lower[:100]:
+                    section_type = "toc"
+                
                 # Try table extraction first
                 tables = page.extract_tables()
                 
@@ -185,20 +209,22 @@ def parse_pdf_structured(filepath: Path) -> List[Dict[str, Any]]:
                                     f"DATA: {', '.join(data_parts)}"
                                 )
                                 
+                                # Table chunks get section_type="table" (unless already set to references/toc)
+                                chunk_section_type = section_type if section_type in ("references", "toc") else "table"
+                                
                                 results.append({
                                     "page": page_num,
                                     "table_num": table_idx,
+                                    "section_type": chunk_section_type,
                                     "text": structured_text
                                 })
                 
                 # If no tables found or tables didn't cover the whole page, extract text
-                text = page.extract_text()
-                
-                if text:
-                    if len(text.strip()) > 200:
+                if page_text:
+                    if len(page_text.strip()) > 200:
                         text_page_count += 1
                     # Clean and structure the text
-                    text = clean_text(text)
+                    text = clean_text(page_text)
                     
                     # Only add if not empty and we haven't already added tables
                     if text.strip() and (not tables or len(text) > 200):
@@ -211,6 +237,7 @@ def parse_pdf_structured(filepath: Path) -> List[Dict[str, Any]]:
                         
                         results.append({
                             "page": page_num,
+                            "section_type": section_type,  # Can be None, "title", "references", or "toc"
                             "text": structured_text
                         })
         
@@ -258,6 +285,18 @@ def parse_word_structured(filepath: Path) -> List[Dict[str, Any]]:
         current_section = "Introduction"
         section_paragraphs = []
         section_num = 0
+        is_first_section = True
+        
+        def _detect_section_type(section_name: str, section_num: int) -> str | None:
+            """Detect section_type from section name."""
+            section_lower = section_name.lower()
+            if section_num == 0 or is_first_section:
+                return "title"
+            elif "references" in section_lower or "reference" in section_lower:
+                return "references"
+            elif "table of contents" in section_lower or "contents" in section_lower:
+                return "toc"
+            return None
         
         for para in doc.paragraphs:
             text = para.text.strip()
@@ -288,13 +327,17 @@ def parse_word_structured(filepath: Path) -> List[Dict[str, Any]]:
                         f"CONTENT:\n{section_text}"
                     )
                     
+                    section_type = _detect_section_type(current_section, section_num)
+                    
                     results.append({
                         "section": current_section,
                         "section_num": section_num,
+                        "section_type": section_type,
                         "text": structured_text
                     })
                     
                     section_num += 1
+                    is_first_section = False
                 
                 # Start new section
                 current_section = text
@@ -312,9 +355,12 @@ def parse_word_structured(filepath: Path) -> List[Dict[str, Any]]:
                 f"CONTENT:\n{section_text}"
             )
             
+            section_type = _detect_section_type(current_section, section_num)
+            
             results.append({
                 "section": current_section,
                 "section_num": section_num,
+                "section_type": section_type,
                 "text": structured_text
             })
         
@@ -345,6 +391,7 @@ def parse_word_structured(filepath: Path) -> List[Dict[str, Any]]:
                     results.append({
                         "table_num": table_idx,
                         "row_num": row_idx,
+                        "section_type": "table",
                         "text": structured_text
                     })
         
@@ -435,6 +482,11 @@ def process_document(filepath: Path) -> List[Dict[str, Any]]:
                 chunk_data["section"] = section["section"]
             if "table_num" in section:
                 chunk_data["table_num"] = section["table_num"]
+            if "row_num" in section:
+                chunk_data["row_num"] = section["row_num"]
+            # Add section_type metadata (for intent-aware boosting)
+            if "section_type" in section:
+                chunk_data["section_type"] = section["section_type"]
             
             chunks.append(chunk_data)
     

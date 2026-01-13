@@ -51,7 +51,7 @@ async def _generate_answer_openai(system_prompt: str, user_prompt: str) -> str:
             {"role": "user", "content": user_prompt},
         ],
         temperature=0.0,
-        max_tokens=1000,
+        max_tokens=3000,  # Increased from 1000 to allow complete answers for detailed lists
     )
     answer = response.choices[0].message.content
 
@@ -76,7 +76,7 @@ async def _generate_answer_gemini(system_prompt: str, user_prompt: str) -> str:
     payload = {
         "system_instruction": {"parts": [{"text": system_prompt}]},
         "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
-        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 1000},
+        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 3000},  # Increased from 1000 to allow complete answers for detailed lists
     }
 
     # DEBUG: Log prompt details (never log keys)
@@ -139,6 +139,6 @@ async def generate_answer_with_history(system_prompt: str, messages: list[dict])
         model=LLM_MODEL,
         messages=all_messages,
         temperature=0.0,
-        max_tokens=1000,
+        max_tokens=3000,  # Increased from 1000 to allow complete answers for detailed lists
     )
     return response.choices[0].message.content

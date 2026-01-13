@@ -33,6 +33,46 @@ async def process_rag_query(question: str) -> dict:
     Returns:
         Dict with 'answer' and 'source' keys
     """
+    # Step 0: Query Expansion for short/ambiguous entity queries
+    def _expand_query_if_needed(q: str) -> str:
+        """Expand short entity queries using pattern matching."""
+        if not q:
+            return q
+        
+        q_lower = q.lower().strip()
+        q_original = q.strip()
+        
+        # Check if it's a known entity name (case-insensitive)
+        known_entities = {
+            "tyler": "Tyler Grange ecological consultant",
+            "grange": "Tyler Grange ecological consultant",
+            "lemp": "LEMP Landscape and Ecological Management Plan",
+            "eia": "EIA Environmental Impact Assessment"
+        }
+        
+        # Single word queries that match known entities
+        words = q_original.split()
+        if len(words) == 1:
+            word_lower = words[0].lower().rstrip("?")
+            if word_lower in known_entities:
+                return known_entities[word_lower]
+        
+        # "what is X" or "X nedir" patterns
+        if re.search(r"\b(what is|what's|nedir|ne demek)\b", q_lower):
+            for entity, expansion in known_entities.items():
+                if entity in q_lower:
+                    # Replace entity with expansion
+                    pattern = re.compile(rf"\b{re.escape(entity)}\b", re.IGNORECASE)
+                    if pattern.search(q_original):
+                        return pattern.sub(expansion, q_original, count=1)
+        
+        return q
+    
+    expanded_question = _expand_query_if_needed(question)
+    if expanded_question != question:
+        print(f"🔎 DEBUG: Query expanded: '{question}' → '{expanded_question}'")
+        question = expanded_question
+    
     # Step 1: Detect language
     language = detect_language(question)
     fallback = get_fallback_message(language)
@@ -48,9 +88,10 @@ async def process_rag_query(question: str) -> dict:
     
     # Step 3: Search ChromaDB with high k for structured data
     # Recall-first: retrieve more than we will send to the LLM, then filter down.
+    # Hybrid search: combine vector (semantic) + keyword (lexical) for better recall
     retrieval_top_k = max(TOP_K_RESULTS, 120)
-    print(f"\n🔎 DEBUG: Searching ChromaDB with top_k={retrieval_top_k}...")
-    results = search_documents(query_embedding, top_k=retrieval_top_k)
+    print(f"\n🔎 DEBUG: Searching ChromaDB with top_k={retrieval_top_k} (hybrid=True)...")
+    results = search_documents(query_embedding, top_k=retrieval_top_k, hybrid=True, query_text=question)
     
     print(f"🔎 DEBUG: Retrieved {len(results)} raw results from ChromaDB")
     
@@ -156,6 +197,110 @@ async def process_rag_query(question: str) -> dict:
     
     # Step 5: Smart filter (reduce noise while keeping recall)
     # Goal: Keep keyword-matching chunks (high precision) + top-scoring remainder (recall safety net).
+    def _detect_query_intent(q: str) -> dict:
+        """
+        Detect query intent for intent-aware boosting.
+        
+        Returns:
+            dict with 'type' (definition/reference/identity/table/normal) and 'confidence' (0.0-1.0)
+        """
+        q_lower = (q or "").lower()
+        
+        # Definition intent: "what is", "nedir", "tanımı"
+        if re.search(r"\b(what is|what's|nedir|ne demek|tanımı|definition|meaning)\b", q_lower):
+            return {"type": "definition", "confidence": 0.9}
+        
+        # Reference intent: "ref", "reference", "[3]", "[1]"
+        if re.search(r"\b(ref|reference|referans)\b", q_lower) or re.search(r"\[[\d]+\]", q_lower):
+            return {"type": "reference", "confidence": 0.9}
+        
+        # Identity intent: "who is", "kimdir"
+        if re.search(r"\b(who is|who's|kimdir|kim)\b", q_lower):
+            return {"type": "identity", "confidence": 0.9}
+        
+        # Table intent: "table", "tablo", "ratio", "oranı"
+        if re.search(r"\b(table|tablo|ratio|oranı|oran|metraj|voltage|gerilim|current|akım)\b", q_lower):
+            return {"type": "table", "confidence": 0.7}
+        
+        return {"type": "normal", "confidence": 0.5}
+    
+    def _is_entity_lookup(q: str) -> bool:
+        """
+        Detect if query is a short entity lookup (e.g., "tyler?", "what is tyler").
+        
+        Rule: Query is less than 3 words, contains capitalized word OR known entity names, contains NO numeric values.
+        """
+        if not q:
+            return False
+        
+        # Count words (split by whitespace)
+        words = q.strip().split()
+        if len(words) >= 3:
+            return False
+        
+        # Check for capitalized word (entity name) OR known entity names (case-insensitive)
+        has_capitalized = any(w and w[0].isupper() for w in words)
+        known_entities = {"tyler", "grange", "lemp", "eia"}  # Add more as needed
+        q_lower = q.lower()
+        has_known_entity = any(entity in q_lower for entity in known_entities)
+        
+        if not has_capitalized and not has_known_entity:
+            return False
+        
+        # Check for NO numeric values
+        has_numeric = bool(re.search(r'\d', q))
+        if has_numeric:
+            return False
+        
+        return True
+    
+    def _is_organization_query(q: str) -> bool:
+        """
+        Detect if query is likely about an organization/company/consultant rather than equipment.
+        
+        Heuristics:
+        - "what is X" where X is capitalized (likely entity name)
+        - Query contains organization-related keywords
+        - Query is very short (entity name only)
+        """
+        q_lower = (q or "").lower()
+        q_original = q.strip()
+        
+        # Check for "what is X" pattern where X is capitalized
+        if re.search(r"\b(what is|what's|who is|who's|nedir|kimdir)\b", q_lower):
+            # Extract the entity name (word after "what is" / "who is")
+            match = re.search(r"\b(what is|what's|who is|who's|nedir|kimdir)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)", q_original)
+            if match:
+                return True
+        
+        # Very short query with capitalized word (likely entity name)
+        words = q_original.split()
+        if len(words) <= 2:
+            if any(w and w[0].isupper() for w in words):
+                # Check if it's NOT a known equipment term
+                equipment_terms = {"tiger", "neo", "jinko", "sungrow", "sg350", "inverter", "module", "panel", "cable", "kablo"}
+                q_lower_words = [w.lower() for w in words]
+                if not any(term in q_lower_words for term in equipment_terms):
+                    return True
+        
+        # Organization-related keywords
+        org_keywords = {"consultant", "company", "firm", "organization", "author", "producer", "danışman", "şirket", "firma"}
+        if any(kw in q_lower for kw in org_keywords):
+            return True
+        
+        return False
+    
+    def _is_ecology_document(doc_name: str, meta: dict) -> bool:
+        """
+        Check if document is ecology-related (LEMP, EIA, Environmental reports).
+        """
+        dn = (doc_name or "").lower()
+        if "lemp" in dn or "ecological" in dn or "landscape" in dn or "eia" in dn or "environmental" in dn:
+            return True
+        if "tyler" in dn or "grange" in dn:
+            return True
+        return False
+    
     def _select_chunks(
         q: str,
         items: list[dict],
@@ -166,6 +311,18 @@ async def process_rag_query(question: str) -> dict:
             return []
 
         q_lower = (q or "").lower()
+        
+        # Detect intent for boosting
+        intent = _detect_query_intent(q)
+        
+        # ENTITY AMBIGUITY DETECTION: Check if this is a short entity lookup query
+        is_entity_lookup = _is_entity_lookup(q)
+        is_organization_query = _is_organization_query(q)
+        
+        # If "what is X" and X appears to be an organization/entity, prioritize organization over equipment
+        is_entity_definition = False
+        if intent["type"] == "definition" and is_organization_query:
+            is_entity_definition = True
 
         def infer_doc_type(doc_name: str, meta: dict) -> str:
             dt = (meta or {}).get("doc_type")
@@ -183,6 +340,10 @@ async def process_rag_query(question: str) -> dict:
         # Intent hints for doc-type aware prioritization (multi-doc)
         intent_ecology = bool(re.search(r"\b(planting|hedgerow|ecolog|lemp|tyler|grange|bat\s*box|yarasa)\b", q_lower))
         intent_inverter = bool(re.search(r"\b(inverter|inverte|sg350|sungrow)\b", q_lower))
+        
+        # ENTITY AMBIGUITY RULE: For entity lookups, prioritize ecology/environmental documents
+        if is_entity_lookup or is_entity_definition:
+            intent_ecology = True  # Force ecology intent for entity queries
         kws = []
         try:
             kws = extract_keywords(q) or []
@@ -215,6 +376,24 @@ async def process_rag_query(question: str) -> dict:
         if not uniq_kws:
             return items[:max_chunks]
 
+        # ENTITY AMBIGUITY RULE: For entity lookups, constrain to ecology/environmental documents
+        # This prevents misinterpreting "Tyler" as "Tiger" module or other equipment.
+        if is_entity_lookup or is_entity_definition:
+            ecology_items = []
+            for r in items:
+                meta = r.get("metadata") or {}
+                dn = str(meta.get("doc_name") or "")
+                if _is_ecology_document(dn, meta):
+                    ecology_items.append(r)
+            if ecology_items:
+                items = ecology_items
+                # Also boost ecology keywords in expansion
+                if "tyler" in q_lower or "grange" in q_lower:
+                    for kw in ["tyler", "grange", "consultant", "ecological", "lemp"]:
+                        if kw not in seen_kw:
+                            seen_kw.add(kw)
+                            uniq_kws.append(kw)
+
         # If query is explicitly about "bat box" (ecology), constrain to PDFs if any exist.
         # This prevents drifting into electrical "junction box/switch box" chunks.
         if re.search(r"\bbat\s*box\b|\bbatbox\b|\bbat\s*boxes\b", q_lower):
@@ -238,6 +417,14 @@ async def process_rag_query(question: str) -> dict:
             expansions.extend(["brand", "manufacturer"])
         if any(kw in uniq_kws for kw in ["inverter", "inveter"]):
             expansions.extend(["inverter", "sungrow", "sg350"])
+        
+        # ENTITY AMBIGUITY: Expand entity names to full names and related terms
+        if "tyler" in uniq_kws:
+            expansions.extend(["tyler grange", "grange", "consultant", "ecological", "lemp"])
+        if "grange" in uniq_kws:
+            expansions.extend(["tyler grange", "tyler", "consultant"])
+        if "lemp" in uniq_kws:
+            expansions.extend(["landscape", "ecological", "management", "plan"])
 
         for ex in expansions:
             ex = ex.strip().lower()
@@ -258,25 +445,61 @@ async def process_rag_query(question: str) -> dict:
             t = (text or "").lower()
             return any(kw in t for kw in uniq_kws)
 
-        # Doc-type aware boost: for ecology questions, prefer PDFs; for inverter/equipment, prefer Word+Excel.
+        # Doc-type aware boost + Intent-aware boost (section_type metadata)
         def boosted_sort_key(r: dict) -> tuple:
             meta = r.get("metadata") or {}
             dn = str(meta.get("doc_name") or "")
             dt = infer_doc_type(dn, meta)
             score = float(r.get("score") or 0.0)
             boost = 0.0
+            
+            # Intent-aware boosting based on section_type metadata
+            section_type = meta.get("section_type")
+            if section_type:
+                if intent["type"] == "definition" and section_type == "title":
+                    boost += 2.0  # Title chunks are perfect for definitions
+                elif intent["type"] == "reference" and section_type == "references":
+                    boost += 3.0  # References section is critical for ref queries
+                elif intent["type"] == "identity" and section_type == "title":
+                    boost += 1.5  # Title chunks help with identity questions
+                elif intent["type"] == "table" and section_type == "table":
+                    boost += 1.0  # Table chunks for table queries
+            
+            # Doc-type aware boost: for ecology questions, prefer PDFs; for inverter/equipment, prefer Word+Excel.
             if intent_ecology:
                 if dt == "pdf":
                     boost += 2.0
+                if _is_ecology_document(dn, meta):
+                    boost += 2.5  # Strong boost for LEMP/EIA/environmental documents
                 if "landscape" in dn.lower() or "ecological" in dn.lower():
                     boost += 1.0
                 if dt == "excel":
-                    boost -= 1.0
+                    boost -= 2.0  # Strong de-prioritize Excel for entity queries
+                if "technical description" in dn.lower() or "bill of m" in dn.lower():
+                    boost -= 1.5  # De-prioritize technical docs for entity queries
             if intent_inverter:
                 if dt in ("word", "excel"):
                     boost += 1.0
                 if "technical description" in dn.lower():
                     boost += 1.0
+            
+            # ENTITY AMBIGUITY RULE: For entity queries, strongly prioritize organization/ecology docs
+            if is_entity_lookup or is_entity_definition:
+                if _is_ecology_document(dn, meta):
+                    boost += 5.0  # Very strong boost for ecology docs
+                if dt == "pdf" and ("lemp" in dn.lower() or "ecological" in dn.lower() or "landscape" in dn.lower()):
+                    boost += 3.0
+                # Strongly de-prioritize technical/equipment documents
+                if dt == "excel":
+                    boost -= 5.0
+                if "technical description" in dn.lower() or "bill of m" in dn.lower():
+                    boost -= 4.0
+                # De-prioritize chunks that mention equipment terms (Tiger, Jinko, module, etc.)
+                text_lower = (r.get("text") or "").lower()
+                equipment_terms = ["tiger", "neo", "jinko", "module", "panel", "inverter", "sg350", "sungrow"]
+                if any(term in text_lower for term in equipment_terms):
+                    boost -= 2.0
+            
             return (-(score + boost), dn)
 
         kw_hits = [r for r in items if has_kw(r.get("text", ""))]
@@ -320,79 +543,15 @@ async def process_rag_query(question: str) -> dict:
 
     selected_results = _select_chunks(question, relevant_results)
 
-    # WHY/RISK/WHAT-HAPPENS strict handling:
-    # - If the user asks for reasons/risks/consequences and the context does not explicitly state a reason,
-    #   we MUST NOT infer. Return fallback + relevant excerpts (mentions) WITHOUT explaining causality.
-    def _is_why_intent(q: str) -> bool:
-        ql = (q or "").lower()
-        return bool(
-            re.search(
-                r"\b(why|neden|niye|riskli|ne olur|nolur|what happens|issue|problem|illegal|ceza|yasak|suçlu|sorumlu|daha iyi mi|olursa)\b",
-                ql,
-            )
-        )
-
-    def _context_has_explicit_reason(items: list[dict]) -> bool:
-        patterns = [
-            r"\bbecause\b",
-            r"\bin order to\b",
-            r"\bto avoid\b",
-            r"\bto prevent\b",
-            r"\bso that\b",
-            r"\btherefore\b",
-            r"\bçünkü\b",
-            r"\bbu nedenle\b",
-            r"\bamacıyla\b",
-            r"\bönlemek için\b",
-        ]
-        for r in items or []:
-            tl = (r.get("text") or "").lower()
-            if any(re.search(p, tl) for p in patterns):
-                return True
-        return False
-
-    def _build_mentions(items: list[dict], max_n: int = 5) -> tuple[str | None, list[str]]:
-        doc_names = []
-        mentions = []
-        for r in (items or [])[:25]:
-            meta = r.get("metadata") or {}
-            dn = meta.get("doc_name")
-            if dn and dn not in doc_names:
-                doc_names.append(dn)
-
-            text = (r.get("text") or "").strip()
-            if not text:
-                continue
-
-            page = meta.get("page")
-            sheet = meta.get("sheet")
-            table_num = meta.get("table_num")
-            loc = None
-            if table_num is not None:
-                loc = f"Table: {table_num}"
-            elif sheet:
-                loc = f"Sheet: {sheet}"
-            elif page:
-                loc = f"Page: {page}"
-
-            snippet = text.replace("\n", " ")
-            snippet = re.sub(r"\s+", " ", snippet).strip()
-            snippet = snippet[:220] + ("…" if len(snippet) > 220 else "")
-            cite = f"[Kaynak: {dn}{', ' + loc if loc else ''}]"
-            mentions.append(f'- "{snippet}" {cite}')
-            if len(mentions) >= max_n:
-                break
-        source_list = ", ".join(doc_names[:5]) if doc_names else None
-        return source_list, mentions
-
-    if _is_why_intent(question) and not _context_has_explicit_reason(selected_results):
-        source_list, mentions = _build_mentions(selected_results, max_n=5)
-        ans = fallback
-        if source_list:
-            ans = f"{ans} [Kaynak: {source_list}]"
-        if mentions:
-            ans = ans + "\n\nİLGİLİ BULGULAR (NEDEN/SONUÇ AÇIKLANMIYOR):\n" + "\n".join(mentions)
-        return {"answer": ans, "source": source_list}
+    # ANTIGRAVITY MODE: Removed all Python-level "safety" filters that were blocking intelligent responses.
+    # The LLM (Gemini 3 Flash) is now fully trusted to synthesize answers from context, including:
+    # - Table data interpretation (e.g., "dc/ ratio" from DATA rows)
+    # - Acronym resolution (e.g., "LEMP" from document titles)
+    # - Reference extraction (e.g., "ref [3]" from REFERENCES sections)
+    # - Reasonable inference when context provides sufficient clues
+    # 
+    # The system prompt (system_general.txt) enforces CEW guardrails (no hallucination, citations required),
+    # but we no longer pre-filter questions at the Python level.
 
     # Deterministic aggregation for "how many inverters" / "kaç tane inverter" questions.
     def _extract_kv_pairs_from_data(text: str) -> list[tuple[str, str]]:
