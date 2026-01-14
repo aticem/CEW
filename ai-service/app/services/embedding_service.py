@@ -52,11 +52,19 @@ def _generate_embedding_openai_sync(text: str) -> list[float]:
 async def _generate_embedding_gemini(text: str) -> list[float]:
     if not GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY is missing for embedding.")
+    
+    if not GEMINI_EMBEDDING_MODEL:
+        raise RuntimeError("GEMINI_EMBEDDING_MODEL is not configured.")
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_EMBEDDING_MODEL}:embedContent"
+    # Normalize model name: "gemini-embedding-001" -> "embedding-001"
+    model_name = GEMINI_EMBEDDING_MODEL
+    if model_name and model_name.startswith("gemini-"):
+        model_name = model_name.replace("gemini-", "", 1)
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:embedContent"
     params = {"key": GEMINI_API_KEY}
     payload = {
-        "model": f"models/{GEMINI_EMBEDDING_MODEL}",
+        "model": f"models/{model_name}",
         "content": {"parts": [{"text": text}]},
     }
 
@@ -70,11 +78,19 @@ async def _generate_embedding_gemini(text: str) -> list[float]:
 def _generate_embedding_gemini_sync(text: str) -> list[float]:
     if not GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY is missing for embedding.")
+    
+    if not GEMINI_EMBEDDING_MODEL:
+        raise RuntimeError("GEMINI_EMBEDDING_MODEL is not configured.")
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_EMBEDDING_MODEL}:embedContent"
+    # Normalize model name: "gemini-embedding-001" -> "embedding-001"
+    model_name = GEMINI_EMBEDDING_MODEL
+    if model_name and model_name.startswith("gemini-"):
+        model_name = model_name.replace("gemini-", "", 1)
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:embedContent"
     params = {"key": GEMINI_API_KEY}
     payload = {
-        "model": f"models/{GEMINI_EMBEDDING_MODEL}",
+        "model": f"models/{model_name}",
         "content": {"parts": [{"text": text}]},
     }
 

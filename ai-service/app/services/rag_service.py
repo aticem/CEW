@@ -14,10 +14,45 @@ from app.config import TOP_K_RESULTS, SIMILARITY_THRESHOLD
 from app.utils.text_utils import extract_keywords
 
 
+def _expand_query_if_needed(q: str) -> str:
+    """Expand short entity queries using pattern matching."""
+    if not q:
+        return q
+
+    q_lower = q.lower().strip()
+    q_original = q.strip()
+
+    # Check if it's a known entity name (case-insensitive)
+    known_entities = {
+        "tyler": "Tyler Grange ecological consultant",
+        "grange": "Tyler Grange ecological consultant",
+        "lemp": "LEMP Landscape and Ecological Management Plan",
+        "eia": "EIA Environmental Impact Assessment"
+    }
+
+    # Single word queries that match known entities
+    words = q_original.split()
+    if len(words) == 1:
+        word_lower = words[0].lower().rstrip("?")
+        if word_lower in known_entities:
+            return known_entities[word_lower]
+
+    # "what is X" or "X nedir" patterns
+    if re.search(r"\b(what is|what's|nedir|ne demek)\b", q_lower):
+        for entity, expansion in known_entities.items():
+            if entity in q_lower:
+                # Replace entity with expansion
+                pattern = re.compile(rf"\b{re.escape(entity)}\b", re.IGNORECASE)
+                if pattern.search(q_original):
+                    return pattern.sub(expansion, q_original, count=1)
+
+    return q
+
+
 async def process_rag_query(question: str) -> dict:
     """
     Process a question using the RAG pipeline.
-    
+
     Steps:
     1. Detect language (EN/TR)
     2. Generate embedding for question
@@ -26,48 +61,14 @@ async def process_rag_query(question: str) -> dict:
     5. Build prompt with chunks
     6. Call LLM
     7. Return answer with source
-    
+
     Args:
         question: User's natural language question
-        
+
     Returns:
         Dict with 'answer' and 'source' keys
     """
     # Step 0: Query Expansion for short/ambiguous entity queries
-    def _expand_query_if_needed(q: str) -> str:
-        """Expand short entity queries using pattern matching."""
-        if not q:
-            return q
-        
-        q_lower = q.lower().strip()
-        q_original = q.strip()
-        
-        # Check if it's a known entity name (case-insensitive)
-        known_entities = {
-            "tyler": "Tyler Grange ecological consultant",
-            "grange": "Tyler Grange ecological consultant",
-            "lemp": "LEMP Landscape and Ecological Management Plan",
-            "eia": "EIA Environmental Impact Assessment"
-        }
-        
-        # Single word queries that match known entities
-        words = q_original.split()
-        if len(words) == 1:
-            word_lower = words[0].lower().rstrip("?")
-            if word_lower in known_entities:
-                return known_entities[word_lower]
-        
-        # "what is X" or "X nedir" patterns
-        if re.search(r"\b(what is|what's|nedir|ne demek)\b", q_lower):
-            for entity, expansion in known_entities.items():
-                if entity in q_lower:
-                    # Replace entity with expansion
-                    pattern = re.compile(rf"\b{re.escape(entity)}\b", re.IGNORECASE)
-                    if pattern.search(q_original):
-                        return pattern.sub(expansion, q_original, count=1)
-        
-        return q
-    
     expanded_question = _expand_query_if_needed(question)
     if expanded_question != question:
         print(f"🔎 DEBUG: Query expanded: '{question}' → '{expanded_question}'")
