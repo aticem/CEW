@@ -1,0 +1,9 @@
+node_modules/
+.env
+.DS_Store
+API_KEYS_AND_SECRETS.md
+__pycache__/
+*.pyc
+.venv
+venv/
+.cursor/
