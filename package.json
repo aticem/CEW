@@ -3,9 +3,9 @@
   "private": true,
   "description": "CEW - Construction Engineering Workflow Application",
   "scripts": {
-    "dev": "npm --prefix CEW1/_root run dev",
+    "dev": "npm --prefix CEW1-1/_root run dev",
     "dev:ai": "npm --prefix ai-service run dev",
-    "build": "npm --prefix CEW1/_root run build",
+    "build": "npm --prefix CEW1-1/_root run build",
     "build:ai": "npm --prefix ai-service run build",
     "ingest": "npm --prefix ai-service run ingest",
     "test:ai": "npm --prefix ai-service run test",

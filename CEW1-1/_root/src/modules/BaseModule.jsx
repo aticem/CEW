@@ -5,7 +5,6 @@ import '../App.css';
 import SubmitModal from '../components/SubmitModal';
 import useDailyLog from '../hooks/useDailyLog';
 import { useChartExport } from '../hooks/useChartExport';
-import { useProgress } from '../context/ProgressContext.jsx';
 import Papa from 'papaparse';
 import {
   asLineStrings,
@@ -318,9 +317,6 @@ export default function BaseModule({
   customPanelLogic: _customPanelLogic = null,
   customBoundaryLogic = null,
 }) {
-  // Progress context for AI Assistant (shares real-time data with AIAssistant component)
-  const { updateProgress } = useProgress();
-
   // Global status line used across module load/parsing flows.
   const [status, setStatus] = useState('Loading...');
 
@@ -14861,18 +14857,6 @@ export default function BaseModule({
   const remainingTotal = Math.max(0, overallTotal - completedTotal);
 
   const simpleCounterUnit = typeof activeMode?.simpleCounterUnit === 'string' ? activeMode.simpleCounterUnit : 'm';
-
-  // Update AI Assistant context with real-time progress data
-  useEffect(() => {
-    updateProgress({
-      module: moduleName,
-      total: overallTotal,
-      completed: completedTotal,
-      remaining: remainingTotal,
-      percentage: completedPct,
-      unit: simpleCounterUnit || 'units',
-    });
-  }, [moduleName, overallTotal, completedTotal, remainingTotal, completedPct, simpleCounterUnit, updateProgress]);
   const formatSimpleCounter = (value) => {
     const v = Number(value) || 0;
     return `${v.toFixed(0)}${simpleCounterUnit ? ` ${simpleCounterUnit}` : ''}`;
@@ -19398,20 +19382,6 @@ export default function BaseModule({
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         onSubmit={(record) => {
-          // Helper: Send snapshot to AI backend (non-blocking, silent fail)
-          const sendModuleSnapshot = (workAmountOverride) => {
-            const moduleKey = activeMode?.key || 'UNKNOWN';
-            const moduleLabel = activeMode?.label || moduleKey;
-            sendSnapshotAfterSubmit({
-              moduleKey,
-              moduleLabel,
-              completedToday: typeof workAmountOverride === 'number' ? workAmountOverride : (record.total_cable || 0),
-              completedTotal: completedTotal + (typeof workAmountOverride === 'number' ? workAmountOverride : (record.total_cable || 0)),
-              overallTotal,
-              unit: simpleCounterUnit || record.unit || 'm',
-            });
-          };
-
           // Add notes from the same date to the record
           const recordDate = record.date;
           const notesOnDate = notes.filter(n => {
@@ -19513,7 +19483,6 @@ export default function BaseModule({
               setMvfActiveSegmentKeys(new Set());
             
             alert('Work submitted successfully!');
-            sendModuleSnapshot(meters);
             return;
           }
 
@@ -19555,7 +19524,6 @@ export default function BaseModule({
             });
 
             alert('Work submitted successfully!');
-            sendModuleSnapshot(meters);
             return;
           }
 
@@ -19614,7 +19582,6 @@ export default function BaseModule({
             };
             addRecord(recordWithSelections);
             alert('Work submitted successfully!');
-            sendModuleSnapshot();
             return;
           }
 
@@ -19675,7 +19642,6 @@ export default function BaseModule({
               dcttCommittedPanelIdsRef.current = nextCommitted;
             }
             alert('Work submitted successfully!');
-            sendModuleSnapshot();
             return;
           }
 
@@ -19700,7 +19666,6 @@ export default function BaseModule({
             // Clear selection after submit
             setDatpSelectedTrenchParts([]);
             alert('Work submitted successfully!');
-            sendModuleSnapshot(meters);
             return;
           }
 
@@ -19739,7 +19704,6 @@ export default function BaseModule({
             // Clear ONLY the draft selection after submit
             setMvftSelectedTrenchParts([]);
             alert('Work submitted successfully!');
-            sendModuleSnapshot(meters);
             return;
           }
 
@@ -19779,7 +19743,6 @@ export default function BaseModule({
               setPtepSelectedParameterParts([]);
             }
             alert('Work submitted successfully!');
-            sendModuleSnapshot();
             return;
           }
 
@@ -19806,7 +19769,6 @@ export default function BaseModule({
             };
             addRecord(recordWithSelections);
             alert('Work submitted successfully!');
-            sendModuleSnapshot(totalCables);
             return;
           }
 
@@ -19827,7 +19789,6 @@ export default function BaseModule({
             };
             addRecord(recordWithSelections);
             alert('Work submitted successfully!');
-            sendModuleSnapshot(totalCables);
             return;
           }
 
@@ -19893,7 +19854,6 @@ export default function BaseModule({
           });
 
           alert('Work submitted successfully!');
-          sendModuleSnapshot(newWorkAmount);
         }}
         moduleKey={isMC4
           ? (mc4SelectionMode === 'termination_panel'
