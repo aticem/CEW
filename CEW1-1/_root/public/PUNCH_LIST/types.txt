@@ -1,0 +1,8 @@
+Elektrik
+Mekanik
+Sivil
+Otomasyon
+Kablolama
+Zemin İşleri
+Boyama
+Izolasyon

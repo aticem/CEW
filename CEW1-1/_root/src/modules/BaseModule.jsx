@@ -15,6 +15,12 @@ import {
   subtractInterval,
 } from '../utils/lineBoxSelection';
 
+// Punch List Services
+import * as plDb from './punch-list/services/db';
+import { loadConfig as plLoadConfig } from './punch-list/services/configLoader';
+import { exportToPdf as plExportToPdf, exportToExcel as plExportToExcel, exportAllHistoryToPdf as plExportAllHistoryToPdf, exportAllHistoryToExcel as plExportAllHistoryToExcel } from './punch-list/services/export';
+
+
 // ═══════════════════════════════════════════════════════════════
 // CUSTOM CANVAS TEXT LABEL CLASS
 // ═══════════════════════════════════════════════════════════════
@@ -52,11 +58,11 @@ L.TextLabel = L.CircleMarker.extend({
 
   _updatePath: function () {
     if (!this._renderer || !this._renderer._ctx) return;
-    
+
     const ctx = this._renderer._ctx;
     const p = this._point;
     const map = this._map;
-    
+
     if (!map || !p) return;
 
     const zoom = map.getZoom();
@@ -75,7 +81,7 @@ L.TextLabel = L.CircleMarker.extend({
     if (fontSize < 1) return;
 
     ctx.save();
-    
+
     const rotationRad = (this.options.rotation || 0) * Math.PI / 180;
     ctx.translate(p.x, p.y);
     ctx.rotate(rotationRad);
@@ -197,7 +203,7 @@ L.TextLabel = L.CircleMarker.extend({
       ctx.lineTo(w / 2, y);
       ctx.stroke();
     }
-    
+
     ctx.restore();
   }
 });
@@ -222,24 +228,24 @@ const canvasRenderer = L.canvas({ padding: 0.1 });
 // ═══════════════════════════════════════════════════════════════
 function calculateLineAngle(coords) {
   if (!coords || coords.length < 2) return 0;
-  
+
   let maxDist = 0;
   let bestAngle = 0;
-  
+
   for (let i = 0; i < coords.length - 1; i++) {
-    const dx = coords[i+1][0] - coords[i][0];
-    const dy = coords[i+1][1] - coords[i][1];
-    const dist = Math.sqrt(dx*dx + dy*dy);
-    
+    const dx = coords[i + 1][0] - coords[i][0];
+    const dy = coords[i + 1][1] - coords[i][1];
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
     if (dist > maxDist) {
       maxDist = dist;
       bestAngle = Math.atan2(dy, dx) * 180 / Math.PI;
     }
   }
-  
+
   if (bestAngle > 90) bestAngle -= 180;
   if (bestAngle < -90) bestAngle += 180;
-  
+
   return bestAngle;
 }
 
@@ -445,6 +451,22 @@ export default function BaseModule({
     isDCTTRef.current = isDCTT;
   }, [isDCTT]);
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   // ─────────────────────────────────────────────────────────────
   // GENERIC POLYGON SELECTION (shared across many modules)
   // ─────────────────────────────────────────────────────────────
@@ -619,7 +641,7 @@ export default function BaseModule({
   const polygonById = useRef({}); // uniqueId -> {layer, stringId}
   const prevHistoryHighlightRef = useRef(new Set()); // Track previously highlighted history polygons
   const mvtHistoryHighlightStationSetRef = useRef(new Set()); // stationNorms highlighted by history selection (MVT termination)
-                const boxRectRef = useRef(null);
+  const boxRectRef = useRef(null);
   const draggingRef = useRef(null);
   const rafRef = useRef(null);
   const stringTextPointsRef = useRef([]); // [{lat,lng,text,angle,stringId}]
@@ -1317,7 +1339,7 @@ export default function BaseModule({
   useEffect(() => {
     if (!isLVTT || String(lvttSubMode || 'termination') !== 'testing') setLvttTestFilter(null);
   }, [isLVTT, lvttSubMode]);
-  
+
   // TABLE_INSTALLATION: küçük ve büyük masa sayaçları (masa = 2 panel üst üste)
   const [tableSmallCount, setTableSmallCount] = useState(0); // 2V14 küçük masalar
   const [tableBigCount, setTableBigCount] = useState(0);     // 2V27 büyük masalar
@@ -1355,7 +1377,7 @@ export default function BaseModule({
   const lvibInvBoxLayerRef = useRef(null);
   // LVIB: polygonId -> boxType mapping
   const lvibBoxTypeRef = useRef(new Map()); // Map<polygonId, 'lvBox'|'invBox'>
-  
+
   const [totalPlus, setTotalPlus] = useState(0); // Total +DC Cable from CSV
   const [totalMinus, setTotalMinus] = useState(0); // Total -DC Cable from CSV
   const [completedPlus, setCompletedPlus] = useState(0); // Selected +DC Cable
@@ -1368,7 +1390,7 @@ export default function BaseModule({
   }, [historyOpen]);
   const [historySortBy, setHistorySortBy] = useState('date'); // 'date', 'workers', 'cable'
   const [historySortOrder, setHistorySortOrder] = useState('desc'); // 'asc', 'desc'
-  
+
   // History editing mode states
   const [historySelectedRecordId, setHistorySelectedRecordId] = useState(null); // ID of selected record in history
   const historySelectedRecordIdRef = useRef(historySelectedRecordId);
@@ -1377,7 +1399,7 @@ export default function BaseModule({
     // Also set on window for Leaflet click handlers (they run outside React's event system)
     window.__historySelectedRecordId = historySelectedRecordId;
   }, [historySelectedRecordId]);
-  
+
   // Local editing state for history record polygons
   const [editingPolygonIds, setEditingPolygonIds] = useState([]);
   const editingPolygonIdsRef = useRef([]);
@@ -1385,29 +1407,29 @@ export default function BaseModule({
     editingPolygonIdsRef.current = editingPolygonIds;
     window.__editingPolygonIds = editingPolygonIds;
   }, [editingPolygonIds]);
-  
+
   // Editing amount state (updated directly from click handler)
   const [editingAmountState, setEditingAmountState] = useState(0);
   useEffect(() => {
     window.__setEditingAmountState = setEditingAmountState;
   }, []);
-  
+
   // Draggable history panel position
   const [historyPanelPos, setHistoryPanelPos] = useState({ x: 0, y: 0 });
   const [historyDragging, setHistoryDragging] = useState(false);
   const historyDragOffset = useRef({ x: 0, y: 0 });
   const historyPanelRef = useRef(null);
-  
+
   // Note Mode state - PUNCH_LIST always starts in punch mode
   const [noteMode, setNoteMode] = useState(isPL);
-  
+
   // PUNCH_LIST: Ensure punch mode is always active
   useEffect(() => {
     if (isPL && !noteMode) {
       setNoteMode(true);
     }
   }, [isPL, noteMode]);
-  
+
   const initialNotes = (() => {
     const saved = localStorage.getItem('cew_notes');
     return saved ? JSON.parse(saved) : [];
@@ -1439,69 +1461,120 @@ export default function BaseModule({
     '#06b6d4', // Cyan
     '#78716c', // Stone/Gray
   ];
-  
+
   // Special color for completed punches
   const PUNCH_COMPLETED_COLOR = '#22c55e';
 
   // Contractors: { id, name, color }
-  const [plContractors, setPlContractors] = useState(() => {
-    try {
-      const saved = localStorage.getItem(PL_CONTRACTORS_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch (_e) {
-      return [];
-    }
-  });
+  // Contractors: { id, name, color }
+  const [plContractors, setPlContractors] = useState([]);
 
-  // Punch points: { id, lat, lng, contractorId, text, photoDataUrl, photoName, tableId?, createdAt, punchNumber }
-  const [plPunches, setPlPunches] = useState(() => {
-    try {
-      const saved = localStorage.getItem(PL_PUNCHES_KEY);
-      if (!saved) return [];
-      const punches = JSON.parse(saved);
-      // Ensure all punches have a punchNumber (migrate old punches)
-      let maxNum = 0;
-      punches.forEach(p => {
-        if (p.punchNumber) maxNum = Math.max(maxNum, p.punchNumber);
-      });
-      // Assign numbers to punches without one
-      punches.forEach((p) => {
-        if (!p.punchNumber) {
-          maxNum++;
-          p.punchNumber = maxNum;
+  // Disciplines: { id, name } - loaded from types.txt
+  const [plDisciplines, setPlDisciplines] = useState([]);
+
+  // Currently selected discipline for new punches
+  const [plSelectedDiscipline, setPlSelectedDiscipline] = useState('');
+
+  // Discipline dropdown state (Live Filter)
+  const [plDisciplineDropdownOpen, setPlDisciplineDropdownOpen] = useState(false);
+  const [plSelectedDisciplineFilter, setPlSelectedDisciplineFilter] = useState(''); // '' = All
+
+  // Multiple Punch Lists State
+  const [plActiveListId, setPlActiveListId] = useState(null);
+  const [plLists, setPlLists] = useState([]);
+  const [plListDropdownOpen, setPlListDropdownOpen] = useState(false);
+
+  // Punch list history (submitted snapshots)
+  const [plHistory, setPlHistory] = useState([]);
+  const plHistoryRef = useRef(plHistory);
+  useEffect(() => { plHistoryRef.current = plHistory; }, [plHistory]);
+
+  // Submit modal state
+  const [plShowSubmitModal, setPlShowSubmitModal] = useState(false);
+  const [plSubmitName, setPlSubmitName] = useState('');
+
+  // All history view state
+  const [plShowAllHistory, setPlShowAllHistory] = useState(false);
+
+  // Load Config & Lists on mount (isPL)
+  useEffect(() => {
+    if (!isPL) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        // Sync config
+        const { contractors, disciplines } = await plLoadConfig();
+        if (cancelled) return;
+        setPlDisciplines(disciplines);
+        setPlContractors(contractors);
+
+        // Load Lists
+        const lists = await plDb.getAllPunchLists();
+        if (cancelled) return;
+
+        let currentId = null;
+        if (!lists || lists.length === 0) {
+          // Create default list
+          const defaultList = { id: `list-${Date.now()}`, name: 'Punch List 1', createdAt: new Date().toISOString() };
+          await plDb.savePunchList(defaultList);
+          lists.push(defaultList);
+          currentId = defaultList.id;
+        } else {
+          // Default to first
+          currentId = lists[0].id;
         }
-      });
-      return punches;
-    } catch (_e) {
-      return [];
-    }
-  });
-  
-  // Punch counter for permanent numbering - always starts from max existing punchNumber
-  const PL_COUNTER_KEY = 'punch_list_counter';
-  const [plPunchCounter, setPlPunchCounter] = useState(() => {
-    try {
-      // Always calculate from existing punches to ensure continuity
-      const savedPunches = localStorage.getItem(PL_PUNCHES_KEY);
-      if (savedPunches) {
-        const punches = JSON.parse(savedPunches);
-        const maxNum = Math.max(0, ...punches.map(p => p.punchNumber || 0));
-        return maxNum;
+
+        setPlLists(lists);
+        // Only set active if not already set (preserve selection if hot reload logic allows, though here we overwrite)
+        setPlActiveListId(currentId);
+
+        // Load History (Global for now)
+        const history = await plDb.getAllHistory();
+        if (cancelled) return;
+        setPlHistory(history);
+
+      } catch (err) {
+        console.error('Failed to load punch list data:', err);
       }
-      return 0;
-    } catch (_e) {
-      return 0;
-    }
-  });
-  
+    })();
+    return () => { cancelled = true; };
+  }, [isPL]);
+
+  // Load Punches when Active List Changes
+  useEffect(() => {
+    if (!isPL || !plActiveListId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const punches = await plDb.getPunchesByListId(plActiveListId);
+        if (cancelled) return;
+        setPlPunches(punches);
+
+        // Init counter
+        const maxNum = Math.max(0, ...punches.map(p => p.punchNumber || 0));
+        setPlPunchCounter(maxNum);
+      } catch (e) { console.error(e); }
+    })();
+    return () => { cancelled = true; };
+  }, [isPL, plActiveListId]);
+
+
+  // Punch points: { id, lat, lng, contractorId, text, photoDataUrl, photoName, tableId?, createdAt, punchNumber, discipline }
+  const [plPunches, setPlPunches] = useState([]);
+
+  // Punch counter for permanent numbering - always starts from max existing punchNumber
+  // Punch counter for permanent numbering - initialized from DB load
+  const [plPunchCounter, setPlPunchCounter] = useState(0);
+
   // Ref to track current counter value for async handlers
   const plPunchCounterRef = useRef(plPunchCounter);
-  
+
   // Keep counter ref in sync with state
   useEffect(() => {
     plPunchCounterRef.current = plPunchCounter;
   }, [plPunchCounter]);
-  
+
   // Persist punch counter
   useEffect(() => {
     try {
@@ -1514,7 +1587,7 @@ export default function BaseModule({
   // Currently selected contractor for new punches
   const [plSelectedContractorId, setPlSelectedContractorId] = useState(null);
   const plSelectedContractorIdRef = useRef(null); // Ref to track selected contractor for async handlers
-  
+
   // Keep contractor ref in sync with state
   useEffect(() => {
     plSelectedContractorIdRef.current = plSelectedContractorId;
@@ -1526,28 +1599,39 @@ export default function BaseModule({
   const [plNewContractorName, setPlNewContractorName] = useState('');
   const [plNewContractorColor, setPlNewContractorColor] = useState(DEFAULT_PUNCH_COLORS[0]);
   const [plShowAddContractorForm, setPlShowAddContractorForm] = useState(false); // Show add form when contractors exist
-  
+
   // Ref to capture hamburger menu state at mousedown time (before App.jsx closes it)
   const plHamburgerWasOpenOnMouseDownRef = useRef(false);
-  
-  // Contractor editing state - must be declared before useEffect that references it
-  const [plEditingContractor, setPlEditingContractor] = useState(null); // contractor being edited
-  const [plEditContractorName, setPlEditContractorName] = useState('');
-  const [plEditContractorColor, setPlEditContractorColor] = useState('');
-  
-  // Helper to get first available (unused) color
-  const getFirstAvailableColor = useCallback(() => {
-    const usedColors = new Set(plContractors.map(c => c.color));
-    return DEFAULT_PUNCH_COLORS.find(clr => !usedColors.has(clr)) || DEFAULT_PUNCH_COLORS[0];
-  }, [plContractors]);
-  
-  // Auto-select first available color when dropdown opens
-  useEffect(() => {
-    if (plContractorDropdownOpen && !plEditingContractor) {
-      setPlNewContractorColor(getFirstAvailableColor());
-    }
-  }, [plContractorDropdownOpen, plEditingContractor, getFirstAvailableColor]);
-  
+
+  // History Panel State (Draggable)
+  const [plHistoryPos, setPlHistoryPos] = useState({ x: 100, y: 100 });
+  const [plViewingHistoryId, setPlViewingHistoryId] = useState(null); // ID of punch list being viewed in detail
+  const plHistoryDragStart = useCallback((e) => {
+    if (e.button !== 0) return; // Left click only
+    // e.preventDefault(); // Don't prevent default immediately if interacting with content? No, header drag needs preventDefault to avoid selection
+    // But we attach this to header.
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startLeft = plHistoryPos.x;
+    const startTop = plHistoryPos.y;
+
+    const onMouseMove = (ev) => {
+      ev.preventDefault();
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      setPlHistoryPos({ x: startLeft + dx, y: startTop + dy });
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [plHistoryPos]);
+
   // Keep ref in sync with state
   useEffect(() => {
     plContractorDropdownOpenRef.current = plContractorDropdownOpen;
@@ -1561,110 +1645,121 @@ export default function BaseModule({
   const [plEditingPunch, setPlEditingPunch] = useState(null); // punch object being edited
   const [plPunchText, setPlPunchText] = useState('');
   const [plPunchContractorId, setPlPunchContractorId] = useState(null);
+  const [plPunchDiscipline, setPlPunchDiscipline] = useState(''); // NEW: discipline for edit popup
   const [plPunchPhotoDataUrl, setPlPunchPhotoDataUrl] = useState(null);
   const [plPunchPhotoName, setPlPunchPhotoName] = useState('');
   const [plPopupPosition, setPlPopupPosition] = useState(null); // {x, y} screen coords for dynamic positioning
+
   const plPunchPhotoInputRef = useRef(null);
   const plPunchMarkersRef = useRef({}); // id -> marker
   const plIsoInnerRef = useRef(null); // ref for isometric inner container (for fit button)
-  
+
   // Selected punches (for box selection and deletion)
   const [plSelectedPunches, setPlSelectedPunches] = useState(new Set());
-  
+
   // Drag state for moving punches
   const plDraggingPunchRef = useRef(null); // { punchId, startLatLng, marker }
 
-  // Persist contractors
-  useEffect(() => {
-    try {
-      localStorage.setItem(PL_CONTRACTORS_KEY, JSON.stringify(plContractors));
-    } catch (_e) {
-      void _e;
-    }
-  }, [plContractors]);
 
-  // Persist punches
-  useEffect(() => {
-    try {
-      localStorage.setItem(PL_PUNCHES_KEY, JSON.stringify(plPunches));
-    } catch (_e) {
-      void _e;
-    }
-  }, [plPunches]);
+  // Contractor management is now READ-ONLY from TXT file
+  // No add/remove/update functions needed.
 
-  // Add contractor
-  const plAddContractor = useCallback((name, color) => {
-    if (!name?.trim()) return null;
-    const id = `contractor_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-    // Always uppercase contractor names
-    const newC = { id, name: name.trim().toUpperCase(), color: color || DEFAULT_PUNCH_COLORS[0] };
-    setPlContractors(prev => [...prev, newC]);
-    return newC;
-  }, []);
-
-  // Remove contractor
-  const plRemoveContractor = useCallback((contractorId) => {
-    setPlContractors(prev => prev.filter(c => c.id !== contractorId));
-  }, []);
-
-  // Update contractor (name and/or color) - always uppercase names
-  const plUpdateContractor = useCallback((contractorId, name, color) => {
-    setPlContractors(prev => prev.map(c => 
-      c.id === contractorId 
-        ? { ...c, name: (name?.trim() || c.name).toUpperCase(), color: color || c.color }
-        : c
-    ));
-  }, []);
 
   // Get contractor by ID
   const plGetContractor = useCallback((contractorId) => {
     return plContractors.find(c => c.id === contractorId) || null;
   }, [plContractors]);
 
+  // Helper: Switch List
+  const plSwitchList = useCallback(async (listId) => {
+    // Punches reload via useEffect [plActiveListId]
+    setPlActiveListId(listId);
+    setPlListDropdownOpen(false);
+  }, []);
+
+  // Helper: Create New List
+  const plCreateNewList = useCallback(async () => {
+    const name = prompt('Enter new Punch List name:', `Punch List ${plLists.length + 1}`);
+    if (!name) return;
+    const newList = { id: `list-${Date.now()}`, name, createdAt: new Date().toISOString() };
+    try {
+      await plDb.savePunchList(newList);
+      setPlLists(prev => [...prev, newList]);
+      setPlActiveListId(newList.id);
+      setPlListDropdownOpen(false);
+    } catch (e) {
+      console.error('Failed to create list', e);
+      alert('Error creating list');
+    }
+  }, [plLists]);
+
   // Create punch point (no popup on create - user clicks on dot to edit)
   // Returns null if no contractor selected (caller should show warning)
-  const plCreatePunch = useCallback((latlng, tableId = null) => {
+  const plCreatePunch = useCallback(async (latlng, tableId = null) => {
     // Must have contractor selected - use ref for current value
     const contractorId = plSelectedContractorIdRef.current;
     if (!contractorId) {
-      return null; // Signal that punch cannot be created
+      return null;
     }
+    if (!plActiveListId) {
+      alert('No active punch list selected');
+      return null;
+    }
+
     // Get next punch number using ref (always current) and increment both ref and state
     const nextNumber = plPunchCounterRef.current + 1;
     plPunchCounterRef.current = nextNumber; // Update ref immediately for next call
     setPlPunchCounter(nextNumber); // Update state for persistence
-    
+
     const punch = {
       id: `punch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       lat: latlng.lat,
       lng: latlng.lng,
       contractorId: contractorId,
+      punchListId: plActiveListId, // Link to active list
+      discipline: plSelectedDiscipline || '',
       text: '',
       photoDataUrl: null,
       photoName: '',
       tableId: tableId || null,
       createdAt: new Date().toISOString(),
-      punchNumber: nextNumber // Permanent number - never changes even if others are deleted
+      punchNumber: nextNumber,
+      completed: false,
+      updatedAt: new Date().toISOString()
     };
+
+    // Save to DB immediately
+    await plDb.savePunch(punch);
+    // Update State
     setPlPunches(prev => [...prev, punch]);
+
     // Don't open popup - user clicks on dot to edit
     return punch;
-  }, []); // No dependencies - uses refs for current values
-  
+  }, [plSelectedDiscipline, plActiveListId]);
+
+
   // Move punch to new location
-  const plMovePunch = useCallback((punchId, newLatLng) => {
-    setPlPunches(prev => prev.map(p =>
-      p.id === punchId
-        ? { ...p, lat: newLatLng.lat, lng: newLatLng.lng }
-        : p
-    ));
-  }, []);
-  
+  const plMovePunch = useCallback(async (punchId, newLatLng) => {
+    // Find punch
+    const p = plPunches.find(x => x.id === punchId);
+    if (!p) return;
+    const updated = { ...p, lat: newLatLng.lat, lng: newLatLng.lng, updatedAt: new Date().toISOString() };
+
+    await plDb.savePunch(updated);
+    setPlPunches(prev => prev.map(item => item.id === punchId ? updated : item));
+  }, [plPunches]);
+
   // Delete multiple punches (for selection delete)
-  const plDeleteSelectedPunches = useCallback(() => {
+  const plDeleteSelectedPunches = useCallback(async () => {
     if (plSelectedPunches.size === 0) return;
     const count = plSelectedPunches.size;
     if (!window.confirm(`Are you sure you want to delete ${count} selected punch item${count > 1 ? 's' : ''}?`)) return;
+
+    // Delete from DB
+    for (const id of plSelectedPunches) {
+      await plDb.deletePunch(id);
+    }
+
     setPlPunches(prev => prev.filter(p => !plSelectedPunches.has(p.id)));
     if (plEditingPunch && plSelectedPunches.has(plEditingPunch.id)) {
       setPlEditingPunch(null);
@@ -1673,35 +1768,50 @@ export default function BaseModule({
   }, [plSelectedPunches, plEditingPunch]);
 
   // Save punch
-  const plSavePunch = useCallback(() => {
+  const plSavePunch = useCallback(async () => {
     if (!plEditingPunch) return;
-    setPlPunches(prev => prev.map(p =>
-      p.id === plEditingPunch.id
-        ? { ...p, text: plPunchText, contractorId: plPunchContractorId, photoDataUrl: plPunchPhotoDataUrl, photoName: plPunchPhotoName }
-        : p
-    ));
+    const updated = {
+      ...plEditingPunch,
+      text: plPunchText,
+      contractorId: plPunchContractorId,
+      discipline: plPunchDiscipline,
+      photoDataUrl: plPunchPhotoDataUrl,
+      photoName: plPunchPhotoName,
+      updatedAt: new Date().toISOString()
+    };
+
+    await plDb.savePunch(updated);
+    setPlPunches(prev => prev.map(p => p.id === plEditingPunch.id ? updated : p));
+
     setPlEditingPunch(null);
     setPlPunchText('');
     setPlPunchContractorId(null);
+    setPlPunchDiscipline('');
     setPlPunchPhotoDataUrl(null);
     setPlPunchPhotoName('');
-  }, [plEditingPunch, plPunchText, plPunchContractorId, plPunchPhotoDataUrl, plPunchPhotoName]);
+  }, [plEditingPunch, plPunchText, plPunchContractorId, plPunchDiscipline, plPunchPhotoDataUrl, plPunchPhotoName]);
+
 
   // Delete punch
-  const plDeletePunch = useCallback((punchId) => {
+  const plDeletePunch = useCallback(async (punchId) => {
     if (!window.confirm('Are you sure you want to delete this punch item?')) return;
+    await plDb.deletePunch(punchId);
     setPlPunches(prev => prev.filter(p => p.id !== punchId));
     if (plEditingPunch?.id === punchId) {
       setPlEditingPunch(null);
     }
   }, [plEditingPunch]);
-  
+
   // Mark punch as completed (done)
-  const plMarkPunchCompleted = useCallback((punchId) => {
+  const plMarkPunchCompleted = useCallback(async (punchId) => {
     if (!window.confirm('Are you sure you want to mark this punch as completed?')) return;
-    setPlPunches(prev => prev.map(p =>
-      p.id === punchId ? { ...p, completed: true, completedAt: new Date().toISOString() } : p
-    ));
+    const p = plPunches.find(x => x.id === punchId);
+    if (!p) return;
+    const updated = { ...p, completed: true, completedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+
+    await plDb.savePunch(updated);
+    setPlPunches(prev => prev.map(item => item.id === punchId ? updated : item));
+
     // Close popup if this punch is being edited
     if (plEditingPunch?.id === punchId) {
       setPlEditingPunch(null);
@@ -1710,15 +1820,97 @@ export default function BaseModule({
       setPlPunchPhotoDataUrl(null);
       setPlPunchPhotoName('');
     }
-  }, [plEditingPunch]);
+  }, [plEditingPunch, plPunches]);
 
   // Mark punch as uncompleted
-  const plMarkPunchUncompleted = useCallback((punchId) => {
+  const plMarkPunchUncompleted = useCallback(async (punchId) => {
     if (!window.confirm('Are you sure you want to mark this punch as incomplete?')) return;
-    setPlPunches(prev => prev.map(p =>
-      p.id === punchId ? { ...p, completed: false, completedAt: null } : p
-    ));
+    const p = plPunches.find(x => x.id === punchId);
+    if (!p) return;
+    const updated = { ...p, completed: false, completedAt: null, updatedAt: new Date().toISOString() };
+
+    await plDb.savePunch(updated);
+    setPlPunches(prev => prev.map(item => item.id === punchId ? updated : item));
+  }, [plPunches]);
+
+  // Toggle punch status (Used in History Table)
+  const plTogglePunchStatus = useCallback(async (historyRecordId, punchId) => {
+    if (!historyRecordId || !punchId) return;
+    try {
+      const record = await plDb.history.get(historyRecordId);
+      if (!record) return;
+      const punches = record.punches || [];
+      const idx = punches.findIndex(p => p.id === punchId);
+      if (idx === -1) return;
+
+      // Toggle status
+      punches[idx].completed = !punches[idx].completed;
+      if (punches[idx].completed) {
+        punches[idx].completedAt = new Date().toISOString();
+      } else {
+        punches[idx].completedAt = null;
+      }
+
+      // Update counts
+      record.openCount = punches.filter(p => !p.completed).length;
+      record.closedCount = punches.filter(p => p.completed).length;
+      record.updatedAt = new Date().toISOString();
+
+      await plDb.history.put(record);
+
+      // Update State
+      setPlHistory(prev => prev.map(r => r.id === historyRecordId ? record : r));
+    } catch (err) {
+      console.error('Failed to toggle punch status', err);
+    }
   }, []);
+
+  // Map Markers Rendering (Live Filter)
+  const plMarkersRef = useRef(null);
+  useEffect(() => {
+    if (!isPL || !mapRef.current) {
+      if (plMarkersRef.current) {
+        plMarkersRef.current.clearLayers();
+        plMarkersRef.current.remove();
+        plMarkersRef.current = null;
+      }
+      return;
+    }
+
+    if (!plMarkersRef.current) {
+      plMarkersRef.current = L.layerGroup().addTo(mapRef.current);
+    }
+    const layer = plMarkersRef.current;
+    layer.clearLayers();
+
+    plPunches.forEach(p => {
+      // Filter Logic (Live)
+      if (plSelectedDisciplineFilter && p.discipline !== plSelectedDisciplineFilter) return;
+
+      const c = plGetContractor(p.contractorId);
+      const color = p.completed ? PUNCH_COMPLETED_COLOR : (c?.color || '#888');
+
+      const marker = L.circleMarker([p.lat, p.lng], {
+        radius: 7,
+        fillColor: color,
+        color: '#fff',
+        weight: 2,
+        opacity: 1,
+        fillOpacity: 1
+      });
+      marker.bindTooltip(`contractor: ${c?.name || 'Unknown'}\ndiscipline: ${p.discipline || '-'}\n${p.text || ''}`, { direction: 'top', offset: [0, -6] });
+      marker.on('click', (e) => {
+        L.DomEvent.stopPropagation(e);
+        setPlEditingPunch(p);
+        setPlPunchText(p.text || '');
+        setPlPunchContractorId(p.contractorId);
+        setPlPunchDiscipline(p.discipline || '');
+        setPlPunchPhotoDataUrl(p.photoDataUrl || null);
+        setPlPunchPhotoName(p.photoName || '');
+      });
+      layer.addLayer(marker);
+    });
+  }, [isPL, plPunches, plSelectedDisciplineFilter, plContractors, plGetContractor]);
 
   // Photo lightbox state for enlarged view
   const [plPhotoLightbox, setPlPhotoLightbox] = useState(null); // { url, name, x, y }
@@ -1745,6 +1937,111 @@ export default function BaseModule({
     };
     reader.readAsDataURL(file);
   }, []);
+
+  // Submit punch list to history (creates snapshot without clearing punches)
+  const plSubmitPunchList = useCallback(async () => {
+    const name = plSubmitName?.trim();
+    if (!name) {
+      alert('Please enter a punch list name.');
+      return false;
+    }
+
+    if (plPunches.length === 0) {
+      alert('No punches to submit.');
+      return false;
+    }
+
+    const historyRecord = {
+      id: `history-${Date.now()}`,
+      name: name,
+      punchListId: plActiveListId, // Link to active list
+      punches: JSON.parse(JSON.stringify(plPunches)), // Deep clone
+      contractors: JSON.parse(JSON.stringify(plContractors)),
+      disciplines: JSON.parse(JSON.stringify(plDisciplines)),
+      openCount: plPunches.filter(p => !p.completed).length,
+      closedCount: plPunches.filter(p => p.completed).length,
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      await plDb.saveHistoryRecord(historyRecord);
+      setPlHistory(prev => [historyRecord, ...prev]);
+      setPlShowSubmitModal(false);
+      setPlSubmitName('');
+      alert('Punch list submitted successfully!');
+      return true;
+    } catch (err) {
+      console.error('Failed to submit punch list:', err);
+      alert('Failed to submit punch list.');
+      return false;
+    }
+  }, [plSubmitName, plPunches, plContractors, plDisciplines, plActiveListId]);
+
+  // Export current punch list
+  const plExportCurrentList = useCallback(async (format = 'excel') => {
+    if (plPunches.length === 0) {
+      alert('No punches to export.');
+      return;
+    }
+
+    const record = {
+      name: 'Current Punch List',
+      punches: plPunches,
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      if (format === 'pdf') {
+        await plExportToPdf(record);
+      } else {
+        await plExportToExcel(record);
+      }
+    } catch (err) {
+      console.error('Export failed:', err);
+      alert('Export failed. Please try again.');
+    }
+  }, [plPunches]);
+
+  // Export a history record
+  const plExportHistoryRecord = useCallback(async (historyId, format = 'excel') => {
+    const record = plHistoryRef.current.find(h => h.id === historyId);
+    if (!record) {
+      alert('History record not found.');
+      return;
+    }
+
+    try {
+      if (format === 'pdf') {
+        await plExportToPdf(record);
+      } else {
+        await plExportToExcel(record);
+      }
+    } catch (err) {
+      console.error('Export failed:', err);
+      alert('Export failed. Please try again.');
+    }
+  }, []);
+
+  // Export all history summary
+  const plExportAllHistorySummary = useCallback(async (format = 'excel') => {
+    const history = plHistoryRef.current;
+    if (history.length === 0) {
+      alert('No history to export.');
+      return;
+    }
+
+    try {
+      if (format === 'pdf') {
+        await plExportAllHistoryToPdf(history);
+      } else {
+        await plExportAllHistoryToExcel(history);
+      }
+    } catch (err) {
+      console.error('Export failed:', err);
+      alert('Export failed. Please try again.');
+    }
+  }, []);
+
 
   // ─────────────────────────────────────────────────────────────
   // GLOBAL UNDO/REDO (modules + sub-modes)
@@ -3231,7 +3528,7 @@ export default function BaseModule({
 
     dcttHistoryRef.current = { actions: [], index: -1 };
     setDcttHistoryTick((t) => t + 1);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeMode?.key]);
 
   // Track selectedPolygons changes for undo/redo
@@ -3558,8 +3855,8 @@ export default function BaseModule({
               : isMVFT ? mvftCanUndo
                 : isPTEP ? (ptepSubMode === 'tabletotable' ? ptepTTCanUndo : ptepParamCanUndo)
                   : isLV ? lvInvCanUndo
-                  : isMVF ? mvfPartsCanUndo
-                    : selectionCanUndo);
+                    : isMVF ? mvfPartsCanUndo
+                      : selectionCanUndo);
 
   const globalCanRedo = noteMode
     ? canRedoNotes
@@ -3570,9 +3867,9 @@ export default function BaseModule({
             : isDATP ? datpCanRedo
               : isMVFT ? mvftCanRedo
                 : isPTEP ? (ptepSubMode === 'tabletotable' ? ptepTTCanRedo : ptepParamCanRedo)
-                : isLV ? lvInvCanRedo
-                  : isMVF ? mvfPartsCanRedo
-                    : selectionCanRedo);
+                  : isLV ? lvInvCanRedo
+                    : isMVF ? mvfPartsCanRedo
+                      : selectionCanRedo);
 
   const globalUndo = useCallback(() => {
     if (noteMode) return void undoNotes();
@@ -3931,13 +4228,13 @@ export default function BaseModule({
 
     const states = mc4PanelStatesRef.current || {};
     const panels = polygonById.current || {};
-    
+
     // Zoom-based radius: scale markers based on zoom level (always visible)
     const zoom = map.getZoom();
     const baseRadius = 4;
     // Scale radius based on zoom (smaller when zoomed out, larger when zoomed in)
     const radius = Math.max(1.5, Math.min(8, baseRadius * Math.pow(1.2, zoom - 20)));
-    
+
     const mk = (pos, st) => {
       const isMc4 = st === MC4_PANEL_STATES.MC4;
       const isTerm = st === MC4_PANEL_STATES.TERMINATED;
@@ -4024,12 +4321,12 @@ export default function BaseModule({
 
     const states = dcttPanelStatesRef.current || {};
     const panels = polygonById.current || {};
-    
+
     // Zoom-based radius: scale markers based on zoom level
     const zoom = map.getZoom();
     const baseRadius = 4;
     const radius = Math.max(1.5, Math.min(8, baseRadius * Math.pow(1.2, zoom - 20)));
-    
+
     const mk = (pos, st) => {
       const isTerm = st === 'terminated';
       if (!isTerm) return null;
@@ -4282,12 +4579,12 @@ export default function BaseModule({
     const invDoneBgPaddingX = 4;
     const invDoneBgPaddingY = 2;
     const invDoneBgCornerRadius = 3;
-    
+
     Object.keys(labels).forEach((invIdNorm) => {
       const lbl = labels[invIdNorm];
       if (!lbl) return;
       const done = dcttCompletedInvIds.has(invIdNorm);
-      
+
       let changed = false;
       if (done) {
         // Green background styling for completed
@@ -4458,11 +4755,11 @@ export default function BaseModule({
       // (otherwise rounding can make different cursor positions look identical and leave stale labels on screen)
       const key = cursorBounds
         ? `${zoom}|cursor|${Math.round(cursorPoint.x)},${Math.round(cursorPoint.y)}|${bounds
-            .getSouth()
-            .toFixed(6)},${bounds.getWest().toFixed(6)},${bounds.getNorth().toFixed(6)},${bounds.getEast().toFixed(6)}`
+          .getSouth()
+          .toFixed(6)},${bounds.getWest().toFixed(6)},${bounds.getNorth().toFixed(6)},${bounds.getEast().toFixed(6)}`
         : `${zoom}|${bounds.getSouth().toFixed(5)},${bounds.getWest().toFixed(5)},${bounds.getNorth().toFixed(5)},${bounds.getEast().toFixed(5)}`;
       if (key === lastStringLabelKeyRef.current) return;
-      
+
       // Clear canvas before redrawing to prevent ghost text artifacts on zoom/pan
       try {
         const renderer = stringTextRendererRef.current;
@@ -4481,7 +4778,7 @@ export default function BaseModule({
       } catch (_e) {
         void _e;
       }
-      
+
       lastStringLabelKeyRef.current = key;
 
       // Query candidates using the spatial grid if available; otherwise fall back to scanning.
@@ -4647,38 +4944,38 @@ export default function BaseModule({
             if (stationKey === 'css' && mode === 'testing') {
               nextTextColor = 'rgba(255,255,255,0.98)';
             } else
-            if (mode === 'termination' && mvtCountsByStation) {
-              const max = mvtTerminationMaxForNorm(stationKey);
-              const terminated = clampMvtTerminationCount(stationKey, mvtCountsByStation[stationKey] ?? 0);
-              // MVT rule: max/max => GREEN, otherwise WHITE (not red)
-              nextTextColor = (max > 0 && terminated === max) ? 'rgba(34,197,94,0.98)' : 'rgba(255,255,255,0.98)';
-            } else if (mode === 'testing' && mvtTestStatusByStation) {
-              const st = mvtTestStatusByStation.statusOf(raw);
-              if (!st?.hasTested) nextTextColor = 'rgba(148,163,184,0.98)';
-              else if (st?.allPass) nextTextColor = 'rgba(34,197,94,0.98)';
-              else nextTextColor = 'rgba(220,38,38,0.98)';
+              if (mode === 'termination' && mvtCountsByStation) {
+                const max = mvtTerminationMaxForNorm(stationKey);
+                const terminated = clampMvtTerminationCount(stationKey, mvtCountsByStation[stationKey] ?? 0);
+                // MVT rule: max/max => GREEN, otherwise WHITE (not red)
+                nextTextColor = (max > 0 && terminated === max) ? 'rgba(34,197,94,0.98)' : 'rgba(255,255,255,0.98)';
+              } else if (mode === 'testing' && mvtTestStatusByStation) {
+                const st = mvtTestStatusByStation.statusOf(raw);
+                if (!st?.hasTested) nextTextColor = 'rgba(148,163,184,0.98)';
+                else if (st?.allPass) nextTextColor = 'rgba(34,197,94,0.98)';
+                else nextTextColor = 'rgba(220,38,38,0.98)';
 
-              // Filter highlighting (DCCT-style): when active, recolor matches and dim non-matches
-              if (mvtActiveFilter) {
-                const l1s = String(st?.phases?.L1?.status || 'N/A').trim().toUpperCase();
-                const l2s = String(st?.phases?.L2?.status || 'N/A').trim().toUpperCase();
-                const l3s = String(st?.phases?.L3?.status || 'N/A').trim().toUpperCase();
-                const hasPass = l1s === 'PASS' || l2s === 'PASS' || l3s === 'PASS';
-                const hasFail = l1s === 'FAIL' || l2s === 'FAIL' || l3s === 'FAIL' || l1s === 'FAILED' || l2s === 'FAILED' || l3s === 'FAILED';
-                const hasNA = (!l1s || l1s === 'N/A') || (!l2s || l2s === 'N/A') || (!l3s || l3s === 'N/A');
-                const matches = mvtActiveFilter === 'passed' ? hasPass : mvtActiveFilter === 'failed' ? hasFail : hasNA;
-                if (matches) {
-                  nextTextColor = mvtActiveFilter === 'passed'
-                    ? 'rgba(34,197,94,0.98)'
-                    : mvtActiveFilter === 'failed'
-                    ? 'rgba(220,38,38,0.98)'
-                    : 'rgba(148,163,184,0.98)';
-                } else {
-                  nextTextColor = 'rgba(148,163,184,0.18)';
-                  nextOpacity = 0.18;
+                // Filter highlighting (DCCT-style): when active, recolor matches and dim non-matches
+                if (mvtActiveFilter) {
+                  const l1s = String(st?.phases?.L1?.status || 'N/A').trim().toUpperCase();
+                  const l2s = String(st?.phases?.L2?.status || 'N/A').trim().toUpperCase();
+                  const l3s = String(st?.phases?.L3?.status || 'N/A').trim().toUpperCase();
+                  const hasPass = l1s === 'PASS' || l2s === 'PASS' || l3s === 'PASS';
+                  const hasFail = l1s === 'FAIL' || l2s === 'FAIL' || l3s === 'FAIL' || l1s === 'FAILED' || l2s === 'FAILED' || l3s === 'FAILED';
+                  const hasNA = (!l1s || l1s === 'N/A') || (!l2s || l2s === 'N/A') || (!l3s || l3s === 'N/A');
+                  const matches = mvtActiveFilter === 'passed' ? hasPass : mvtActiveFilter === 'failed' ? hasFail : hasNA;
+                  if (matches) {
+                    nextTextColor = mvtActiveFilter === 'passed'
+                      ? 'rgba(34,197,94,0.98)'
+                      : mvtActiveFilter === 'failed'
+                        ? 'rgba(220,38,38,0.98)'
+                        : 'rgba(148,163,184,0.98)';
+                  } else {
+                    nextTextColor = 'rgba(148,163,184,0.18)';
+                    nextOpacity = 0.18;
+                  }
                 }
               }
-            }
           }
         }
 
@@ -4690,7 +4987,7 @@ export default function BaseModule({
           // Determine status: passed, failed, or not_tested
           // NOTE: If there's no CSV row for this ID, testResult is undefined => not_tested.
           const status = testResult === 'passed' ? 'passed' : testResult === 'failed' ? 'failed' : 'not_tested';
-          
+
           // Color based on status
           if (status === 'passed') {
             nextTextColor = 'rgba(5,150,105,0.96)'; // Softer green
@@ -4699,7 +4996,7 @@ export default function BaseModule({
           } else {
             nextTextColor = 'rgba(255,255,255,0.98)'; // White (not tested)
           }
-          
+
           // Apply filter: dim labels that don't match the active filter
           // NOTE: In DCCT we keep other labels stable; counter click only highlights the counter itself.
         }
@@ -4925,75 +5222,75 @@ export default function BaseModule({
               const termMode = modeNow === 'termination';
               const testMode = modeNow === 'testing';
 
-               // If this label instance came from the pool (created in another module),
-               // it won't have the MVT click handler. Bind it lazily here.
-               if (!label._mvtHandlersBound) {
-                 label.on('click', (evt) => {
-                   try {
-                     if (evt?.originalEvent) {
-                       evt.originalEvent.stopImmediatePropagation?.();
-                       L.DomEvent.stopPropagation(evt.originalEvent);
-                       L.DomEvent.preventDefault(evt.originalEvent);
-                     }
-                   } catch (_e) { void _e; }
-                   const modeNow2 = String(mvtSubModeRef.current || 'termination');
-                   const stationLabel2 = String(label._mvtStationLabel || '').trim();
-                   const stationNorm2 = String(label._mvtStationNorm || '');
-                   if (!stationNorm2) return;
-                   const oe = evt?.originalEvent;
-                   const x = oe?.clientX ?? 0;
-                   const y = oe?.clientY ?? 0;
-                   if (modeNow2 === 'termination') {
-                     const lockedNow2 = Boolean(label._mvtLocked);
-                     if (lockedNow2) return;
-                     const cur2 = clampMvtTerminationCount(stationNorm2, mvtTerminationByStationRef.current?.[stationNorm2] ?? 0);
-                     setMvtTermPopup({
-                       stationLabel: stationLabel2 || stationNorm2,
-                       stationNorm: stationNorm2,
-                       draft: cur2,
-                       x,
-                       y,
-                     });
-                     return;
-                   }
-                   if (modeNow2 === 'testing') {
-                     const csv = mvtTestCsvByFromRef.current || {};
-                     const normSt = normalizeId(stationLabel2 || stationNorm2);
-                     const candKeys = [normSt];
-                     const pad2 = (n) => String(n).padStart(2, '0');
-                     const mSs = normSt.match(/^ss(\d{1,2})$/i);
-                     const mSub = normSt.match(/^sub(\d{1,2})$/i);
-                     if (mSs) {
-                       const nn = pad2(mSs[1]);
-                       candKeys.push(`ss${nn}`);
-                       candKeys.push(`sub${nn}`);
-                     }
-                     if (mSub) {
-                       const nn = pad2(mSub[1]);
-                       candKeys.push(`sub${nn}`);
-                       candKeys.push(`ss${nn}`);
-                     }
-                     let fromKey = '';
-                     for (const k of candKeys) {
-                       if (csv[k]) { fromKey = k; break; }
-                     }
-                     if (!fromKey) {
-                       const preferred = candKeys.find((k) => /^sub\d{2}$/i.test(k)) || candKeys[0] || '';
-                       fromKey = preferred;
-                     }
-                     setMvtTestPanel(null);
-                     setMvtTestPopup({ stationLabel: stationLabel2 || stationNorm2, fromKey, x, y });
-                   }
-                 });
+              // If this label instance came from the pool (created in another module),
+              // it won't have the MVT click handler. Bind it lazily here.
+              if (!label._mvtHandlersBound) {
+                label.on('click', (evt) => {
+                  try {
+                    if (evt?.originalEvent) {
+                      evt.originalEvent.stopImmediatePropagation?.();
+                      L.DomEvent.stopPropagation(evt.originalEvent);
+                      L.DomEvent.preventDefault(evt.originalEvent);
+                    }
+                  } catch (_e) { void _e; }
+                  const modeNow2 = String(mvtSubModeRef.current || 'termination');
+                  const stationLabel2 = String(label._mvtStationLabel || '').trim();
+                  const stationNorm2 = String(label._mvtStationNorm || '');
+                  if (!stationNorm2) return;
+                  const oe = evt?.originalEvent;
+                  const x = oe?.clientX ?? 0;
+                  const y = oe?.clientY ?? 0;
+                  if (modeNow2 === 'termination') {
+                    const lockedNow2 = Boolean(label._mvtLocked);
+                    if (lockedNow2) return;
+                    const cur2 = clampMvtTerminationCount(stationNorm2, mvtTerminationByStationRef.current?.[stationNorm2] ?? 0);
+                    setMvtTermPopup({
+                      stationLabel: stationLabel2 || stationNorm2,
+                      stationNorm: stationNorm2,
+                      draft: cur2,
+                      x,
+                      y,
+                    });
+                    return;
+                  }
+                  if (modeNow2 === 'testing') {
+                    const csv = mvtTestCsvByFromRef.current || {};
+                    const normSt = normalizeId(stationLabel2 || stationNorm2);
+                    const candKeys = [normSt];
+                    const pad2 = (n) => String(n).padStart(2, '0');
+                    const mSs = normSt.match(/^ss(\d{1,2})$/i);
+                    const mSub = normSt.match(/^sub(\d{1,2})$/i);
+                    if (mSs) {
+                      const nn = pad2(mSs[1]);
+                      candKeys.push(`ss${nn}`);
+                      candKeys.push(`sub${nn}`);
+                    }
+                    if (mSub) {
+                      const nn = pad2(mSub[1]);
+                      candKeys.push(`sub${nn}`);
+                      candKeys.push(`ss${nn}`);
+                    }
+                    let fromKey = '';
+                    for (const k of candKeys) {
+                      if (csv[k]) { fromKey = k; break; }
+                    }
+                    if (!fromKey) {
+                      const preferred = candKeys.find((k) => /^sub\d{2}$/i.test(k)) || candKeys[0] || '';
+                      fromKey = preferred;
+                    }
+                    setMvtTestPanel(null);
+                    setMvtTestPopup({ stationLabel: stationLabel2 || stationNorm2, fromKey, x, y });
+                  }
+                });
 
-                 label.on('mouseover', () => {
-                   try { if (!label._mvtLocked) map.getContainer().style.cursor = 'pointer'; } catch (_e) { void _e; }
-                 });
-                 label.on('mouseout', () => {
-                   try { map.getContainer().style.cursor = ''; } catch (_e) { void _e; }
-                 });
-                 label._mvtHandlersBound = true;
-               }
+                label.on('mouseover', () => {
+                  try { if (!label._mvtLocked) map.getContainer().style.cursor = 'pointer'; } catch (_e) { void _e; }
+                });
+                label.on('mouseout', () => {
+                  try { map.getContainer().style.cursor = ''; } catch (_e) { void _e; }
+                });
+                label._mvtHandlersBound = true;
+              }
 
               // MVT: CSS is excluded from MV testing. Keep it WHITE and non-interactive in testing mode.
               if (stationKey === 'css' && testMode) {
@@ -5020,66 +5317,66 @@ export default function BaseModule({
                   if (label.options.bgCornerRadius !== 0) { label.options.bgCornerRadius = 0; needsRedraw = true; }
                 }
               } else {
-              const max = mvtTerminationMaxForNorm(stationKey);
-              const terminated = clampMvtTerminationCount(stationKey, mvtTerminationByStationRef.current?.[stationKey] ?? 0);
-              const locked = (max > 0 && terminated === max);
+                const max = mvtTerminationMaxForNorm(stationKey);
+                const terminated = clampMvtTerminationCount(stationKey, mvtTerminationByStationRef.current?.[stationKey] ?? 0);
+                const locked = (max > 0 && terminated === max);
 
-              let baseTextColor = locked ? 'rgba(34,197,94,0.98)' : 'rgba(255,255,255,0.98)';
-              if (testMode && mvtTestStatusByStation) {
-                const st = mvtTestStatusByStation.statusOf(raw);
-                if (!st?.hasTested) baseTextColor = 'rgba(148,163,184,0.98)';
-                else if (st?.allPass) baseTextColor = 'rgba(34,197,94,0.98)';
-                else baseTextColor = 'rgba(220,38,38,0.98)';
-              }
+                let baseTextColor = locked ? 'rgba(34,197,94,0.98)' : 'rgba(255,255,255,0.98)';
+                if (testMode && mvtTestStatusByStation) {
+                  const st = mvtTestStatusByStation.statusOf(raw);
+                  if (!st?.hasTested) baseTextColor = 'rgba(148,163,184,0.98)';
+                  else if (st?.allPass) baseTextColor = 'rgba(34,197,94,0.98)';
+                  else baseTextColor = 'rgba(220,38,38,0.98)';
+                }
 
-              const historyHighlighted =
-                Boolean(historyOpenRef.current) &&
-                Boolean(historySelectedRecordIdRef.current) &&
-                Boolean(mvtHistoryHighlightStationSetRef.current?.has(stationKey));
-              const highlightBgColor = 'rgba(249,115,22,1)'; // #f97316
-              const highlightTextColor = 'rgba(11,18,32,0.98)';
-              label._mvtStationNorm = stationKey;
-              label._mvtStationLabel = raw;
-              label._mvtLocked = locked;
-            if (label.options.radius !== ((termMode || testMode) ? 22 : 0)) { label.options.radius = (termMode || testMode) ? 22 : 0; needsRedraw = true; }
-            if (label.options.interactive !== (termMode || testMode)) { label.options.interactive = (termMode || testMode); needsRedraw = true; }
-            if (label.options.textBaseSize !== mvtBaseSizeLocal) { label.options.textBaseSize = mvtBaseSizeLocal; needsRedraw = true; }
-            // MVT: clickability is represented by underlined station labels (no extra numeric overlay labels).
-            if (label.options.underline !== (termMode || testMode)) { label.options.underline = (termMode || testMode); needsRedraw = true; }
-            if ((termMode || testMode) && label.options.underlineColor !== label.options.textColor) { label.options.underlineColor = label.options.textColor; needsRedraw = true; }
-            // MVT station labels: base color (white/green) OR history-highlight (orange)
-            {
-              const desiredTextColor = historyHighlighted ? highlightTextColor : baseTextColor;
-              if (label.options.textColor !== desiredTextColor) { label.options.textColor = desiredTextColor; needsRedraw = true; }
-              // Keep underline color in sync with the resolved text color (including history highlight override).
-              if ((termMode || testMode) && label.options.underlineColor !== desiredTextColor) { label.options.underlineColor = desiredTextColor; needsRedraw = true; }
-              if (historyHighlighted) {
-                if (label.options.bgColor !== highlightBgColor) { label.options.bgColor = highlightBgColor; needsRedraw = true; }
-                if (label.options.bgPaddingX !== 4) { label.options.bgPaddingX = 4; needsRedraw = true; }
-                if (label.options.bgPaddingY !== 2) { label.options.bgPaddingY = 2; needsRedraw = true; }
-                if (label.options.bgCornerRadius !== 3) { label.options.bgCornerRadius = 3; needsRedraw = true; }
-              } else {
-                if (label.options.bgColor != null) { label.options.bgColor = null; needsRedraw = true; }
-                if (label.options.bgPaddingX !== 0) { label.options.bgPaddingX = 0; needsRedraw = true; }
-                if (label.options.bgPaddingY !== 0) { label.options.bgPaddingY = 0; needsRedraw = true; }
-                if (label.options.bgCornerRadius !== 0) { label.options.bgCornerRadius = 0; needsRedraw = true; }
-              }
-            }
+                const historyHighlighted =
+                  Boolean(historyOpenRef.current) &&
+                  Boolean(historySelectedRecordIdRef.current) &&
+                  Boolean(mvtHistoryHighlightStationSetRef.current?.has(stationKey));
+                const highlightBgColor = 'rgba(249,115,22,1)'; // #f97316
+                const highlightTextColor = 'rgba(11,18,32,0.98)';
+                label._mvtStationNorm = stationKey;
+                label._mvtStationLabel = raw;
+                label._mvtLocked = locked;
+                if (label.options.radius !== ((termMode || testMode) ? 22 : 0)) { label.options.radius = (termMode || testMode) ? 22 : 0; needsRedraw = true; }
+                if (label.options.interactive !== (termMode || testMode)) { label.options.interactive = (termMode || testMode); needsRedraw = true; }
+                if (label.options.textBaseSize !== mvtBaseSizeLocal) { label.options.textBaseSize = mvtBaseSizeLocal; needsRedraw = true; }
+                // MVT: clickability is represented by underlined station labels (no extra numeric overlay labels).
+                if (label.options.underline !== (termMode || testMode)) { label.options.underline = (termMode || testMode); needsRedraw = true; }
+                if ((termMode || testMode) && label.options.underlineColor !== label.options.textColor) { label.options.underlineColor = label.options.textColor; needsRedraw = true; }
+                // MVT station labels: base color (white/green) OR history-highlight (orange)
+                {
+                  const desiredTextColor = historyHighlighted ? highlightTextColor : baseTextColor;
+                  if (label.options.textColor !== desiredTextColor) { label.options.textColor = desiredTextColor; needsRedraw = true; }
+                  // Keep underline color in sync with the resolved text color (including history highlight override).
+                  if ((termMode || testMode) && label.options.underlineColor !== desiredTextColor) { label.options.underlineColor = desiredTextColor; needsRedraw = true; }
+                  if (historyHighlighted) {
+                    if (label.options.bgColor !== highlightBgColor) { label.options.bgColor = highlightBgColor; needsRedraw = true; }
+                    if (label.options.bgPaddingX !== 4) { label.options.bgPaddingX = 4; needsRedraw = true; }
+                    if (label.options.bgPaddingY !== 2) { label.options.bgPaddingY = 2; needsRedraw = true; }
+                    if (label.options.bgCornerRadius !== 3) { label.options.bgCornerRadius = 3; needsRedraw = true; }
+                  } else {
+                    if (label.options.bgColor != null) { label.options.bgColor = null; needsRedraw = true; }
+                    if (label.options.bgPaddingX !== 0) { label.options.bgPaddingX = 0; needsRedraw = true; }
+                    if (label.options.bgPaddingY !== 0) { label.options.bgPaddingY = 0; needsRedraw = true; }
+                    if (label.options.bgCornerRadius !== 0) { label.options.bgCornerRadius = 0; needsRedraw = true; }
+                  }
+                }
               }
             } else {
-            label._mvtStationNorm = '';
-            label._mvtStationLabel = '';
-            label._mvtLocked = false;
-            if (label.options.radius !== 0) { label.options.radius = 0; needsRedraw = true; }
-            if (label.options.interactive !== false) { label.options.interactive = false; needsRedraw = true; }
-            if (label.options.underline) { label.options.underline = false; needsRedraw = true; }
-            if (label.options.underlineColor) { label.options.underlineColor = null; needsRedraw = true; }
-            if (label.options.textBaseSize !== stringTextBaseSizeCfg) { label.options.textBaseSize = stringTextBaseSizeCfg; needsRedraw = true; }
-            // Clear background when pooled label is reused for non-SS text
-            if (label.options.bgColor != null) { label.options.bgColor = null; needsRedraw = true; }
-            if (label.options.bgPaddingX !== 0) { label.options.bgPaddingX = 0; needsRedraw = true; }
-            if (label.options.bgPaddingY !== 0) { label.options.bgPaddingY = 0; needsRedraw = true; }
-            if (label.options.bgCornerRadius !== 0) { label.options.bgCornerRadius = 0; needsRedraw = true; }
+              label._mvtStationNorm = '';
+              label._mvtStationLabel = '';
+              label._mvtLocked = false;
+              if (label.options.radius !== 0) { label.options.radius = 0; needsRedraw = true; }
+              if (label.options.interactive !== false) { label.options.interactive = false; needsRedraw = true; }
+              if (label.options.underline) { label.options.underline = false; needsRedraw = true; }
+              if (label.options.underlineColor) { label.options.underlineColor = null; needsRedraw = true; }
+              if (label.options.textBaseSize !== stringTextBaseSizeCfg) { label.options.textBaseSize = stringTextBaseSizeCfg; needsRedraw = true; }
+              // Clear background when pooled label is reused for non-SS text
+              if (label.options.bgColor != null) { label.options.bgColor = null; needsRedraw = true; }
+              if (label.options.bgPaddingX !== 0) { label.options.bgPaddingX = 0; needsRedraw = true; }
+              if (label.options.bgPaddingY !== 0) { label.options.bgPaddingY = 0; needsRedraw = true; }
+              if (label.options.bgCornerRadius !== 0) { label.options.bgCornerRadius = 0; needsRedraw = true; }
             }
           }
         }
@@ -5529,7 +5826,7 @@ export default function BaseModule({
       '/MV_TERMINATION_PROGRESS_TRACKING/mv_circuit_tests.csv',
     ];
 
-      const parse = (text) => {
+    const parse = (text) => {
       const rawText = String(text || '');
       const rawLinesArr = rawText.split(/\r?\n/);
       const lines = rawLinesArr.map((l) => l.trim()).filter(Boolean);
@@ -6449,8 +6746,8 @@ export default function BaseModule({
             nextColor = activeFilter === 'passed'
               ? 'rgba(34,197,94,0.98)'
               : activeFilter === 'failed'
-              ? 'rgba(239,68,68,0.98)'
-              : 'rgba(148,163,184,0.98)';
+                ? 'rgba(239,68,68,0.98)'
+                : 'rgba(148,163,184,0.98)';
           } else {
             nextColor = 'rgba(148,163,184,0.18)';
           }
@@ -6711,7 +7008,7 @@ export default function BaseModule({
     el.addEventListener('click', onAnyClickCapture, true);
     return () => el.removeEventListener('click', onAnyClickCapture, true);
   }, [effectiveStringTextVisibility, scheduleStringTextLabelUpdate]);
-  
+
   // Hooks for daily log and export
   const { dailyLog, addRecord, updateRecord, deleteRecord } = useDailyLog(activeMode?.key || 'DC');
   const { exportToExcel } = useChartExport();
@@ -6737,7 +7034,7 @@ export default function BaseModule({
   useEffect(() => {
     dcttCommittedPanelIdsRef.current = dcttCommittedPanelIds;
   }, [dcttCommittedPanelIds]);
-  
+
   // Initialize editing state when a history record is selected
   useEffect(() => {
     if (historySelectedRecordId) {
@@ -6753,11 +7050,11 @@ export default function BaseModule({
       window.__editingAmount = 0;
     }
   }, [historySelectedRecordId, dailyLog]);
-  
+
   // Calculate editingAmount from editingPolygonIds (auto-updates when selection changes)
   const editingAmount = useMemo(() => {
     if (!historySelectedRecordId || editingPolygonIds.length === 0) return 0;
-    
+
     // LV: selection list contains inv_id norms; calculate meters using CSV lengthData.
     if (isLV) {
       return editingPolygonIds.reduce((sum, invIdNorm) => {
@@ -6803,7 +7100,7 @@ export default function BaseModule({
         return sum + (Number.isFinite(m) ? m : 0);
       }, 0);
     }
-    
+
     // For other modules, just count polygons
     return editingPolygonIds.length;
   }, [historySelectedRecordId, editingPolygonIds, isLV, isDC, isMVFT, lengthData, mvftCommittedTrenchParts]);
@@ -6814,25 +7111,25 @@ export default function BaseModule({
     if (isMVF) {
       const map = mapRef.current;
       if (!map) return;
-      
+
       // Create or clear history highlight layer
       if (!mvfHistoryHighlightLayerRef.current) {
         mvfHistoryHighlightLayerRef.current = L.layerGroup().addTo(map);
       }
       mvfHistoryHighlightLayerRef.current.clearLayers();
-      
+
       // If no record selected, we're done
       if (!historySelectedRecordId) {
         return;
       }
-      
+
       // Find the selected record and get its IDs
       const record = dailyLog.find((r) => r.id === historySelectedRecordId);
       if (!record) return;
-      
+
       const idsToHighlight = record.selectedPolygonIds || [];
       if (idsToHighlight.length === 0) return;
-      
+
       // Separate segment IDs from part IDs
       const segmentKeys = new Set();
       const partIds = new Set();
@@ -6843,7 +7140,7 @@ export default function BaseModule({
           partIds.add(String(id));
         }
       });
-      
+
       // Highlight segments: use mvfSegmentLinesByKeyRef to find the segment polylines
       const segmentLines = mvfSegmentLinesByKeyRef.current || {};
       segmentKeys.forEach((segKey) => {
@@ -6902,16 +7199,16 @@ export default function BaseModule({
           }
         });
       });
-      
+
       // Highlight trench parts from committed parts
       const committed = mvfCommittedTrenchPartsRef.current || [];
       committed.forEach((part) => {
         const partId = String(part?.id || '');
         if (!partIds.has(partId)) return;
-        
+
         const coords = part?.coords;
         if (!coords || !Array.isArray(coords) || coords.length < 2) return;
-        
+
         try {
           const latlngs = coords.map((c) => [c[1], c[0]]); // GeoJSON is [lng, lat], Leaflet is [lat, lng]
           const line = L.polyline(latlngs, {
@@ -6924,7 +7221,7 @@ export default function BaseModule({
           void _e;
         }
       });
-      
+
       return;
     }
 
@@ -6971,63 +7268,63 @@ export default function BaseModule({
       return;
     }
 
-      // MC4: highlight inv_id labels (orange) when selecting a history record that contains inverter IDs.
-      // NOTE: MC4 panel-side/MC4-install use panel IDs, so we only activate this when IDs look like TX..-INV..
-      if (isMC4) {
-        const labels = lvInvLabelByIdRef.current || {};
-        const looksLikeInvId = (id) => {
-          const s = String(id || '').toLowerCase();
-          if (!s) return false;
-          return /tx\s*\d+/.test(s) && /inv\s*\d+/.test(s);
-        };
+    // MC4: highlight inv_id labels (orange) when selecting a history record that contains inverter IDs.
+    // NOTE: MC4 panel-side/MC4-install use panel IDs, so we only activate this when IDs look like TX..-INV..
+    if (isMC4) {
+      const labels = lvInvLabelByIdRef.current || {};
+      const looksLikeInvId = (id) => {
+        const s = String(id || '').toLowerCase();
+        if (!s) return false;
+        return /tx\s*\d+/.test(s) && /inv\s*\d+/.test(s);
+      };
 
-        const invIdsToHighlight = historySelectedRecordId
-          ? new Set(editingPolygonIds.map(normalizeId).filter(looksLikeInvId))
-          : new Set();
+      const invIdsToHighlight = historySelectedRecordId
+        ? new Set(editingPolygonIds.map(normalizeId).filter(looksLikeInvId))
+        : new Set();
 
-        // Default styling from config
-        const invBgColor = activeMode?.invIdTextBgColor || null;
-        const invBgStrokeColor = activeMode?.invIdTextBgStrokeColor || null;
-        const invBgStrokeWidth = typeof activeMode?.invIdTextBgStrokeWidth === 'number' ? activeMode.invIdTextBgStrokeWidth : 0;
+      // Default styling from config
+      const invBgColor = activeMode?.invIdTextBgColor || null;
+      const invBgStrokeColor = activeMode?.invIdTextBgStrokeColor || null;
+      const invBgStrokeWidth = typeof activeMode?.invIdTextBgStrokeWidth === 'number' ? activeMode.invIdTextBgStrokeWidth : 0;
 
-        // Cleanup previous highlights (restore to normal state)
-        prevHistoryMc4InvHighlightRef.current.forEach((invIdNorm) => {
-          if (invIdsToHighlight.has(invIdNorm)) return;
+      // Cleanup previous highlights (restore to normal state)
+      prevHistoryMc4InvHighlightRef.current.forEach((invIdNorm) => {
+        if (invIdsToHighlight.has(invIdNorm)) return;
+        const lbl = labels[invIdNorm];
+        if (!lbl) return;
+        lbl.options.textColor = 'rgba(255,255,255,0.98)';
+        lbl.options.textColorNoBg = null;
+        lbl.options.bgColor = invBgColor;
+        lbl.options.bgStrokeColor = invBgStrokeColor;
+        lbl.options.bgStrokeWidth = invBgStrokeWidth;
+        lbl.redraw?.();
+      });
+
+      // If this record doesn't contain inverter IDs, allow normal polygon highlighting to run.
+      if (!historySelectedRecordId || invIdsToHighlight.size === 0) {
+        prevHistoryMc4InvHighlightRef.current = new Set();
+      } else {
+        // Apply orange highlight
+        const highlightTextColor = activeMode?.invIdHighlightTextColor || 'rgba(255,255,255,0.98)';
+        const highlightBgColor = activeMode?.invIdHighlightBgColor || 'rgba(249, 115, 22, 1)';
+        const highlightBgStrokeColor = activeMode?.invIdHighlightBgStrokeColor || 'rgba(255,255,255,0.9)';
+        const highlightBgStrokeWidth = activeMode?.invIdHighlightBgStrokeWidth || 2.5;
+
+        invIdsToHighlight.forEach((invIdNorm) => {
           const lbl = labels[invIdNorm];
           if (!lbl) return;
-          lbl.options.textColor = 'rgba(255,255,255,0.98)';
+          lbl.options.textColor = highlightTextColor;
           lbl.options.textColorNoBg = null;
-          lbl.options.bgColor = invBgColor;
-          lbl.options.bgStrokeColor = invBgStrokeColor;
-          lbl.options.bgStrokeWidth = invBgStrokeWidth;
+          lbl.options.bgColor = highlightBgColor;
+          lbl.options.bgStrokeColor = highlightBgStrokeColor;
+          lbl.options.bgStrokeWidth = highlightBgStrokeWidth;
           lbl.redraw?.();
         });
 
-        // If this record doesn't contain inverter IDs, allow normal polygon highlighting to run.
-        if (!historySelectedRecordId || invIdsToHighlight.size === 0) {
-          prevHistoryMc4InvHighlightRef.current = new Set();
-        } else {
-          // Apply orange highlight
-          const highlightTextColor = activeMode?.invIdHighlightTextColor || 'rgba(255,255,255,0.98)';
-          const highlightBgColor = activeMode?.invIdHighlightBgColor || 'rgba(249, 115, 22, 1)';
-          const highlightBgStrokeColor = activeMode?.invIdHighlightBgStrokeColor || 'rgba(255,255,255,0.9)';
-          const highlightBgStrokeWidth = activeMode?.invIdHighlightBgStrokeWidth || 2.5;
-
-          invIdsToHighlight.forEach((invIdNorm) => {
-            const lbl = labels[invIdNorm];
-            if (!lbl) return;
-            lbl.options.textColor = highlightTextColor;
-            lbl.options.textColorNoBg = null;
-            lbl.options.bgColor = highlightBgColor;
-            lbl.options.bgStrokeColor = highlightBgStrokeColor;
-            lbl.options.bgStrokeWidth = highlightBgStrokeWidth;
-            lbl.redraw?.();
-          });
-
-          prevHistoryMc4InvHighlightRef.current = invIdsToHighlight;
-          return;
-        }
+        prevHistoryMc4InvHighlightRef.current = invIdsToHighlight;
+        return;
       }
+    }
 
     // DCTT: highlight inv_id labels (for termination_inv mode) OR panel polygons (for termination_panel mode)
     if (isDCTT) {
@@ -7128,7 +7425,7 @@ export default function BaseModule({
       prevHistoryDcttPanelHighlightRef.current = panelIdsToHighlight;
       return;
     }
-    
+
     // LV: highlight inv_id labels (orange)
     if (isLV) {
       const labels = lvInvLabelByIdRef.current || {};
@@ -7172,7 +7469,7 @@ export default function BaseModule({
       const highlightBgColor = activeMode?.invIdHighlightBgColor || 'rgba(249, 115, 22, 1)';
       const highlightBgStrokeColor = activeMode?.invIdHighlightBgStrokeColor || 'rgba(255,255,255,0.9)';
       const highlightBgStrokeWidth = activeMode?.invIdHighlightBgStrokeWidth || 2.5;
-      
+
       idsToHighlight.forEach((invIdNorm) => {
         const lbl = labels[invIdNorm];
         if (!lbl) return;
@@ -7231,7 +7528,7 @@ export default function BaseModule({
 
     const panels = polygonById.current || {};
     const polygonIdsToHighlight = new Set(editingPolygonIds);
-    
+
     const unselectedColor = FULL_GEOJSON_BASE_COLOR;
     const unselectedWeight = FULL_GEOJSON_BASE_WEIGHT;
 
@@ -7285,7 +7582,7 @@ export default function BaseModule({
 
     prevHistoryHighlightRef.current = polygonIdsToHighlight;
   }, [historySelectedRecordId, editingPolygonIds, committedPolygons, isLV, isMC4, isDCTT, isMVF, isMVFT, dailyLog, activeMode, lvCompletedInvIds, mvftCommittedTrenchParts, dcttCompletedInvIds, dcttPanelStates]);
-  
+
   // Save notes to localStorage
   useEffect(() => {
     localStorage.setItem('cew_notes', JSON.stringify(notes));
@@ -7304,7 +7601,7 @@ export default function BaseModule({
       setNotePhotoName('');
     }
   }, [notes, editingNote]);
-  
+
   // Render note markers on map
   useEffect(() => {
     if (!mapRef.current) return;
@@ -7316,15 +7613,15 @@ export default function BaseModule({
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
-    
+
     // Clear existing markers
     Object.values(noteMarkersRef.current).forEach(marker => marker.remove());
     noteMarkersRef.current = {};
-    
+
     // Create markers for all notes (red dot)
     notes.forEach(note => {
       const isSelected = selectedNotes.has(note.id);
-      
+
       const dotIcon = L.divIcon({
         className: 'custom-note-pin',
         html: `
@@ -7336,8 +7633,8 @@ export default function BaseModule({
         iconAnchor: [14, 14],
         popupAnchor: [0, -14]
       });
-      
-      const marker = L.marker([note.lat, note.lng], { 
+
+      const marker = L.marker([note.lat, note.lng], {
         icon: dotIcon,
         interactive: true,
         riseOnHover: true
@@ -7361,7 +7658,7 @@ export default function BaseModule({
         marker.on('mouseover', () => marker.openTooltip());
         marker.on('mouseout', () => marker.closeTooltip());
       }
-      
+
       marker.on('click', (e) => {
         try {
           const oe = e?.originalEvent;
@@ -7373,7 +7670,7 @@ export default function BaseModule({
           void _e;
         }
         markerClickedRef.current = true;
-        
+
         // Open popup immediately when marker is clicked
         setEditingNote(note);
         setNoteText(note.text || '');
@@ -7381,13 +7678,13 @@ export default function BaseModule({
         setNotePhotoDataUrl(note.photoDataUrl || null);
         setNotePhotoName(note.photoName || '');
         marker.closeTooltip?.();
-        
+
         // Reset flag after event propagation
         setTimeout(() => {
           markerClickedRef.current = false;
         }, 200);
       });
-      
+
       marker.on('mousedown', (e) => {
         try {
           const oe = e?.originalEvent;
@@ -7399,7 +7696,7 @@ export default function BaseModule({
           void _e;
         }
       });
-      
+
       marker.addTo(mapRef.current);
       noteMarkersRef.current[note.id] = marker;
     });
@@ -7598,11 +7895,11 @@ export default function BaseModule({
           }
           // Only left click for drag
           if (oe?.button !== 0) return;
-          
+
           mouseDownTime = Date.now();
           mouseDownPos = { x: oe.clientX, y: oe.clientY };
           isDragging = false;
-          
+
           // Start drag after threshold
           const dragStartTimer = setTimeout(() => {
             if (mouseDownPos) {
@@ -7617,7 +7914,7 @@ export default function BaseModule({
               marker.getElement()?.classList.add('dragging');
             }
           }, DRAG_THRESHOLD);
-          
+
           // Store timer ref for cleanup
           marker._dragStartTimer = dragStartTimer;
         } catch (_e) {
@@ -7636,22 +7933,22 @@ export default function BaseModule({
         } catch (_e) {
           void _e;
         }
-        
+
         // Clear drag timer
         if (marker._dragStartTimer) {
           clearTimeout(marker._dragStartTimer);
           marker._dragStartTimer = null;
         }
-        
+
         // If we were dragging, don't process click
         if (isDragging || plDraggingPunchRef.current) {
           isDragging = false;
           return;
         }
-        
+
         markerClickedRef.current = true;
         marker.closeTooltip?.();
-        
+
         // Shift+click: toggle selection
         const shiftKey = e?.originalEvent?.shiftKey;
         if (shiftKey) {
@@ -7682,7 +7979,7 @@ export default function BaseModule({
             setPlPunchPhotoName(punch.photoName || '');
           }
         }
-        
+
         setTimeout(() => {
           markerClickedRef.current = false;
         }, 200);
@@ -7692,16 +7989,16 @@ export default function BaseModule({
       plPunchMarkersRef.current[punch.id] = marker;
     });
   }, [isPL, plPunches, plContractors, plGetContractor, plSelectedPunches, plEditingPunch]);
-  
+
   // Handle punch drag - global mousemove and mouseup
   useEffect(() => {
     if (!isPL) return;
-    
+
     const handleMouseMove = (e) => {
       if (!plDraggingPunchRef.current) return;
       const { marker } = plDraggingPunchRef.current;
       if (!marker || !mapRef.current) return;
-      
+
       try {
         const newLatLng = mapRef.current.mouseEventToLatLng(e);
         marker.setLatLng(newLatLng);
@@ -7709,15 +8006,15 @@ export default function BaseModule({
         void _e;
       }
     };
-    
+
     const handleMouseUp = (e) => {
       if (!plDraggingPunchRef.current) return;
       const { punchId, marker, startLatLng } = plDraggingPunchRef.current;
-      
+
       try {
         marker.getElement()?.classList.remove('dragging');
         const newLatLng = marker.getLatLng();
-        
+
         // Only update if actually moved
         if (newLatLng.lat !== startLatLng.lat || newLatLng.lng !== startLatLng.lng) {
           plMovePunch(punchId, newLatLng);
@@ -7725,19 +8022,19 @@ export default function BaseModule({
       } catch (_e) {
         void _e;
       }
-      
+
       plDraggingPunchRef.current = null;
     };
-    
+
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
-    
+
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isPL, plMovePunch]);
-  
+
   // Handle Delete key for selected notes, Escape to close popup, and Ctrl+Z / Ctrl+Y for undo/redo (notes)
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -7777,25 +8074,25 @@ export default function BaseModule({
           setPlSelectedPunches(new Set());
         }
       }
-      
+
       // Delete selected notes
       if (e.key === 'Delete' && noteMode && selectedNotes.size > 0 && !isPL) {
         const toDelete = new Set(selectedNotes);
         setNotes(prev => prev.filter(n => !toDelete.has(n.id)));
         setSelectedNotes(new Set());
       }
-      
+
       // Delete selected punches (PUNCH_LIST mode)
       if (e.key === 'Delete' && isPL && noteMode && plSelectedPunches.size > 0) {
         e.preventDefault();
         plDeleteSelectedPunches();
       }
     };
-    
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [noteMode, selectedNotes, globalUndo, globalRedo, setNotes, isPL, plSelectedPunches, plDeleteSelectedPunches]);
-  
+
   // Create new note at click position (no popup on create)
   const createNote = (latlng) => {
     const newNote = {
@@ -7834,11 +8131,11 @@ export default function BaseModule({
     };
     reader.readAsDataURL(file);
   };
-  
+
   // Save note text
   const saveNote = () => {
     if (!editingNote) return;
-    setNotes(prev => prev.map(n => 
+    setNotes(prev => prev.map(n =>
       n.id === editingNote.id
         ? { ...n, text: noteText, noteDate: noteDate || getNoteYmd(n), photoDataUrl: notePhotoDataUrl, photoName: notePhotoName }
         : n
@@ -7849,7 +8146,7 @@ export default function BaseModule({
     setNotePhotoDataUrl(null);
     setNotePhotoName('');
   };
-  
+
   // Delete single note
   const deleteNote = (noteId) => {
     setNotes(prev => prev.filter(n => n.id !== noteId));
@@ -7864,7 +8161,7 @@ export default function BaseModule({
     setNotePhotoDataUrl(null);
     setNotePhotoName('');
   };
-  
+
   // Delete all selected notes
   const deleteSelectedNotes = () => {
     if (selectedNotes.size === 0) return;
@@ -8278,7 +8575,7 @@ export default function BaseModule({
     }
     let plus = 0;
     let minus = 0;
-    
+
     // Collect unique string IDs from selected polygons
     const stringIds = new Set();
     selectedPolygons.forEach(polygonId => {
@@ -8287,7 +8584,7 @@ export default function BaseModule({
         stringIds.add(normalizeId(polygonInfo.stringId));
       }
     });
-    
+
     // Sum data for each unique string ID
     stringIds.forEach(stringId => {
       const data = lengthData[stringId];
@@ -8300,7 +8597,7 @@ export default function BaseModule({
         }
       }
     });
-    
+
     setCompletedPlus(plus);
     setCompletedMinus(minus);
   }, [isLV, selectedPolygons, lengthData, stringMatchVersion]);
@@ -8314,20 +8611,20 @@ export default function BaseModule({
     if (isDCCT) return;
     const prevSelected = prevSelectedRef.current;
     const currentSelected = selectedPolygons;
-    
+
     // Find polygons that need to be updated (added or removed from selection)
     const toUpdate = new Set();
-    
+
     // Newly selected
     currentSelected.forEach(id => {
       if (!prevSelected.has(id)) toUpdate.add(id);
     });
-    
+
     // Newly unselected
     prevSelected.forEach(id => {
       if (!currentSelected.has(id)) toUpdate.add(id);
     });
-    
+
     // Update only changed polygons
     toUpdate.forEach(polygonId => {
       const polygonInfo = polygonById.current[polygonId];
@@ -8341,17 +8638,17 @@ export default function BaseModule({
         polygonInfo.layer.setStyle(
           isSelected
             ? {
-                color: '#22c55e',
-                weight: 2,
-                fill: keepFillForHover,
-                fillOpacity: 0
-              }
+              color: '#22c55e',
+              weight: 2,
+              fill: keepFillForHover,
+              fillOpacity: 0
+            }
             : {
-                color: unselectedColor,
-                weight: unselectedWeight,
-                fill: keepFillForHover,
-                fillOpacity: 0
-              }
+              color: unselectedColor,
+              weight: unselectedWeight,
+              fill: keepFillForHover,
+              fillOpacity: 0
+            }
         );
 
         // PUNCH_LIST: never allow selection updates to disable hover interactivity.
@@ -8364,7 +8661,7 @@ export default function BaseModule({
         }
       }
     });
-    
+
     // Save current selection for next comparison
     prevSelectedRef.current = new Set(currentSelected);
   }, [isDCCT, isPL, selectedPolygons]);
@@ -8606,12 +8903,12 @@ export default function BaseModule({
       try { mvftTrenchSelectedLayerRef.current.remove(); } catch (_e) { void _e; }
       mvftTrenchSelectedLayerRef.current = null;
     }
-    
+
     const allBounds = L.latLngBounds();
     let totalFeatures = 0;
     let textCount = 0;
     const collectedPoints = [];
-    
+
     // String text'leri topla (text konumları için)
     const stringTextMap = {}; // stringId -> {lat, lng, angle, text}
 
@@ -8700,24 +8997,24 @@ export default function BaseModule({
         if (file.name === 'string_text') {
           const stringLayer = L.layerGroup();
           stringTextLayerRef.current = stringLayer;
-          
+
           (data.features || []).forEach(feature => {
             if (feature.geometry?.type === 'Point' && feature.properties?.text) {
               const coords = feature.geometry.coordinates;
               if (!coords || coords.length < 2) return;
-              
+
               const lat = coords[1];
               const lng = coords[0];
               const stringId = isDCCT
                 ? dcctNormalizeId(feature.properties.text)
                 : isDCTT
-                ? dcttTestNormalizeId(feature.properties.text)
-                : normalizeId(feature.properties.text);
-              
+                  ? dcttTestNormalizeId(feature.properties.text)
+                  : normalizeId(feature.properties.text);
+
               // Save point info
               collectedPoints.push({ id: stringId, lat, lng });
               stringTextMap[stringId] = { lat, lng, angle: feature.properties.angle || 0, text: feature.properties.text };
-              
+
               // Store for lazy rendering
               stringTextPointsRef.current.push({
                 lat,
@@ -8726,7 +9023,7 @@ export default function BaseModule({
                 text: feature.properties.text,
                 angle: feature.properties.angle || 0
               });
-              
+
               allBounds.extend([lat, lng]);
             }
           });
@@ -8748,7 +9045,7 @@ export default function BaseModule({
             });
             setDcttTestMapIds(mapIds);
           }
-          
+
           stringLayer.addTo(mapRef.current);
           layersRef.current.push(stringLayer);
 
@@ -8787,7 +9084,7 @@ export default function BaseModule({
           lvttSubCounterLayerRef.current = null;
           continue;
         }
-        
+
         if (file.name === 'full') {
           // DATP/MVFT: full layer is background only; trench lines are the selectable layer.
           // IMPORTANT: Use the same global FULL_GEOJSON_* styling as other modules so the
@@ -9316,7 +9613,7 @@ export default function BaseModule({
           if (isTIP) {
             const isTipSingleBoxSource = /full_plot_single_box\.geojson$/i.test(String(file?.url || ''));
             const threshold = activeMode?.tableAreaThreshold || 50; // m²
-            
+
             // Calculate polygon area in m² using Shoelace formula
             const calcAreaM2 = (coords) => {
               try {
@@ -9336,7 +9633,7 @@ export default function BaseModule({
                 return 0;
               }
             };
-            
+
             // Calculate centroid for each panel
             const getCentroid = (coords) => {
               try {
@@ -9613,7 +9910,7 @@ export default function BaseModule({
               tipPanelPairsRef.current = { featurePairs: tipFeaturePairs, polygonPairs: new Map() };
             }
           }
-          
+
           // LVTT: tables must NOT be selectable; draw only.
           if (isLVTT) {
             const fullLayer = L.geoJSON(data, {
@@ -9677,11 +9974,11 @@ export default function BaseModule({
           // TIP: Track feature index for panel pairing
           let tipFeatureIndex = 0;
           const tipFeatureToPolygonId = new Map(); // featureIndex -> polygonId
-          
+
           const fullLayer = L.geoJSON(data, {
             renderer: canvasRenderer,
             interactive: true,
-            
+
             // PL needs a filled (but invisible) hit-area so hover works over the whole table,
             // even after selection/unselection style updates.
             style: () => ({
@@ -9691,7 +9988,7 @@ export default function BaseModule({
               fill: !!isPL || !!isTIP,
               fillOpacity: 0,
             }),
-            
+
             onEachFeature: (feature, featureLayer) => {
               const currentFeatureIdx = tipFeatureIndex++;
               const gType = feature?.geometry?.type;
@@ -9757,7 +10054,7 @@ export default function BaseModule({
               // Assign unique ID to this panel/polygon
               const uniqueId = `polygon_${polygonIdCounter.current++}`;
               featureLayer._uniquePolygonId = uniqueId;
-              
+
               // TIP: Map feature index to polygon ID for panel pairing
               if (isTIP) {
                 tipFeatureToPolygonId.set(currentFeatureIdx, uniqueId);
@@ -9794,13 +10091,13 @@ export default function BaseModule({
                   const ring = Array.isArray(ll) ? ll : null;
                   if (!ring || ring.length < 4) return null;
                   const pts = ring.map((p) => map.latLngToLayerPoint(p));
-                  
+
                   // Calculate centroid (center of polygon)
                   let cx = 0, cy = 0;
                   pts.forEach((p) => { cx += p.x; cy += p.y; });
                   cx /= pts.length;
                   cy /= pts.length;
-                  
+
                   const edges = [];
                   const n = pts.length;
                   for (let i = 0; i < n; i++) {
@@ -9814,7 +10111,7 @@ export default function BaseModule({
                   edges.sort((a, b) => a.len - b.len);
                   const shortEdges = edges.slice(0, 2);
                   shortEdges.sort((a, b) => (a.center.x - b.center.x) || (a.center.y - b.center.y));
-                  
+
                   // Pull points inward toward centroid (30% of distance to center)
                   const inwardRatio = 0.3;
                   const pullInward = (edgeCenter) => {
@@ -9825,10 +10122,10 @@ export default function BaseModule({
                       y: edgeCenter.y + dy * inwardRatio
                     };
                   };
-                  
+
                   const leftPt = pullInward(shortEdges[0].center);
                   const rightPt = pullInward(shortEdges[1].center);
-                  
+
                   const leftPos = map.layerPointToLatLng(L.point(leftPt.x, leftPt.y));
                   const rightPos = map.layerPointToLatLng(L.point(rightPt.x, rightPt.y));
                   return { leftPos, rightPos };
@@ -10081,12 +10378,12 @@ export default function BaseModule({
                       toggleIds.forEach((id) => currentSet.add(id));
                       newPolygonIds = Array.from(currentSet);
                     }
-                    
+
                     // Update editing state
                     setEditingPolygonIds(newPolygonIds);
                     editingPolygonIdsRef.current = newPolygonIds;
                     window.__editingPolygonIds = newPolygonIds;
-                    
+
                     // Calculate new amount for DC
                     if (isDC) {
                       const stringIdsSet = new Set();
@@ -10127,10 +10424,10 @@ export default function BaseModule({
                         });
                       }
                     });
-                    
+
                     return; // Don't do normal selection
                   }
-                  
+
                   // COMMITTED POLYGON CHECK: Don't allow unselecting committed (submitted) polygons
                   // They can only be removed by deleting the history record
                   // Use ref to get latest value (Leaflet handlers have stale closures)
@@ -10140,15 +10437,15 @@ export default function BaseModule({
                     // Already committed - don't allow unselection
                     return;
                   }
-                  
+
                   // TIP: Select/unselect both panels of a table together
                   if (isTIP) {
                     const partnerPolygonId = tipPanelPairsRef.current?.polygonPairs?.get(polygonId);
                     // Check if any of the pair is committed
-                    const anyCommitted = currentCommitted.has(polygonId) || 
+                    const anyCommitted = currentCommitted.has(polygonId) ||
                       (partnerPolygonId && currentCommitted.has(partnerPolygonId));
                     if (anyCommitted) return; // Don't allow unselection of committed polygons
-                    
+
                     setSelectedPolygons(prev => {
                       const next = new Set(prev);
                       const isSelected = next.has(polygonId);
@@ -10163,21 +10460,21 @@ export default function BaseModule({
                     });
                     return;
                   }
-                  
+
                   // For small tables: select all polygons with same string ID
                   const polygonInfo = polygonById.current[polygonId];
                   if (polygonInfo && polygonInfo.stringId && polygonInfo.isSmallTable) {
                     // Check if any polygon in the group is committed
-                      const groupIds = [];
-                      Object.keys(polygonById.current).forEach(pid => {
-                        const info = polygonById.current[pid];
-                        if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
-                          groupIds.push(pid);
-                        }
-                      });
+                    const groupIds = [];
+                    Object.keys(polygonById.current).forEach(pid => {
+                      const info = polygonById.current[pid];
+                      if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
+                        groupIds.push(pid);
+                      }
+                    });
                     const anyGroupCommitted = groupIds.some(id => currentCommitted.has(id));
                     if (anyGroupCommitted) return; // Don't allow unselection of committed groups
-                    
+
                     setSelectedPolygons(prev => {
                       const next = new Set(prev);
 
@@ -10200,7 +10497,7 @@ export default function BaseModule({
                   }
                 }
               });
-              
+
               featureLayer.on('contextmenu', (e) => {
                 try {
                   const oe = e?.originalEvent;
@@ -10219,15 +10516,15 @@ export default function BaseModule({
                   const currentCommitted = committedPolygonsRef.current || new Set();
                   const isCommitted = currentCommitted.has(polygonId);
                   if (isCommitted) return; // Already committed - don't allow unselection
-                  
+
                   // TIP: Unselect both panels of a table together
                   if (isTIP && tipPanelPairsRef.current?.polygonPairs) {
                     const partnerPolygonId = tipPanelPairsRef.current.polygonPairs.get(polygonId);
                     // Check if any is committed
-                    const anyCommitted = currentCommitted.has(polygonId) || 
+                    const anyCommitted = currentCommitted.has(polygonId) ||
                       (partnerPolygonId && currentCommitted.has(partnerPolygonId));
                     if (anyCommitted) return;
-                    
+
                     setSelectedPolygons(prev => {
                       const next = new Set(prev);
                       next.delete(polygonId);
@@ -10236,21 +10533,21 @@ export default function BaseModule({
                     });
                     return;
                   }
-                  
+
                   // For small tables: unselect all polygons with same string ID
                   const polygonInfo = polygonById.current[polygonId];
                   if (polygonInfo && polygonInfo.stringId && polygonInfo.isSmallTable) {
                     // Check if any in group is committed
                     const groupIds = [];
-                      Object.keys(polygonById.current).forEach(pid => {
-                        const info = polygonById.current[pid];
-                        if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
+                    Object.keys(polygonById.current).forEach(pid => {
+                      const info = polygonById.current[pid];
+                      if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
                         groupIds.push(pid);
                       }
                     });
                     const anyGroupCommitted = groupIds.some(id => currentCommitted.has(id));
                     if (anyGroupCommitted) return;
-                    
+
                     setSelectedPolygons(prev => {
                       const next = new Set(prev);
                       groupIds.forEach(pid => next.delete(pid));
@@ -10268,7 +10565,7 @@ export default function BaseModule({
               });
             }
           });
-          
+
           // TIP: Build polygonPairs map from feature pairs (bidirectional)
           if (isTIP && tipPanelPairsRef.current?.featurePairs) {
             const polygonPairs = new Map();
@@ -10284,10 +10581,10 @@ export default function BaseModule({
             tipPanelPairsRef.current.polygonPairs = polygonPairs;
             console.log('TIP: Built polygonPairs map with', polygonPairs.size, 'entries');
           }
-          
+
           fullLayer.addTo(mapRef.current);
           layersRef.current.push(fullLayer);
-          
+
           if (fullLayer.getBounds().isValid()) {
             allBounds.extend(fullLayer.getBounds());
           }
@@ -10298,14 +10595,14 @@ export default function BaseModule({
         if (isLVIB && (file.name === 'lv_box' || file.name === 'inv_box')) {
           const boxType = file.name === 'lv_box' ? 'lvBox' : 'invBox';
           const featureCount = data.features?.length || 0;
-          
+
           // Set total counts
           if (boxType === 'lvBox') {
             setLvibLvBoxTotal(featureCount);
           } else {
             setLvibInvBoxTotal(featureCount);
           }
-          
+
           const boxLayer = L.geoJSON(data, {
             renderer: canvasRenderer,
             interactive: true,
@@ -10315,7 +10612,7 @@ export default function BaseModule({
               const polygonId = `${boxType}_${String(fid)}`;
               const selectedSet = boxType === 'lvBox' ? lvibSelectedLvBoxesRef.current : lvibSelectedInvBoxesRef.current;
               const isSelected = selectedSet.has(polygonId);
-              
+
               if (isSelected) {
                 return {
                   color: '#16a34a',
@@ -10345,27 +10642,27 @@ export default function BaseModule({
                 fidRaw != null
                   ? String(fidRaw)
                   : (() => {
-                      try {
-                        const g = feature?.geometry;
-                        const coords = g?.coordinates;
-                        const head = Array.isArray(coords) ? JSON.stringify(coords).slice(0, 160) : '';
-                        return `geom_${head.length}_${head}`;
-                      } catch {
-                        return 'geom_unknown';
-                      }
-                    })();
+                    try {
+                      const g = feature?.geometry;
+                      const coords = g?.coordinates;
+                      const head = Array.isArray(coords) ? JSON.stringify(coords).slice(0, 160) : '';
+                      return `geom_${head.length}_${head}`;
+                    } catch {
+                      return 'geom_unknown';
+                    }
+                  })();
               const polygonId = `${boxType}_${fid}`;
-              
+
               // Store box type mapping
               lvibBoxTypeRef.current.set(polygonId, boxType);
-              
+
               // Store in polygonById for selection box support
               polygonById.current[polygonId] = {
                 layer: featureLayer,
                 boxType: boxType,
                 polygonId: polygonId
               };
-              
+
               featureLayer.on('click', (e) => {
                 try {
                   if (e?.originalEvent) {
@@ -10373,14 +10670,14 @@ export default function BaseModule({
                     L.DomEvent.preventDefault(e.originalEvent);
                   }
                 } catch (_e) { void _e; }
-                
+
                 // Only allow selection if this box type matches current sub-mode
                 const currentSubMode = lvibSubModeRef.current;
                 if (currentSubMode !== boxType) return;
-                
+
                 const isRightClick = e?.originalEvent?.button === 2;
                 const setSelected = boxType === 'lvBox' ? setLvibSelectedLvBoxes : setLvibSelectedInvBoxes;
-                
+
                 setSelected(prev => {
                   const next = new Set(prev);
                   if (isRightClick) {
@@ -10394,27 +10691,27 @@ export default function BaseModule({
                   }
                   return next;
                 });
-                
+
                 // Update style
                 boxLayer.resetStyle(featureLayer);
               });
             }
           });
-          
+
           // Store layer reference for style updates
           if (boxType === 'lvBox') {
             lvibLvBoxLayerRef.current = boxLayer;
           } else {
             lvibInvBoxLayerRef.current = boxLayer;
           }
-          
+
           boxLayer.addTo(mapRef.current);
           layersRef.current.push(boxLayer);
-          
+
           if (boxLayer.getBounds().isValid()) {
             allBounds.extend(boxLayer.getBounds());
           }
-          
+
           // Add LV/INV text labels inside boxes using the SAME rendering system/options as inv_id labels.
           // This ensures identical zoom scaling, stroke, and optional background plate behavior.
           const boxLabel = boxType === 'lvBox' ? 'LV' : 'INV';
@@ -10487,7 +10784,7 @@ export default function BaseModule({
             textMarker.addTo(mapRef.current);
             layersRef.current.push(textMarker);
           });
-          
+
           continue;
         }
 
@@ -10514,19 +10811,19 @@ export default function BaseModule({
         const useRenderer = ptepTableToTableInteractive
           ? (ptepTableToTableSvgRendererRef.current || L.svg({ pane: 'ptepTableToTablePane' }))
           : ptepParameterInteractive
-          ? (ptepParameterSvgRendererRef.current || L.svg({ pane: 'ptepParameterPane' }))
-          : datpTrenchInteractive
-          ? (datpSvgRendererRef.current || L.svg({ pane: 'datpTrenchPane' }))
-          : mvftTrenchInteractive
-          ? (mvftSvgRendererRef.current || L.svg({ pane: 'mvftTrenchPane' }))
-          : canvasRenderer;
+            ? (ptepParameterSvgRendererRef.current || L.svg({ pane: 'ptepParameterPane' }))
+            : datpTrenchInteractive
+              ? (datpSvgRendererRef.current || L.svg({ pane: 'datpTrenchPane' }))
+              : mvftTrenchInteractive
+                ? (mvftSvgRendererRef.current || L.svg({ pane: 'mvftTrenchPane' }))
+                : canvasRenderer;
 
         const layer = L.geoJSON(data, {
           pane: ptepPaneName || datpPaneName || mvftPaneName,
           renderer: useRenderer,
           interactive: !disableInteractions && (invInteractive || mvfTrenchInteractive || ptepTableToTableInteractive || ptepParameterInteractive || datpTrenchInteractive || mvftTrenchInteractive),
           bubblingMouseEvents: !(ptepTableToTableInteractive || ptepParameterInteractive || datpTrenchInteractive || mvftTrenchInteractive),
-          
+
           style: (feature) => {
             // BOUNDARY: render identically across ALL modules (match DC CABLE PULLING PROGRESS TRACKING)
             if (file.name === 'boundry' || file.name === 'boundary') {
@@ -10725,7 +11022,7 @@ export default function BaseModule({
               fillOpacity: 0
             };
           },
-          
+
           pointToLayer: (feature, latlng) => {
             if (invLabelMode && feature.properties?.text) {
               const raw = feature.properties.text;
@@ -10741,7 +11038,7 @@ export default function BaseModule({
                   void _e;
                 }
               }
-              
+
               const invScale = typeof activeMode?.invIdTextScale === 'number' ? activeMode.invIdTextScale : 1;
               const invBase = typeof activeMode?.invIdTextBaseSize === 'number' ? activeMode.invIdTextBaseSize : 19;
               const invRefZoom = typeof activeMode?.invIdTextRefZoom === 'number' ? activeMode.invIdTextRefZoom : 20;
@@ -10768,13 +11065,13 @@ export default function BaseModule({
               const invDoneBgStrokeColor = activeMode?.invIdDoneBgStrokeColor || 'rgba(255,255,255,0.70)';
               const invDoneBgStrokeWidth =
                 typeof activeMode?.invIdDoneBgStrokeWidth === 'number' ? activeMode.invIdDoneBgStrokeWidth : 2;
-              
+
               // LVTT colors based on test status
               let textColor = 'rgba(255,255,255,0.98)'; // default white (not tested)
               let bgColor = invBgColor;
               let bgStrokeColor = invBgStrokeColor;
               let bgStrokeWidth = invBgStrokeWidth;
-              
+
               if (isLVTT) {
                 const mode = String(lvttSubModeRef.current || 'termination');
                 if (mode === 'termination') {
@@ -10799,7 +11096,7 @@ export default function BaseModule({
                 bgStrokeColor = invDoneBgStrokeColor;
                 bgStrokeWidth = invDoneBgStrokeWidth;
               }
-              
+
               const baseSize = invBase * invScale;
               const radius = 22 * invScale;
               const lvttModeNow = String(lvttSubModeRef.current || 'termination');
@@ -11016,7 +11313,7 @@ export default function BaseModule({
               fillOpacity: 0.65
             });
           },
-          
+
           onEachFeature: (feature, featureLayer) => {
             // LV: index lv_box geometries so we can turn the box green when its inv_id is selected.
             if (isLV && file.name === 'lv_box') {
@@ -11089,12 +11386,12 @@ export default function BaseModule({
               const uniqueId = `tt_${String(fid)}`;
               featureLayer._ptepUniqueId = uniqueId;
               ptepTableToTableByIdRef.current[uniqueId] = featureLayer;
-              
+
               // Ensure layer is interactive
               if (featureLayer.options) {
                 featureLayer.options.interactive = true;
               }
-              
+
               featureLayer.on('click', (e) => {
                 try {
                   if (e?.originalEvent) {
@@ -11107,7 +11404,7 @@ export default function BaseModule({
                 if (noteMode) return;
                 // Only allow selection when tabletotable sub-mode is active
                 if (ptepSubModeRef.current !== 'tabletotable') return;
-                
+
                 const isRightClick = e?.originalEvent?.button === 2;
                 setPtepCompletedTableToTable((prev) => {
                   const next = new Set(prev);
@@ -11159,12 +11456,12 @@ export default function BaseModule({
                 void _e;
                 ptepParameterLenByIdRef.current[uniqueId] = 0;
               }
-              
+
               // Ensure layer is interactive
               if (featureLayer.options) {
                 featureLayer.options.interactive = true;
               }
-              
+
               featureLayer.on('click', (e) => {
                 try {
                   if (e?.originalEvent) {
@@ -11253,7 +11550,7 @@ export default function BaseModule({
                 });
               });
             }
-            
+
             // MVF: allow selecting mv_trench segments (click toggles green)
             if (mvfTrenchInteractive && featureLayer && typeof featureLayer.on === 'function') {
               const fidRaw = feature?.properties?.fid;
@@ -11574,14 +11871,14 @@ export default function BaseModule({
             }
 
             if (feature.properties?.text && feature.geometry.type !== 'Point') {
-              
+
               let center;
               if (typeof featureLayer.getBounds === 'function') {
                 center = featureLayer.getBounds().getCenter();
               } else if (typeof featureLayer.getLatLng === 'function') {
                 center = featureLayer.getLatLng();
               }
-              
+
               let rotation = 0;
               if (feature.geometry.type === 'LineString') {
                 rotation = calculateLineAngle(feature.geometry.coordinates);
@@ -11604,7 +11901,7 @@ export default function BaseModule({
             }
           }
         }).addTo(mapRef.current);
-        
+
         // PTEP: Count total table-to-table features
         if (isPTEP && file.name === 'earthing_tabletotable' && data?.features?.length) {
           setPtepTotalTableToTable(data.features.length);
@@ -11632,14 +11929,14 @@ export default function BaseModule({
             setDatpTotalTrenchMeters(totalMeters);
           }, 100);
         }
-        
+
         layersRef.current.push(layer);
         if (layer.getBounds().isValid()) {
           allBounds.extend(layer.getBounds());
         }
 
-      } catch (err) { 
-        console.error('Error loading GeoJSON:', err); 
+      } catch (err) {
+        console.error('Error loading GeoJSON:', err);
       }
     }
 
@@ -11785,7 +12082,7 @@ export default function BaseModule({
                 if (uid && polygonById.current?.[uid]) {
                   polygonById.current[uid].dedupeKey = dedupeKey;
                 }
-                
+
                 polygonInfos.push({
                   featureLayer,
                   bounds,
@@ -11800,7 +12097,7 @@ export default function BaseModule({
           });
         }
       });
-      
+
       polygonInfos.sort((a, b) => b.diag - a.diag);
 
       // MODULE_INSTALLATION_PROGRES_TRACKING (and other potential weighted-counter modules):
@@ -11944,7 +12241,7 @@ export default function BaseModule({
               matchesNearby.push({ stringId: c.stringId, dist: distToCenter });
             }
           }
-          
+
           let finalId = null;
           if (matchesInside.length === 1) {
             finalId = matchesInside[0].stringId;
@@ -11968,7 +12265,7 @@ export default function BaseModule({
               finalId = bestLoose.stringId;
             }
           }
-          
+
           if (finalId) {
             const uniqueId = featureLayer._uniquePolygonId;
             if (uniqueId && polygonById.current[uniqueId]) {
@@ -12168,13 +12465,13 @@ export default function BaseModule({
       const color = done ? '#16a34a' : mvfColorOfSegment(k);
       const line = L.polyline(coords, { color, weight: 4.6, opacity: 0.98, interactive: true });
       line._mvfSegmentKey = k;
-      
+
       // Store line for history highlighting
       if (!mvfSegmentLinesByKeyRef.current[k]) {
         mvfSegmentLinesByKeyRef.current[k] = [];
       }
       mvfSegmentLinesByKeyRef.current[k].push(line);
-      
+
       // Right-click on route removes segment highlight (does not erase completed parts).
       line.on('contextmenu', (evt) => {
         try {
@@ -12202,7 +12499,7 @@ export default function BaseModule({
     // PUNCH_LIST: disable box selection only in normal mode.
     // Note mode relies on these handlers for click-to-create and box-to-select notes.
     if (isMVT || isLVTT || (isPL && !noteMode)) return;
-    
+
     const map = mapRef.current;
     const container = map.getContainer();
 
@@ -12211,20 +12508,20 @@ export default function BaseModule({
       if (!t) return false;
       return Boolean(
         t.closest?.('.custom-note-pin') ||
-          t.closest?.('.note-dot-hit') ||
-          t.closest?.('.note-dot-core') ||
-          t.closest?.('.custom-punch-pin') ||
-          t.closest?.('.punch-dot-hit') ||
-          t.closest?.('.punch-dot-core')
+        t.closest?.('.note-dot-hit') ||
+        t.closest?.('.note-dot-core') ||
+        t.closest?.('.custom-punch-pin') ||
+        t.closest?.('.punch-dot-hit') ||
+        t.closest?.('.punch-dot-core')
       );
     };
-    
+
     // Prevent default context menu only on map container
     const preventContextMenu = (e) => {
       e.preventDefault();
     };
     container.addEventListener('contextmenu', preventContextMenu);
-    
+
     const onMouseDown = (e) => {
       if (e.button !== 0 && e.button !== 2) return; // Left or right click
 
@@ -12238,7 +12535,7 @@ export default function BaseModule({
       if (noteMode && isNoteMarkerDomTarget(e)) {
         return;
       }
-      
+
       // Reset marker click flag at start of new interaction
       markerClickedRef.current = false;
       polygonClickedRef.current = false;
@@ -12252,7 +12549,7 @@ export default function BaseModule({
         void _e;
         return;
       }
-      
+
       draggingRef.current = {
         start: startLatLng,
         startPoint: { x: e.clientX, y: e.clientY },
@@ -12272,7 +12569,7 @@ export default function BaseModule({
       }
       try { map.dragging?.disable?.(); } catch (_e) { void _e; }
     };
-    
+
     const onMouseMove = (e) => {
       if (!draggingRef.current) return;
 
@@ -12281,14 +12578,14 @@ export default function BaseModule({
       if (isDCTT && !noteMode && String(dcttSubModeRef.current || 'termination') === 'testing') {
         return;
       }
-      
+
       // Check if moved enough to be a drag
       const dx = e.clientX - draggingRef.current.startPoint.x;
       const dy = e.clientY - draggingRef.current.startPoint.y;
       if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
         draggingRef.current.isDrag = true;
       }
-      
+
       let current = null;
       try {
         if (!map || !map._loaded || !map._mapPane) return;
@@ -12298,7 +12595,7 @@ export default function BaseModule({
         return;
       }
       const bounds = L.latLngBounds(draggingRef.current.start, current);
-      
+
       if (boxRectRef.current) {
         boxRectRef.current.setBounds(bounds);
       } else if (draggingRef.current.isDrag) {
@@ -12315,7 +12612,7 @@ export default function BaseModule({
         }).addTo(map);
       }
     };
-    
+
     const onMouseUp = (e) => {
       if (!draggingRef.current) return;
 
@@ -12325,10 +12622,10 @@ export default function BaseModule({
       // ═══════════════════════════════════════════════════════════════════
       const wasHamburgerMenuOpen = plHamburgerWasOpenOnMouseDownRef.current === true;
       const isContractorDropdownOpen = plContractorDropdownOpenRef.current === true;
-      
+
       // Reset the hamburger flag for next interaction
       plHamburgerWasOpenOnMouseDownRef.current = false;
-      
+
       if (wasHamburgerMenuOpen || isContractorDropdownOpen) {
         // Close contractor dropdown if open
         if (isContractorDropdownOpen) {
@@ -12352,7 +12649,7 @@ export default function BaseModule({
       } catch (_e) {
         void _e;
       }
-      
+
       const wasDrag = draggingRef.current.isDrag;
       const isRightClick = draggingRef.current.isRightClick;
       const clickLatLng = draggingRef.current.start;
@@ -12366,11 +12663,11 @@ export default function BaseModule({
           void _e;
         }
       }
-      
+
       // Handle box selection (drag)
       if (boxRectRef.current && wasDrag) {
         const bounds = boxRectRef.current.getBounds();
-        
+
         if (noteMode) {
           // PUNCH_LIST MODE: Select punches within bounds
           if (isPL) {
@@ -12378,7 +12675,7 @@ export default function BaseModule({
               // Get punch position (handle isometric punches with random positions)
               let pLat = punch.lat;
               let pLng = punch.lng;
-              
+
               // If isometric punch with stored position, use that
               if (punch.tableId && punch.isoX != null && punch.isoY != null && punch.lat === 0 && punch.lng === 0) {
                 const storedPos = plIsoPunchPositionsRef.current?.[punch.id];
@@ -12387,11 +12684,11 @@ export default function BaseModule({
                   pLng = storedPos.lng;
                 }
               }
-              
+
               if (!pLat || !pLng) return false;
               return bounds.contains(L.latLng(pLat, pLng));
             });
-            
+
             if (punchesInBounds.length > 0) {
               setPlSelectedPunches(prev => {
                 const next = new Set(prev);
@@ -12405,10 +12702,10 @@ export default function BaseModule({
             }
           } else {
             // NOTE MODE: Select only notes within bounds
-            const notesInBounds = notes.filter(note => 
+            const notesInBounds = notes.filter(note =>
               bounds.contains(L.latLng(note.lat, note.lng))
             );
-            
+
             if (notesInBounds.length > 0) {
               setSelectedNotes(prev => {
                 const next = new Set(prev);
@@ -12514,148 +12811,148 @@ export default function BaseModule({
                 if (segKey && segKey !== '__FREE__' && doneSet.has(segKey)) {
                   // no-op
                 } else {
-                // Select ONLY the part of trench lines inside the box
-                const toAdd = [];
+                  // Select ONLY the part of trench lines inside the box
+                  const toAdd = [];
 
-                const segScale =
-                  segKey && segKey !== '__FREE__' && typeof mvfSegmentScaleByKeyRef.current?.[segKey] === 'number'
-                    ? mvfSegmentScaleByKeyRef.current[segKey]
-                    : mvfCircuitsMultiplier;
+                  const segScale =
+                    segKey && segKey !== '__FREE__' && typeof mvfSegmentScaleByKeyRef.current?.[segKey] === 'number'
+                      ? mvfSegmentScaleByKeyRef.current[segKey]
+                      : mvfCircuitsMultiplier;
 
-                const committedPartIds = new Set(
-                  (mvfCommittedTrenchPartsRef.current || [])
-                    .filter((p) => String(p?.segmentKey || '') === String(segKey))
-                    .map((p) => String(p?.id || ''))
-                );
+                  const committedPartIds = new Set(
+                    (mvfCommittedTrenchPartsRef.current || [])
+                      .filter((p) => String(p?.segmentKey || '') === String(segKey))
+                      .map((p) => String(p?.id || ''))
+                  );
 
-                // Allowed intervals: if a real segment is selected, box selection only applies on that segment route.
-                // MV mode can still select without picking a segment (segKey === '__FREE__' => unrestricted).
-                const allowedMap =
-                  segKey && segKey !== '__FREE__'
-                    ? (mvfRouteIntervalsBySegmentKeyRef.current?.[segKey] || null)
-                    : null;
+                  // Allowed intervals: if a real segment is selected, box selection only applies on that segment route.
+                  // MV mode can still select without picking a segment (segKey === '__FREE__' => unrestricted).
+                  const allowedMap =
+                    segKey && segKey !== '__FREE__'
+                      ? (mvfRouteIntervalsBySegmentKeyRef.current?.[segKey] || null)
+                      : null;
 
-                // MV mode: when selecting freely, do NOT add selection over DONE segment routes (green is "completed").
-                const blockedMap = (() => {
-                  if (isFibreMode) return null;
-                  if (segKey !== '__FREE__') return null;
-                  const doneKeys = Array.from(mvfDoneSegmentKeysRef.current || []);
-                  if (doneKeys.length === 0) return null;
-                  const out = new Map(); // fid:lineIndex -> merged [[a,b]]
-                  doneKeys.forEach((dk) => {
-                    const m = mvfRouteIntervalsBySegmentKeyRef.current?.[String(dk)];
-                    if (!m) return;
-                    for (const [lk, arr] of m.entries()) {
-                      if (!out.has(lk)) out.set(lk, []);
-                      out.get(lk).push(...arr);
+                  // MV mode: when selecting freely, do NOT add selection over DONE segment routes (green is "completed").
+                  const blockedMap = (() => {
+                    if (isFibreMode) return null;
+                    if (segKey !== '__FREE__') return null;
+                    const doneKeys = Array.from(mvfDoneSegmentKeysRef.current || []);
+                    if (doneKeys.length === 0) return null;
+                    const out = new Map(); // fid:lineIndex -> merged [[a,b]]
+                    doneKeys.forEach((dk) => {
+                      const m = mvfRouteIntervalsBySegmentKeyRef.current?.[String(dk)];
+                      if (!m) return;
+                      for (const [lk, arr] of m.entries()) {
+                        if (!out.has(lk)) out.set(lk, []);
+                        out.get(lk).push(...arr);
+                      }
+                    });
+                    for (const [lk, arr] of out.entries()) out.set(lk, mergeIntervals(arr));
+                    return out;
+                  })();
+
+                  const intersectIntervals = (aList, bList) => {
+                    const out = [];
+                    let i = 0, j = 0;
+                    while (i < aList.length && j < bList.length) {
+                      const a = aList[i];
+                      const b = bList[j];
+                      const lo = Math.max(a[0], b[0]);
+                      const hi = Math.min(a[1], b[1]);
+                      if (hi > lo) out.push([lo, hi]);
+                      if (a[1] < b[1]) i++;
+                      else j++;
                     }
-                  });
-                  for (const [lk, arr] of out.entries()) out.set(lk, mergeIntervals(arr));
-                  return out;
-                })();
+                    return out;
+                  };
 
-                const intersectIntervals = (aList, bList) => {
-                  const out = [];
-                  let i = 0, j = 0;
-                  while (i < aList.length && j < bList.length) {
-                    const a = aList[i];
-                    const b = bList[j];
-                    const lo = Math.max(a[0], b[0]);
-                    const hi = Math.min(a[1], b[1]);
-                    if (hi > lo) out.push([lo, hi]);
-                    if (a[1] < b[1]) i++;
-                    else j++;
-                  }
-                  return out;
-                };
-
-                // Coverage (idempotent) only within this segment key
-                const coveredIntervalsByKey = new Map(); // fid:lineIndex -> merged intervals
-                const addCovered = (p) => {
-                  if (String(p?.segmentKey || '') !== String(segKey)) return;
-                  const fid = String(p?.fid || '');
-                  const lineIndex = Number(p?.lineIndex);
-                  const a = Number(p?.startM);
-                  const b = Number(p?.endM);
-                  if (!fid || !Number.isFinite(lineIndex) || !Number.isFinite(a) || !Number.isFinite(b)) return;
-                  const lo = Math.min(a, b);
-                  const hi = Math.max(a, b);
-                  if (!(hi > lo)) return;
-                  const key = `${fid}:${lineIndex}`;
-                  if (!coveredIntervalsByKey.has(key)) coveredIntervalsByKey.set(key, []);
-                  coveredIntervalsByKey.get(key).push([lo, hi]);
-                };
-                (mvfSelectedTrenchPartsRef.current || []).forEach(addCovered);
-                (mvfCommittedTrenchPartsRef.current || []).forEach(addCovered);
-                for (const [k, arr] of coveredIntervalsByKey.entries()) coveredIntervalsByKey.set(k, mergeIntervals(arr));
-
-                Object.keys(byId).forEach((fid) => {
-                  const layer = byId[fid];
-                  if (!layer || typeof layer.getBounds !== 'function' || typeof layer.getLatLngs !== 'function') return;
-                  try {
-                    const lb = layer.getBounds();
-                    if (!lb || !bounds.intersects(lb)) return;
-                  } catch (_e) {
-                    void _e;
-                    return;
-                  }
-                  const lines = asLineStrings(layer.getLatLngs());
-                  lines.forEach((lineLL, lineIndex) => {
-                    if (!lineLL || lineLL.length < 2) return;
+                  // Coverage (idempotent) only within this segment key
+                  const coveredIntervalsByKey = new Map(); // fid:lineIndex -> merged intervals
+                  const addCovered = (p) => {
+                    if (String(p?.segmentKey || '') !== String(segKey)) return;
+                    const fid = String(p?.fid || '');
+                    const lineIndex = Number(p?.lineIndex);
+                    const a = Number(p?.startM);
+                    const b = Number(p?.endM);
+                    if (!fid || !Number.isFinite(lineIndex) || !Number.isFinite(a) || !Number.isFinite(b)) return;
+                    const lo = Math.min(a, b);
+                    const hi = Math.max(a, b);
+                    if (!(hi > lo)) return;
                     const key = `${fid}:${lineIndex}`;
-                    let candidates = computeIntervalsInBox({ L, map, bounds, lineLatLngs: lineLL, minMeters: 0.5 });
-                    if (!candidates.length) return;
-                    if (allowedMap) {
-                      const allowed = allowedMap.get(key) || [];
-                      if (!allowed.length) return;
-                      candidates = intersectIntervals(candidates, allowed);
-                      if (!candidates.length) return;
+                    if (!coveredIntervalsByKey.has(key)) coveredIntervalsByKey.set(key, []);
+                    coveredIntervalsByKey.get(key).push([lo, hi]);
+                  };
+                  (mvfSelectedTrenchPartsRef.current || []).forEach(addCovered);
+                  (mvfCommittedTrenchPartsRef.current || []).forEach(addCovered);
+                  for (const [k, arr] of coveredIntervalsByKey.entries()) coveredIntervalsByKey.set(k, mergeIntervals(arr));
+
+                  Object.keys(byId).forEach((fid) => {
+                    const layer = byId[fid];
+                    if (!layer || typeof layer.getBounds !== 'function' || typeof layer.getLatLngs !== 'function') return;
+                    try {
+                      const lb = layer.getBounds();
+                      if (!lb || !bounds.intersects(lb)) return;
+                    } catch (_e) {
+                      void _e;
+                      return;
                     }
-                    if (blockedMap) {
-                      const blocked = blockedMap.get(key) || [];
-                      if (blocked.length) {
-                        // subtract blocked from each candidate interval
-                        const remaining = [];
-                        candidates.forEach((c) => {
-                          const pieces = subtractInterval(c, blocked, 0.2);
-                          remaining.push(...pieces);
-                        });
-                        candidates = mergeIntervals(remaining);
+                    const lines = asLineStrings(layer.getLatLngs());
+                    lines.forEach((lineLL, lineIndex) => {
+                      if (!lineLL || lineLL.length < 2) return;
+                      const key = `${fid}:${lineIndex}`;
+                      let candidates = computeIntervalsInBox({ L, map, bounds, lineLatLngs: lineLL, minMeters: 0.5 });
+                      if (!candidates.length) return;
+                      if (allowedMap) {
+                        const allowed = allowedMap.get(key) || [];
+                        if (!allowed.length) return;
+                        candidates = intersectIntervals(candidates, allowed);
                         if (!candidates.length) return;
                       }
-                    }
-                    let covered = coveredIntervalsByKey.get(key) || [];
-                    const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
-                    candidates.forEach(([a, b]) => {
-                      const newInts = subtractInterval([a, b], covered, 0.2);
-                      if (!newInts.length) return;
-                      covered = mergeIntervals([...covered, ...newInts]);
-                      coveredIntervalsByKey.set(key, covered);
-                      newInts.forEach(([x, y]) => {
-                        const id = `${fid}:${lineIndex}:${x.toFixed(2)}-${y.toFixed(2)}:seg:${segKey}`;
-                        if (committedPartIds.has(id)) return;
-                        const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: x, endM: y });
-                        if (!coords || coords.length < 2) return;
-                        toAdd.push({
-                          id,
-                          fid: String(fid),
-                          lineIndex,
-                          startM: x,
-                          endM: y,
-                          coords,
-                          meters: Math.max(0, y - x),
-                          metersMultiplier: segScale,
-                          segmentKey: segKey,
-                          source: 'box',
+                      if (blockedMap) {
+                        const blocked = blockedMap.get(key) || [];
+                        if (blocked.length) {
+                          // subtract blocked from each candidate interval
+                          const remaining = [];
+                          candidates.forEach((c) => {
+                            const pieces = subtractInterval(c, blocked, 0.2);
+                            remaining.push(...pieces);
+                          });
+                          candidates = mergeIntervals(remaining);
+                          if (!candidates.length) return;
+                        }
+                      }
+                      let covered = coveredIntervalsByKey.get(key) || [];
+                      const cumData = buildCumulativeMeters({ L, lineLatLngs: lineLL });
+                      candidates.forEach(([a, b]) => {
+                        const newInts = subtractInterval([a, b], covered, 0.2);
+                        if (!newInts.length) return;
+                        covered = mergeIntervals([...covered, ...newInts]);
+                        coveredIntervalsByKey.set(key, covered);
+                        newInts.forEach(([x, y]) => {
+                          const id = `${fid}:${lineIndex}:${x.toFixed(2)}-${y.toFixed(2)}:seg:${segKey}`;
+                          if (committedPartIds.has(id)) return;
+                          const coords = sliceLineByMeters({ lineLatLngs: lineLL, cumData, startM: x, endM: y });
+                          if (!coords || coords.length < 2) return;
+                          toAdd.push({
+                            id,
+                            fid: String(fid),
+                            lineIndex,
+                            startM: x,
+                            endM: y,
+                            coords,
+                            meters: Math.max(0, y - x),
+                            metersMultiplier: segScale,
+                            segmentKey: segKey,
+                            source: 'box',
+                          });
                         });
                       });
                     });
                   });
-                });
 
-                if (toAdd.length > 0) {
-                  setMvfSelectedTrenchParts((prev) => [...(prev || []), ...toAdd]);
-                }
+                  if (toAdd.length > 0) {
+                    setMvfSelectedTrenchParts((prev) => [...(prev || []), ...toAdd]);
+                  }
                 }
               }
             }
@@ -13335,7 +13632,7 @@ export default function BaseModule({
               });
             }
           } else if (isLV) {
-          // LV MODE: Box select inv_id labels (daily completion)
+            // LV MODE: Box select inv_id labels (daily completion)
             const labels = lvInvLabelByIdRef.current || {};
             const invIdsInBounds = [];
             Object.keys(labels).forEach((invIdNorm) => {
@@ -13360,230 +13657,230 @@ export default function BaseModule({
             }
           } else {
             // NORMAL MODE: Select polygons (DC)
-          const map = mapRef.current;
-          const directlySelectedIds = [];
+            const map = mapRef.current;
+            const directlySelectedIds = [];
 
-          // For weighted-counter modes (e.g. MODULE_INSTALLATION_PROGRES_TRACKING),
-          // bounds-only checks significantly over-select. Use a robust intersection test.
-          const useStrictIntersection = !!activeMode?.workUnitWeights;
+            // For weighted-counter modes (e.g. MODULE_INSTALLATION_PROGRES_TRACKING),
+            // bounds-only checks significantly over-select. Use a robust intersection test.
+            const useStrictIntersection = !!activeMode?.workUnitWeights;
 
-          const rectData = (() => {
-            if (!useStrictIntersection || !map) return null;
-            try {
-              const sw = bounds.getSouthWest();
-              const ne = bounds.getNorthEast();
-              const nw = L.latLng(ne.lat, sw.lng);
-              const se = L.latLng(sw.lat, ne.lng);
-              const rectPts = [
-                map.latLngToLayerPoint(nw),
-                map.latLngToLayerPoint(ne),
-                map.latLngToLayerPoint(se),
-                map.latLngToLayerPoint(sw),
-              ];
-              if (rectPts.some((p) => !p || !Number.isFinite(p.x) || !Number.isFinite(p.y))) return null;
-              const xs = rectPts.map((p) => p.x);
-              const ys = rectPts.map((p) => p.y);
-              const minX = Math.min(...xs);
-              const maxX = Math.max(...xs);
-              const minY = Math.min(...ys);
-              const maxY = Math.max(...ys);
-              const rectEdges = [
-                [rectPts[0], rectPts[1]],
-                [rectPts[1], rectPts[2]],
-                [rectPts[2], rectPts[3]],
-                [rectPts[3], rectPts[0]],
-              ];
-              return { rectPts, rectEdges, minX, maxX, minY, maxY };
-            } catch (_e) {
-              void _e;
-              return null;
-            }
-          })();
+            const rectData = (() => {
+              if (!useStrictIntersection || !map) return null;
+              try {
+                const sw = bounds.getSouthWest();
+                const ne = bounds.getNorthEast();
+                const nw = L.latLng(ne.lat, sw.lng);
+                const se = L.latLng(sw.lat, ne.lng);
+                const rectPts = [
+                  map.latLngToLayerPoint(nw),
+                  map.latLngToLayerPoint(ne),
+                  map.latLngToLayerPoint(se),
+                  map.latLngToLayerPoint(sw),
+                ];
+                if (rectPts.some((p) => !p || !Number.isFinite(p.x) || !Number.isFinite(p.y))) return null;
+                const xs = rectPts.map((p) => p.x);
+                const ys = rectPts.map((p) => p.y);
+                const minX = Math.min(...xs);
+                const maxX = Math.max(...xs);
+                const minY = Math.min(...ys);
+                const maxY = Math.max(...ys);
+                const rectEdges = [
+                  [rectPts[0], rectPts[1]],
+                  [rectPts[1], rectPts[2]],
+                  [rectPts[2], rectPts[3]],
+                  [rectPts[3], rectPts[0]],
+                ];
+                return { rectPts, rectEdges, minX, maxX, minY, maxY };
+              } catch (_e) {
+                void _e;
+                return null;
+              }
+            })();
 
-          const isPointInBox = (p, minX, maxX, minY, maxY) => p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY;
+            const isPointInBox = (p, minX, maxX, minY, maxY) => p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY;
 
-          const isPointInPoly = (pt, poly) => {
-            // Ray casting
-            let inside = false;
-            for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-              const xi = poly[i].x, yi = poly[i].y;
-              const xj = poly[j].x, yj = poly[j].y;
-              const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
-                (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi + 1e-12) + xi);
-              if (intersect) inside = !inside;
-            }
-            return inside;
-          };
-
-          const segIntersects = (p1, p2, q1, q2) => {
-            const orient = (a, b, c) => (b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y);
-            const onSeg = (a, b, c) =>
-              Math.min(a.x, c.x) <= b.x && b.x <= Math.max(a.x, c.x) &&
-              Math.min(a.y, c.y) <= b.y && b.y <= Math.max(a.y, c.y);
-            const o1 = orient(p1, p2, q1);
-            const o2 = orient(p1, p2, q2);
-            const o3 = orient(q1, q2, p1);
-            const o4 = orient(q1, q2, p2);
-            if ((o1 > 0 && o2 < 0 || o1 < 0 && o2 > 0) && (o3 > 0 && o4 < 0 || o3 < 0 && o4 > 0)) return true;
-            if (Math.abs(o1) < 1e-9 && onSeg(p1, q1, p2)) return true;
-            if (Math.abs(o2) < 1e-9 && onSeg(p1, q2, p2)) return true;
-            if (Math.abs(o3) < 1e-9 && onSeg(q1, p1, q2)) return true;
-            if (Math.abs(o4) < 1e-9 && onSeg(q1, p2, q2)) return true;
-            return false;
-          };
-
-          const layerIntersectsSelection = (layer) => {
-            if (!useStrictIntersection || !rectData || !map || !layer) return true;
-
-            const geomType = layer?.feature?.geometry?.type;
-            // Weighted-counter modes are table-only: ignore non-polygons.
-            if (geomType && geomType !== 'Polygon' && geomType !== 'MultiPolygon') return false;
-
-            const { rectPts, rectEdges, minX, maxX, minY, maxY } = rectData;
-
-            const collectRings = (latlngs) => {
-              const out = [];
-              const walk = (node) => {
-                if (!Array.isArray(node) || node.length === 0) return;
-                if (node.length && node[0] && typeof node[0].lat === 'number' && typeof node[0].lng === 'number') {
-                  out.push(node);
-                  return;
-                }
-                node.forEach(walk);
-              };
-              walk(latlngs);
-              return out;
+            const isPointInPoly = (pt, poly) => {
+              // Ray casting
+              let inside = false;
+              for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+                const xi = poly[i].x, yi = poly[i].y;
+                const xj = poly[j].x, yj = poly[j].y;
+                const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+                  (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi + 1e-12) + xi);
+                if (intersect) inside = !inside;
+              }
+              return inside;
             };
 
-            let ll = null;
-            try {
-              if (typeof layer.getLatLngs !== 'function') return false;
-              ll = layer.getLatLngs();
-            } catch (_e) {
-              void _e;
+            const segIntersects = (p1, p2, q1, q2) => {
+              const orient = (a, b, c) => (b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y);
+              const onSeg = (a, b, c) =>
+                Math.min(a.x, c.x) <= b.x && b.x <= Math.max(a.x, c.x) &&
+                Math.min(a.y, c.y) <= b.y && b.y <= Math.max(a.y, c.y);
+              const o1 = orient(p1, p2, q1);
+              const o2 = orient(p1, p2, q2);
+              const o3 = orient(q1, q2, p1);
+              const o4 = orient(q1, q2, p2);
+              if ((o1 > 0 && o2 < 0 || o1 < 0 && o2 > 0) && (o3 > 0 && o4 < 0 || o3 < 0 && o4 > 0)) return true;
+              if (Math.abs(o1) < 1e-9 && onSeg(p1, q1, p2)) return true;
+              if (Math.abs(o2) < 1e-9 && onSeg(p1, q2, p2)) return true;
+              if (Math.abs(o3) < 1e-9 && onSeg(q1, p1, q2)) return true;
+              if (Math.abs(o4) < 1e-9 && onSeg(q1, p2, q2)) return true;
               return false;
-            }
+            };
 
-            const rings = collectRings(ll);
-            for (let r = 0; r < rings.length; r++) {
-              const ring = rings[r];
-              if (!ring || ring.length < 3) continue;
-              const pts = ring.map((p) => map.latLngToLayerPoint(p)).filter(Boolean);
-              if (pts.length < 3) continue;
-              // drop duplicate last point if it equals first
-              const a = pts[0];
-              const z = pts[pts.length - 1];
-              if (a && z && a.x === z.x && a.y === z.y) pts.pop();
-              if (pts.length < 3) continue;
+            const layerIntersectsSelection = (layer) => {
+              if (!useStrictIntersection || !rectData || !map || !layer) return true;
 
-              // 1) Any polygon vertex in selection box
-              if (pts.some((p) => isPointInBox(p, minX, maxX, minY, maxY))) return true;
-              // 2) Any selection corner inside polygon
-              if (rectPts.some((c) => isPointInPoly(c, pts))) return true;
-              // 3) Any edge intersection
-              for (let i = 0; i < pts.length; i++) {
-                const p1 = pts[i];
-                const p2 = pts[(i + 1) % pts.length];
-                for (let k = 0; k < rectEdges.length; k++) {
-                  const [q1, q2] = rectEdges[k];
-                  if (segIntersects(p1, p2, q1, q2)) return true;
+              const geomType = layer?.feature?.geometry?.type;
+              // Weighted-counter modes are table-only: ignore non-polygons.
+              if (geomType && geomType !== 'Polygon' && geomType !== 'MultiPolygon') return false;
+
+              const { rectPts, rectEdges, minX, maxX, minY, maxY } = rectData;
+
+              const collectRings = (latlngs) => {
+                const out = [];
+                const walk = (node) => {
+                  if (!Array.isArray(node) || node.length === 0) return;
+                  if (node.length && node[0] && typeof node[0].lat === 'number' && typeof node[0].lng === 'number') {
+                    out.push(node);
+                    return;
+                  }
+                  node.forEach(walk);
+                };
+                walk(latlngs);
+                return out;
+              };
+
+              let ll = null;
+              try {
+                if (typeof layer.getLatLngs !== 'function') return false;
+                ll = layer.getLatLngs();
+              } catch (_e) {
+                void _e;
+                return false;
+              }
+
+              const rings = collectRings(ll);
+              for (let r = 0; r < rings.length; r++) {
+                const ring = rings[r];
+                if (!ring || ring.length < 3) continue;
+                const pts = ring.map((p) => map.latLngToLayerPoint(p)).filter(Boolean);
+                if (pts.length < 3) continue;
+                // drop duplicate last point if it equals first
+                const a = pts[0];
+                const z = pts[pts.length - 1];
+                if (a && z && a.x === z.x && a.y === z.y) pts.pop();
+                if (pts.length < 3) continue;
+
+                // 1) Any polygon vertex in selection box
+                if (pts.some((p) => isPointInBox(p, minX, maxX, minY, maxY))) return true;
+                // 2) Any selection corner inside polygon
+                if (rectPts.some((c) => isPointInPoly(c, pts))) return true;
+                // 3) Any edge intersection
+                for (let i = 0; i < pts.length; i++) {
+                  const p1 = pts[i];
+                  const p2 = pts[(i + 1) % pts.length];
+                  for (let k = 0; k < rectEdges.length; k++) {
+                    const [q1, q2] = rectEdges[k];
+                    if (segIntersects(p1, p2, q1, q2)) return true;
+                  }
                 }
               }
-            }
-            return false;
-          };
+              return false;
+            };
 
-          Object.keys(polygonById.current).forEach(polygonId => {
-            const polygonInfo = polygonById.current[polygonId];
-            const layer = polygonInfo?.layer;
-            if (!layer || typeof layer.getBounds !== 'function') return;
-            let polygonBounds = null;
-            try {
-              polygonBounds = layer.getBounds();
-            } catch (_e) {
-              void _e;
-              return;
-            }
-            if (!polygonBounds || !bounds.intersects(polygonBounds)) return;
-            if (useStrictIntersection && !layerIntersectsSelection(layer)) return;
-
-            // LVIB: Selection box must ONLY select the currently active box type.
-            // Do not allow selecting other polygons/tables.
-            if (isLVIB) {
-              const currentSubMode = lvibSubModeRef.current;
-              if (polygonInfo?.boxType !== currentSubMode) return;
-            }
-
-            directlySelectedIds.push(polygonId);
-          });
-          
-          // LVIB: Update lvibSelectedLvBoxes or lvibSelectedInvBoxes instead of selectedPolygons
-          if (isLVIB && directlySelectedIds.length > 0) {
-            const currentSubMode = lvibSubModeRef.current;
-            const setSelected = currentSubMode === 'lvBox' ? setLvibSelectedLvBoxes : setLvibSelectedInvBoxes;
-            const uniqueIds = Array.from(new Set(directlySelectedIds));
-            setSelected(prev => {
-              const next = new Set(prev);
-              if (isRightClick) {
-                uniqueIds.forEach(id => next.delete(id));
-              } else {
-                uniqueIds.forEach(id => next.add(id));
+            Object.keys(polygonById.current).forEach(polygonId => {
+              const polygonInfo = polygonById.current[polygonId];
+              const layer = polygonInfo?.layer;
+              if (!layer || typeof layer.getBounds !== 'function') return;
+              let polygonBounds = null;
+              try {
+                polygonBounds = layer.getBounds();
+              } catch (_e) {
+                void _e;
+                return;
               }
-              return next;
-            });
-          }
+              if (!polygonBounds || !bounds.intersects(polygonBounds)) return;
+              if (useStrictIntersection && !layerIntersectsSelection(layer)) return;
 
-          // LVIB: Skip normal polygon selection for selectedPolygons.
-          // IMPORTANT: do not return early here; onMouseUp must always reach the shared
-          // cleanup so the selection box closes (same pattern as LV/MC4 special logic).
-          if (isLVIB) {
-            // no-op
-          } else {
-          
-          const finalSelectedIds = new Set();
-          directlySelectedIds.forEach(polygonId => {
-            const polygonInfo = polygonById.current[polygonId];
-            if (polygonInfo && polygonInfo.isSmallTable && polygonInfo.stringId) {
-              Object.keys(polygonById.current).forEach(pid => {
-                const info = polygonById.current[pid];
-                if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
-                  finalSelectedIds.add(pid);
+              // LVIB: Selection box must ONLY select the currently active box type.
+              // Do not allow selecting other polygons/tables.
+              if (isLVIB) {
+                const currentSubMode = lvibSubModeRef.current;
+                if (polygonInfo?.boxType !== currentSubMode) return;
+              }
+
+              directlySelectedIds.push(polygonId);
+            });
+
+            // LVIB: Update lvibSelectedLvBoxes or lvibSelectedInvBoxes instead of selectedPolygons
+            if (isLVIB && directlySelectedIds.length > 0) {
+              const currentSubMode = lvibSubModeRef.current;
+              const setSelected = currentSubMode === 'lvBox' ? setLvibSelectedLvBoxes : setLvibSelectedInvBoxes;
+              const uniqueIds = Array.from(new Set(directlySelectedIds));
+              setSelected(prev => {
+                const next = new Set(prev);
+                if (isRightClick) {
+                  uniqueIds.forEach(id => next.delete(id));
+                } else {
+                  uniqueIds.forEach(id => next.add(id));
+                }
+                return next;
+              });
+            }
+
+            // LVIB: Skip normal polygon selection for selectedPolygons.
+            // IMPORTANT: do not return early here; onMouseUp must always reach the shared
+            // cleanup so the selection box closes (same pattern as LV/MC4 special logic).
+            if (isLVIB) {
+              // no-op
+            } else {
+
+              const finalSelectedIds = new Set();
+              directlySelectedIds.forEach(polygonId => {
+                const polygonInfo = polygonById.current[polygonId];
+                if (polygonInfo && polygonInfo.isSmallTable && polygonInfo.stringId) {
+                  Object.keys(polygonById.current).forEach(pid => {
+                    const info = polygonById.current[pid];
+                    if (info && info.stringId === polygonInfo.stringId && info.isSmallTable) {
+                      finalSelectedIds.add(pid);
+                    }
+                  });
+                } else {
+                  finalSelectedIds.add(polygonId);
                 }
               });
-            } else {
-              finalSelectedIds.add(polygonId);
+
+              // TIP: Add partner panels for each selected panel (table = 2 panels)
+              if (isTIP && tipPanelPairsRef.current?.polygonPairs) {
+                const partnersToAdd = new Set();
+                finalSelectedIds.forEach(pid => {
+                  const partner = tipPanelPairsRef.current.polygonPairs.get(pid);
+                  if (partner && !finalSelectedIds.has(partner)) {
+                    partnersToAdd.add(partner);
+                  }
+                });
+                partnersToAdd.forEach(p => finalSelectedIds.add(p));
+                console.log('[TIP Selection Box] directlySelectedIds:', directlySelectedIds.length, 'finalSelectedIds:', finalSelectedIds.size, 'partnersAdded:', partnersToAdd.size);
+              }
+
+              if (finalSelectedIds.size > 0) {
+                setSelectedPolygons(prev => {
+                  const next = new Set(prev);
+                  if (isRightClick) {
+                    finalSelectedIds.forEach(id => next.delete(id));
+                  } else {
+                    finalSelectedIds.forEach(id => next.add(id));
+                  }
+                  if (isTIP) console.log('[TIP Selection Box] prev.size:', prev.size, 'next.size:', next.size, 'finalSelectedIds.size:', finalSelectedIds.size);
+                  return next;
+                });
+              }
             }
-          });
-          
-          // TIP: Add partner panels for each selected panel (table = 2 panels)
-          if (isTIP && tipPanelPairsRef.current?.polygonPairs) {
-            const partnersToAdd = new Set();
-            finalSelectedIds.forEach(pid => {
-              const partner = tipPanelPairsRef.current.polygonPairs.get(pid);
-              if (partner && !finalSelectedIds.has(partner)) {
-                partnersToAdd.add(partner);
-              }
-            });
-            partnersToAdd.forEach(p => finalSelectedIds.add(p));
-            console.log('[TIP Selection Box] directlySelectedIds:', directlySelectedIds.length, 'finalSelectedIds:', finalSelectedIds.size, 'partnersAdded:', partnersToAdd.size);
-          }
-          
-          if (finalSelectedIds.size > 0) {
-            setSelectedPolygons(prev => {
-              const next = new Set(prev);
-              if (isRightClick) {
-                finalSelectedIds.forEach(id => next.delete(id));
-              } else {
-                finalSelectedIds.forEach(id => next.add(id));
-              }
-              if (isTIP) console.log('[TIP Selection Box] prev.size:', prev.size, 'next.size:', next.size, 'finalSelectedIds.size:', finalSelectedIds.size);
-              return next;
-            });
-          }
-          }
           }
         }
-        
+
         try {
           boxRectRef.current.remove();
         } catch (_e) {
@@ -14270,15 +14567,15 @@ export default function BaseModule({
           }
         }
       }
-      
+
       draggingRef.current = null;
     };
-    
+
     container.addEventListener('mousedown', onMouseDown);
     // Mouse move/up on window so we always clean up even if the user releases outside the map.
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
-    
+
     return () => {
       container.removeEventListener('contextmenu', preventContextMenu);
       container.removeEventListener('mousedown', onMouseDown);
@@ -14295,7 +14592,7 @@ export default function BaseModule({
       boxRectRef.current = null;
       draggingRef.current = null;
     };
-  // IMPORTANT: include isMC4 (and module key) so drag-selection behavior updates when switching modes.
+    // IMPORTANT: include isMC4 (and module key) so drag-selection behavior updates when switching modes.
   }, [mapReady, activeMode?.key, isLV, isMVF, isMC4, isMVT, isLVTT, isDCCT, stringPoints, noteMode, notes]);
 
   useEffect(() => {
@@ -14449,7 +14746,7 @@ export default function BaseModule({
       void _e;
       mvfHighlightLayerRef.current = null;
     }
-    
+
     // MVF: history highlight layer (orange trench parts for history selection)
     try {
       if (mvfHistoryHighlightLayerRef.current) {
@@ -14619,14 +14916,14 @@ export default function BaseModule({
     try { selectedLayer.clearLayers(); } catch (_e) { void _e; }
     try { committedLayer.clearLayers(); } catch (_e) { void _e; }
 
-            // Committed parts (locked) - completed GREEN
+    // Committed parts (locked) - completed GREEN
     (mvfCommittedTrenchParts || []).forEach((p) => {
       if (!p?.coords || p.coords.length < 2) return;
-              const line = L.polyline(p.coords, { color: '#16a34a', weight: 6.0, opacity: 1.0, interactive: false });
+      const line = L.polyline(p.coords, { color: '#16a34a', weight: 6.0, opacity: 1.0, interactive: false });
       committedLayer.addLayer(line);
     });
 
-            // Selected (pending) parts (completed-in-progress): always vivid GREEN
+    // Selected (pending) parts (completed-in-progress): always vivid GREEN
     (mvfSelectedTrenchParts || []).forEach((p) => {
       if (!p?.coords || p.coords.length < 2) return;
       const segKey = String(p?.segmentKey || '');
@@ -14788,38 +15085,38 @@ export default function BaseModule({
   // LV completion is tracked via inv_id clicks; MVF uses segment completion; DC uses polygon selection (+/-).
   const lvCompletedLength = isLV
     ? Array.from(lvCompletedInvIds).reduce((sum, invId) => {
-        const data = lengthData[normalizeId(invId)];
-        if (!data?.plus?.length) return sum;
-        return sum + data.plus.reduce((a, b) => a + b, 0);
-      }, 0)
+      const data = lengthData[normalizeId(invId)];
+      if (!data?.plus?.length) return sum;
+      return sum + data.plus.reduce((a, b) => a + b, 0);
+    }, 0)
     : 0;
 
   const mvfSelectedCableMeters = isMVF
     ? (mvfSelectedTrenchParts || []).reduce((sum, p) => {
-        const segKey = String(p?.segmentKey || '');
-        if (segKey && mvfDoneSegmentKeysRef.current?.has?.(segKey)) return sum; // done segments count via CSV length
-        const m = Number(p?.meters) || 0; // trench meters
-        const mult =
-          typeof p?.metersMultiplier === 'number' && Number.isFinite(p.metersMultiplier)
-            ? p.metersMultiplier
-            : mvfCircuitsMultiplier;
-        return sum + m * mult;
-      }, 0) + Array.from(mvfActiveSegmentKeys).reduce((sum, segKey) => {
-        const segLen = Number(mvfSegmentLenByKeyRef.current?.[segKey]) || 0;
-        return sum + segLen;
-      }, 0)
+      const segKey = String(p?.segmentKey || '');
+      if (segKey && mvfDoneSegmentKeysRef.current?.has?.(segKey)) return sum; // done segments count via CSV length
+      const m = Number(p?.meters) || 0; // trench meters
+      const mult =
+        typeof p?.metersMultiplier === 'number' && Number.isFinite(p.metersMultiplier)
+          ? p.metersMultiplier
+          : mvfCircuitsMultiplier;
+      return sum + m * mult;
+    }, 0) + Array.from(mvfActiveSegmentKeys).reduce((sum, segKey) => {
+      const segLen = Number(mvfSegmentLenByKeyRef.current?.[segKey]) || 0;
+      return sum + segLen;
+    }, 0)
     : 0;
   const mvfCommittedCableMeters = isMVF
     ? (mvfCommittedTrenchParts || []).reduce((sum, p) => {
-        const segKey = String(p?.segmentKey || '');
-        if (segKey && mvfDoneSegmentKeysRef.current?.has?.(segKey)) return sum; // done segments count via CSV length
-        const m = Number(p?.meters) || 0;
-        const mult =
-          typeof p?.metersMultiplier === 'number' && Number.isFinite(p.metersMultiplier)
-            ? p.metersMultiplier
-            : mvfCircuitsMultiplier;
-        return sum + m * mult;
-      }, 0)
+      const segKey = String(p?.segmentKey || '');
+      if (segKey && mvfDoneSegmentKeysRef.current?.has?.(segKey)) return sum; // done segments count via CSV length
+      const m = Number(p?.meters) || 0;
+      const mult =
+        typeof p?.metersMultiplier === 'number' && Number.isFinite(p.metersMultiplier)
+          ? p.metersMultiplier
+          : mvfCircuitsMultiplier;
+      return sum + m * mult;
+    }, 0)
     : 0;
   const mvfDoneCableMeters = isMVF
     ? (mvfSegments || []).reduce((sum, s) => (mvfDoneSegmentKeys.has(s.key) ? sum + (Number(s.length) || 0) : sum), 0)
@@ -14954,24 +15251,24 @@ export default function BaseModule({
     return { totalStrings, totalEnds, terminatedCompleted };
   }, [isDCTT, dcttPanelStates, dcttHistoryTick, dcttTotalStringsCsv]);
 
-  const workSelectionCount = isLV 
-    ? lvCompletedInvIds.size 
-    : (isMVF 
-      ? (mvfSelectedTrenchParts?.length || 0) 
+  const workSelectionCount = isLV
+    ? lvCompletedInvIds.size
+    : (isMVF
+      ? (mvfSelectedTrenchParts?.length || 0)
       : (isPTEP
         ? (ptepSubMode === 'tabletotable' ? ptepCompletedTableToTable.size : (ptepSelectedParameterParts?.length || 0))
-        : (isMC4 
-          ? Object.keys(mc4PanelStates || {}).length 
+        : (isMC4
+          ? Object.keys(mc4PanelStates || {}).length
           : (activeMode?.workUnitWeights
             ? (() => {
-                const seen = new Set();
-                (selectedPolygons || new Set()).forEach((pid) => {
-                  const info = polygonById.current?.[pid];
-                  const key = String(info?.dedupeKey || pid);
-                  seen.add(key);
-                });
-                return seen.size;
-              })()
+              const seen = new Set();
+              (selectedPolygons || new Set()).forEach((pid) => {
+                const info = polygonById.current?.[pid];
+                const key = String(info?.dedupeKey || pid);
+                seen.add(key);
+              });
+              return seen.size;
+            })()
             : selectedPolygons.size))));
   const mvtCompletedForSubmit = isMVT
     ? Math.max(
@@ -14989,38 +15286,38 @@ export default function BaseModule({
   // LVTT: also surface INV-side (SS/SUB) termination count in submit + history text.
   const lvttInvSideDoneForSubmit = (isLVTT && String(lvttSubMode || 'termination') === 'termination')
     ? (() => {
-        try {
-          const LVTT_INV_SIDE_MULTIPLIER = 3;
-          const pts = stringTextPointsRef.current || [];
-          const seen = new Set();
-          let doneInv = 0;
-          const dict = lvttTxInvMaxByTxRef.current || {};
-          const subMaxInvForNorm = (subNorm) => {
-            const m = String(subNorm || '').match(/^(ss|sub)(\d{2})$/i);
-            if (!m) return 0;
-            const tx = parseInt(m[2], 10);
-            if (!Number.isFinite(tx) || tx <= 0) return 0;
-            return Math.max(0, Number(dict?.[tx] ?? dict?.[String(tx)] ?? 0) || 0);
-          };
+      try {
+        const LVTT_INV_SIDE_MULTIPLIER = 3;
+        const pts = stringTextPointsRef.current || [];
+        const seen = new Set();
+        let doneInv = 0;
+        const dict = lvttTxInvMaxByTxRef.current || {};
+        const subMaxInvForNorm = (subNorm) => {
+          const m = String(subNorm || '').match(/^(ss|sub)(\d{2})$/i);
+          if (!m) return 0;
+          const tx = parseInt(m[2], 10);
+          if (!Number.isFinite(tx) || tx <= 0) return 0;
+          return Math.max(0, Number(dict?.[tx] ?? dict?.[String(tx)] ?? 0) || 0);
+        };
 
-          for (let i = 0; i < pts.length; i++) {
-            const raw = String(pts[i]?.text || '').trim();
-            if (!raw) continue;
-            const subNorm = lvttCanonicalSubNorm(raw);
-            if (!subNorm || seen.has(subNorm)) continue;
-            seen.add(subNorm);
-            const maxInv = subMaxInvForNorm(subNorm);
-            if (!(maxInv > 0)) continue;
-            const stored = Number(lvttSubTerminationBySubRef.current?.[subNorm] ?? 0);
-            const done = Math.max(0, Math.min(maxInv, Number.isFinite(stored) ? stored : 0));
-            doneInv += done;
-          }
-          return Math.max(0, doneInv) * LVTT_INV_SIDE_MULTIPLIER;
-        } catch (_e) {
-          void _e;
-          return 0;
+        for (let i = 0; i < pts.length; i++) {
+          const raw = String(pts[i]?.text || '').trim();
+          if (!raw) continue;
+          const subNorm = lvttCanonicalSubNorm(raw);
+          if (!subNorm || seen.has(subNorm)) continue;
+          seen.add(subNorm);
+          const maxInv = subMaxInvForNorm(subNorm);
+          if (!(maxInv > 0)) continue;
+          const stored = Number(lvttSubTerminationBySubRef.current?.[subNorm] ?? 0);
+          const done = Math.max(0, Math.min(maxInv, Number.isFinite(stored) ? stored : 0));
+          doneInv += done;
         }
-      })()
+        return Math.max(0, doneInv) * LVTT_INV_SIDE_MULTIPLIER;
+      } catch (_e) {
+        void _e;
+        return 0;
+      }
+    })()
     : 0;
 
   // For LVTT, show explicit sides (requested).
@@ -15091,7 +15388,7 @@ export default function BaseModule({
       });
       return meters;
     }
-    
+
     // For DC and similar modules: calculate only NEW (uncommitted) polygons
     const newPolygonIds = new Set();
     selectedPolygons.forEach((id) => {
@@ -15124,7 +15421,7 @@ export default function BaseModule({
       });
       return plus + minus;
     }
-    
+
     return newPolygonIds.size;
   }, [isMVF, isDATP, isMVFT, isPTEP, isMC4, isDCTT, isLV, isDC, selectedPolygons, committedPolygons, mvfSelectedCableMeters, datpCompletedForSubmit, mvftCompletedForSubmit, ptepCompletedForSubmit, mc4Counts, dcttCounts, dcttInvTerminationByInv, dcttSelectionMode, lengthData, lvCompletedInvIds, lvCommittedInvIds]);
 
@@ -15218,7 +15515,7 @@ export default function BaseModule({
           const mainMode = String(dcttSubMode || 'termination');
           const isTermMode = mainMode === 'termination';
           const isTestMode = mainMode === 'testing';
-          
+
           const mode = String(dcttSelectionMode || 'termination_panel');
           const isPanelTermMode = mode === 'termination_panel';
           const isInvTermMode = mode === 'termination_inv';
@@ -15277,11 +15574,10 @@ export default function BaseModule({
                         setDcttTestFilter(null);
                       }
                     }}
-                    className={`row-span-2 w-5 h-5 border-2 rounded flex items-center justify-center transition-colors justify-self-start self-center ${
-                      isTermMode
-                        ? 'border-emerald-500 bg-emerald-500 text-white'
-                        : 'border-slate-500 bg-slate-800 hover:border-emerald-400'
-                    }`}
+                    className={`row-span-2 w-5 h-5 border-2 rounded flex items-center justify-center transition-colors justify-self-start self-center ${isTermMode
+                      ? 'border-emerald-500 bg-emerald-500 text-white'
+                      : 'border-slate-500 bg-slate-800 hover:border-emerald-400'
+                      }`}
                     title="Select Cable Termination Mode"
                     aria-pressed={isTermMode}
                   >
@@ -15366,11 +15662,10 @@ export default function BaseModule({
                         setDcttSubMode('testing');
                       }
                     }}
-                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
-                      isTestMode
-                        ? 'border-sky-500 bg-sky-500 text-white'
-                        : 'border-slate-500 bg-slate-800 hover:border-sky-400'
-                    }`}
+                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${isTestMode
+                      ? 'border-sky-500 bg-sky-500 text-white'
+                      : 'border-slate-500 bg-slate-800 hover:border-sky-400'
+                      }`}
                     title="Select DC_TESTING"
                     aria-pressed={isTestMode}
                   >
@@ -15385,11 +15680,10 @@ export default function BaseModule({
                   </div>
                   {/* Passed (clickable filter) */}
                   <div
-                    className={`${COUNTER_BOX} transition-all ${
-                      activeFilter === 'passed'
-                        ? `border-emerald-500 bg-emerald-950/40 ${filterActiveRing} ring-emerald-500`
-                        : 'hover:border-emerald-600'
-                    }`}
+                    className={`${COUNTER_BOX} transition-all ${activeFilter === 'passed'
+                      ? `border-emerald-500 bg-emerald-950/40 ${filterActiveRing} ring-emerald-500`
+                      : 'hover:border-emerald-600'
+                      }`}
                     role="button"
                     tabIndex={0}
                     onClick={(e) => {
@@ -15413,11 +15707,10 @@ export default function BaseModule({
 
                   {/* Failed (clickable filter) */}
                   <div
-                    className={`${COUNTER_BOX} transition-all ${
-                      activeFilter === 'failed'
-                        ? `border-red-500 bg-red-950/40 ${filterActiveRing} ring-red-500`
-                        : 'hover:border-red-600'
-                    }`}
+                    className={`${COUNTER_BOX} transition-all ${activeFilter === 'failed'
+                      ? `border-red-500 bg-red-950/40 ${filterActiveRing} ring-red-500`
+                      : 'hover:border-red-600'
+                      }`}
                     role="button"
                     tabIndex={0}
                     onClick={(e) => {
@@ -15441,11 +15734,10 @@ export default function BaseModule({
 
                   {/* Not Tested (clickable filter) */}
                   <div
-                    className={`${COUNTER_BOX} transition-all ${
-                      activeFilter === 'not_tested'
-                        ? `border-white bg-slate-700/40 ${filterActiveRing} ring-white`
-                        : 'hover:border-slate-500'
-                    }`}
+                    className={`${COUNTER_BOX} transition-all ${activeFilter === 'not_tested'
+                      ? `border-white bg-slate-700/40 ${filterActiveRing} ring-white`
+                      : 'hover:border-slate-500'
+                      }`}
                     role="button"
                     tabIndex={0}
                     onClick={(e) => {
@@ -15535,11 +15827,10 @@ export default function BaseModule({
                       e.stopPropagation();
                       if (!isTermMode) setMvtSubMode('termination');
                     }}
-                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
-                      isTermMode
-                        ? 'border-emerald-500 bg-emerald-500 text-white'
-                        : 'border-slate-500 bg-slate-800 hover:border-emerald-400'
-                    }`}
+                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${isTermMode
+                      ? 'border-emerald-500 bg-emerald-500 text-white'
+                      : 'border-slate-500 bg-slate-800 hover:border-emerald-400'
+                      }`}
                     title="Select MV_TERMINATION"
                     aria-pressed={isTermMode}
                   >
@@ -15579,11 +15870,10 @@ export default function BaseModule({
                       e.stopPropagation();
                       if (!isTestMode) setMvtSubMode('testing');
                     }}
-                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
-                      isTestMode
-                        ? 'border-sky-500 bg-sky-500 text-white'
-                        : 'border-slate-500 bg-slate-800 hover:border-sky-400'
-                    }`}
+                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${isTestMode
+                      ? 'border-sky-500 bg-sky-500 text-white'
+                      : 'border-slate-500 bg-slate-800 hover:border-sky-400'
+                      }`}
                     title="Select MV_TESTING"
                     aria-pressed={isTestMode}
                   >
@@ -15603,11 +15893,10 @@ export default function BaseModule({
 
                   {/* Passed (clickable filter) */}
                   <div
-                    className={`${COUNTER_BOX} transition-all ${
-                      activeFilter === 'passed'
-                        ? `border-emerald-500 bg-emerald-950/40 ${filterActiveRing} ring-emerald-500`
-                        : 'hover:border-emerald-600'
-                    }`}
+                    className={`${COUNTER_BOX} transition-all ${activeFilter === 'passed'
+                      ? `border-emerald-500 bg-emerald-950/40 ${filterActiveRing} ring-emerald-500`
+                      : 'hover:border-emerald-600'
+                      }`}
                     role="button"
                     tabIndex={0}
                     onClick={(e) => {
@@ -15631,11 +15920,10 @@ export default function BaseModule({
 
                   {/* Failed (clickable filter) */}
                   <div
-                    className={`${COUNTER_BOX} transition-all ${
-                      activeFilter === 'failed'
-                        ? `border-red-500 bg-red-950/40 ${filterActiveRing} ring-red-500`
-                        : 'hover:border-red-600'
-                    }`}
+                    className={`${COUNTER_BOX} transition-all ${activeFilter === 'failed'
+                      ? `border-red-500 bg-red-950/40 ${filterActiveRing} ring-red-500`
+                      : 'hover:border-red-600'
+                      }`}
                     role="button"
                     tabIndex={0}
                     onClick={(e) => {
@@ -15659,11 +15947,10 @@ export default function BaseModule({
 
                   {/* Not Tested (clickable filter) */}
                   <div
-                    className={`${COUNTER_BOX} transition-all ${
-                      activeFilter === 'not_tested'
-                        ? `border-slate-400 bg-slate-700/40 ${filterActiveRing} ring-slate-400`
-                        : 'hover:border-slate-500'
-                    }`}
+                    className={`${COUNTER_BOX} transition-all ${activeFilter === 'not_tested'
+                      ? `border-slate-400 bg-slate-700/40 ${filterActiveRing} ring-slate-400`
+                      : 'hover:border-slate-500'
+                      }`}
                     role="button"
                     tabIndex={0}
                     onClick={(e) => {
@@ -15783,11 +16070,10 @@ export default function BaseModule({
                         setLvttPopup(null);
                       }
                     }}
-                    className={`row-span-2 w-5 h-5 border-2 rounded flex items-center justify-center transition-colors justify-self-start self-center ${
-                      isTermMode
-                        ? 'border-emerald-500 bg-emerald-500 text-white'
-                        : 'border-slate-500 bg-slate-800 hover:border-emerald-400'
-                    }`}
+                    className={`row-span-2 w-5 h-5 border-2 rounded flex items-center justify-center transition-colors justify-self-start self-center ${isTermMode
+                      ? 'border-emerald-500 bg-emerald-500 text-white'
+                      : 'border-slate-500 bg-slate-800 hover:border-emerald-400'
+                      }`}
                     title="Select LV_TERMINATION"
                     aria-pressed={isTermMode}
                   >
@@ -15856,11 +16142,10 @@ export default function BaseModule({
                         setLvttPopup(null);
                       }
                     }}
-                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
-                      isTestMode
-                        ? 'border-sky-500 bg-sky-500 text-white'
-                        : 'border-slate-500 bg-slate-800 hover:border-sky-400'
-                    }`}
+                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${isTestMode
+                      ? 'border-sky-500 bg-sky-500 text-white'
+                      : 'border-slate-500 bg-slate-800 hover:border-sky-400'
+                      }`}
                     title="Select LV_TESTING"
                     aria-pressed={isTestMode}
                   >
@@ -15875,11 +16160,10 @@ export default function BaseModule({
                   </div>
                   {/* Passed (clickable filter) */}
                   <div
-                    className={`${COUNTER_BOX} transition-all ${
-                      activeFilter === 'passed'
-                        ? `border-emerald-500 bg-emerald-950/40 ${filterActiveRing} ring-emerald-500`
-                        : 'hover:border-emerald-600'
-                    }`}
+                    className={`${COUNTER_BOX} transition-all ${activeFilter === 'passed'
+                      ? `border-emerald-500 bg-emerald-950/40 ${filterActiveRing} ring-emerald-500`
+                      : 'hover:border-emerald-600'
+                      }`}
                     role="button"
                     tabIndex={0}
                     onClick={(e) => {
@@ -15909,11 +16193,10 @@ export default function BaseModule({
 
                   {/* Failed (clickable filter) */}
                   <div
-                    className={`${COUNTER_BOX} transition-all ${
-                      activeFilter === 'failed'
-                        ? `border-red-500 bg-red-950/40 ${filterActiveRing} ring-red-500`
-                        : 'hover:border-red-600'
-                    }`}
+                    className={`${COUNTER_BOX} transition-all ${activeFilter === 'failed'
+                      ? `border-red-500 bg-red-950/40 ${filterActiveRing} ring-red-500`
+                      : 'hover:border-red-600'
+                      }`}
                     role="button"
                     tabIndex={0}
                     onClick={(e) => {
@@ -15943,11 +16226,10 @@ export default function BaseModule({
 
                   {/* Not Tested (clickable filter) */}
                   <div
-                    className={`${COUNTER_BOX} transition-all ${
-                      activeFilter === 'not_tested'
-                        ? `border-slate-400 bg-slate-700/40 ${filterActiveRing} ring-slate-400`
-                        : 'hover:border-slate-500'
-                    }`}
+                    className={`${COUNTER_BOX} transition-all ${activeFilter === 'not_tested'
+                      ? `border-slate-400 bg-slate-700/40 ${filterActiveRing} ring-slate-400`
+                      : 'hover:border-slate-500'
+                      }`}
                     role="button"
                     tabIndex={0}
                     onClick={(e) => {
@@ -15988,31 +16270,31 @@ export default function BaseModule({
           const csvTestData = dcctTestData || {};
           const csvIds = new Set(Object.keys(csvTestData));
           const mapIds = dcctMapIds || new Set();
-          
+
           // Calculate counts
           const csvTotal = csvIds.size;
           let passedCount = 0;
           let failedCount = 0;
-          
+
           csvIds.forEach((id) => {
             const result = csvTestData[id];
             if (result === 'passed') passedCount++;
             else if (result === 'failed') failedCount++;
           });
-          
+
           // Not tested: IDs in map but not in CSV, plus IDs in CSV but not in map
           let notTestedCount = 0;
           mapIds.forEach((id) => {
             if (!csvIds.has(id)) notTestedCount++;
           });
           // Spec: Not Tested should be ONLY IDs that are on the map (string_text) but missing in CSV.
-          
+
           const activeFilter = dcctFilter;
-          
+
           // Styling for clickable filter links
           const filterLinkBase = 'cursor-pointer underline decoration-1 underline-offset-2 hover:opacity-80 transition-opacity';
           const filterActiveRing = 'ring-2 ring-offset-1 ring-offset-slate-900';
-          
+
           return (
             <div className="flex items-center gap-3">
               {/* Total Counter */}
@@ -16022,14 +16304,13 @@ export default function BaseModule({
                   <span className="text-xs font-bold text-slate-200 tabular-nums">{csvTotal}</span>
                 </div>
               </div>
-              
+
               {/* Passed Counter - Clickable */}
-              <div 
-                className={`min-w-[120px] border-2 py-3 px-3 transition-all ${
-                  activeFilter === 'passed' 
-                    ? 'border-emerald-500 bg-emerald-950/40 ' + filterActiveRing + ' ring-emerald-500' 
-                    : 'border-slate-700 bg-slate-800 hover:border-emerald-600'
-                }`}
+              <div
+                className={`min-w-[120px] border-2 py-3 px-3 transition-all ${activeFilter === 'passed'
+                  ? 'border-emerald-500 bg-emerald-950/40 ' + filterActiveRing + ' ring-emerald-500'
+                  : 'border-slate-700 bg-slate-800 hover:border-emerald-600'
+                  }`}
                 role="button"
                 tabIndex={0}
                 onClick={() => setDcctFilter(activeFilter === 'passed' ? null : 'passed')}
@@ -16037,7 +16318,7 @@ export default function BaseModule({
                 aria-pressed={activeFilter === 'passed'}
               >
                 <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
-                  <span 
+                  <span
                     className={`text-xs font-bold text-emerald-400 ${filterLinkBase}`}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -16051,14 +16332,13 @@ export default function BaseModule({
                   <span className="text-xs font-bold text-emerald-400 tabular-nums">{passedCount}</span>
                 </div>
               </div>
-              
+
               {/* Failed Counter - Clickable */}
-              <div 
-                className={`min-w-[120px] border-2 py-3 px-3 transition-all ${
-                  activeFilter === 'failed' 
-                    ? 'border-red-500 bg-red-950/40 ' + filterActiveRing + ' ring-red-500' 
-                    : 'border-slate-700 bg-slate-800 hover:border-red-600'
-                }`}
+              <div
+                className={`min-w-[120px] border-2 py-3 px-3 transition-all ${activeFilter === 'failed'
+                  ? 'border-red-500 bg-red-950/40 ' + filterActiveRing + ' ring-red-500'
+                  : 'border-slate-700 bg-slate-800 hover:border-red-600'
+                  }`}
                 role="button"
                 tabIndex={0}
                 onClick={() => setDcctFilter(activeFilter === 'failed' ? null : 'failed')}
@@ -16066,7 +16346,7 @@ export default function BaseModule({
                 aria-pressed={activeFilter === 'failed'}
               >
                 <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
-                  <span 
+                  <span
                     className={`text-xs font-bold text-red-400 ${filterLinkBase}`}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -16080,14 +16360,13 @@ export default function BaseModule({
                   <span className="text-xs font-bold text-red-400 tabular-nums">{failedCount}</span>
                 </div>
               </div>
-              
+
               {/* Not Tested Counter - Clickable */}
-              <div 
-                className={`min-w-[140px] border-2 py-3 px-3 transition-all ${
-                  activeFilter === 'not_tested' 
-                    ? 'border-white bg-slate-700/40 ' + filterActiveRing + ' ring-white' 
-                    : 'border-slate-700 bg-slate-800 hover:border-slate-500'
-                }`}
+              <div
+                className={`min-w-[140px] border-2 py-3 px-3 transition-all ${activeFilter === 'not_tested'
+                  ? 'border-white bg-slate-700/40 ' + filterActiveRing + ' ring-white'
+                  : 'border-slate-700 bg-slate-800 hover:border-slate-500'
+                  }`}
                 role="button"
                 tabIndex={0}
                 onClick={() => setDcctFilter(activeFilter === 'not_tested' ? null : 'not_tested')}
@@ -16095,7 +16374,7 @@ export default function BaseModule({
                 aria-pressed={activeFilter === 'not_tested'}
               >
                 <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
-                  <span 
+                  <span
                     className={`text-xs font-bold text-white ${filterLinkBase}`}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -16122,7 +16401,7 @@ export default function BaseModule({
           const completed = plPunches.filter(p => p.completed).length;
           const remaining = Math.max(0, total - completed);
           const completedPct = total > 0 ? ((completed / total) * 100).toFixed(1) : '0.0';
-          
+
           return (
             <div className="flex items-center gap-3">
               {/* Total Counter */}
@@ -16132,7 +16411,7 @@ export default function BaseModule({
                   <span className="text-xs font-bold text-slate-200 tabular-nums">{total}</span>
                 </div>
               </div>
-              
+
               {/* Completed Counter */}
               <div className="min-w-[160px] border-2 border-emerald-700/50 bg-emerald-900/20 py-3 px-3">
                 <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
@@ -16140,7 +16419,7 @@ export default function BaseModule({
                   <span className="text-xs font-bold text-emerald-400 tabular-nums">{completed} ({completedPct}%)</span>
                 </div>
               </div>
-              
+
               {/* Remaining Counter */}
               <div className="min-w-[120px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
                 <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
@@ -16157,203 +16436,232 @@ export default function BaseModule({
   return (
     <div className="app">
       {_customSidebar}
+
+
       {/* Header with Buttons and Counters */}
       <div ref={headerBarRef} className="sticky top-0 left-0 z-[1100] w-full min-h-[92px] border-b-2 border-slate-700 bg-slate-900 px-4 py-0 sm:px-6 relative flex items-center">
-        <div className="w-full">
-        <div className="grid grid-cols-[1fr_auto] items-center gap-1">
-          {/* Counters (left) */}
-          {showCounters ? (
-            effectiveCustomCounters ? (
-              effectiveCustomCounters
-            ) : (
-              <div className={`flex min-w-0 gap-3 overflow-x-auto pb-1 justify-self-start ${isLVIB ? 'flex-col items-start gap-1' : 'items-center'}`}>
-                {useSimpleCounters ? (
-                  <>
-                    {/* LVIB: LV Box / INV Box counters with checkbox toggle (MC4 style) */}
-                    {isLVIB ? (
-                      <div className="flex flex-col gap-2">
-                        {(() => {
-                          // Match DC cable pulling counters typography + spacing
-                          // - smaller padding
-                          // - same label/value fonts
-                          // Also reduce label-to-counters gap by shrinking label column and gap-x.
-                          const ROW = 'grid grid-cols-[24px_140px_repeat(3,max-content)] items-center gap-x-2 gap-y-2 cursor-pointer';
+        {/* Punch List Dropdown - Absolute Center */}
+        {isPL && (
+          <div className="absolute left-1/2 top-1/2 -translate-y-1/2 -translate-x-1/2 z-[1200]">
+            <div className="relative">
+              <button
+                onClick={(e) => { e.stopPropagation(); setPlListDropdownOpen(!plListDropdownOpen); }}
+                className="flex items-center gap-2 bg-slate-800 border-2 border-slate-600 px-3 py-1.5 text-white hover:border-amber-400 min-w-[160px] justify-between transition-colors shadow-lg rounded"
+                title="Switch Punch List"
+              >
+                <div className="flex flex-col items-start leading-none gap-0.5">
+                  <span className="text-[9px] text-slate-400 uppercase tracking-widest">Active List</span>
+                  <span className="truncate max-w-[140px] text-xs font-bold text-amber-50">{plLists.find(l => l.id === plActiveListId)?.name || 'Loading...'}</span>
+                </div>
+                <span className="text-[10px] text-slate-400 ml-1">▼</span>
+              </button>
 
-                          const lvDone = lvibSelectedLvBoxes.size;
-                          const lvPct = lvibLvBoxTotal > 0 ? ((lvDone / lvibLvBoxTotal) * 100).toFixed(1) : '0.0';
-                          const lvRem = Math.max(0, lvibLvBoxTotal - lvDone);
-
-                          const invDone = lvibSelectedInvBoxes.size;
-                          const invPct = lvibInvBoxTotal > 0 ? ((invDone / lvibInvBoxTotal) * 100).toFixed(1) : '0.0';
-                          const invRem = Math.max(0, lvibInvBoxTotal - invDone);
-
-                          const checkboxBase = 'w-5 h-5 border-2 rounded flex items-center justify-center transition-colors';
-
-                          return (
-                            <>
-                              {/* LV Box row */}
-                              <div
-                                className={ROW}
-                                onClick={() => {
-                                  if (lvibSubMode !== 'lvBox') setLvibSubMode('lvBox');
-                                }}
-                              >
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (lvibSubMode !== 'lvBox') setLvibSubMode('lvBox');
-                                  }}
-                                  className={`${checkboxBase} ${
-                                    lvibSubMode === 'lvBox'
-                                        ? 'border-slate-200 bg-slate-200 text-slate-900'
-                                        : 'border-slate-500 bg-slate-800 hover:border-slate-200'
-                                  }`}
-                                  title="Select LV Box"
-                                  aria-pressed={lvibSubMode === 'lvBox'}
-                                >
-                                  {lvibSubMode === 'lvBox' && <span className="text-xs font-bold">✓</span>}
-                                </button>
-                                  <div className={`text-xs font-bold ${lvibSubMode === 'lvBox' ? 'text-white' : 'text-slate-500'}`}>LV Box:</div>
-                                <div className={COUNTER_BOX}>
-                                  <div className={COUNTER_GRID}>
-                                    <span className={COUNTER_LABEL}>Total</span>
-                                    <span className={COUNTER_VALUE}>{lvibLvBoxTotal}</span>
-                                  </div>
-                                </div>
-                                <div className={COUNTER_BOX}>
-                                  <div className={COUNTER_GRID}>
-                                    <span className={COUNTER_LABEL}>Done</span>
-                                    <span className={COUNTER_VALUE}>{lvDone} ({lvPct}%)</span>
-                                  </div>
-                                </div>
-                                <div className={COUNTER_BOX}>
-                                  <div className={COUNTER_GRID}>
-                                    <span className={COUNTER_LABEL}>Remaining</span>
-                                    <span className={COUNTER_VALUE}>{lvRem}</span>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* INV Box row */}
-                              <div
-                                className={ROW}
-                                onClick={() => {
-                                  if (lvibSubMode !== 'invBox') setLvibSubMode('invBox');
-                                }}
-                              >
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (lvibSubMode !== 'invBox') setLvibSubMode('invBox');
-                                  }}
-                                  className={`${checkboxBase} ${
-                                    lvibSubMode === 'invBox'
-                                        ? 'border-slate-200 bg-slate-200 text-slate-900'
-                                        : 'border-slate-500 bg-slate-800 hover:border-slate-200'
-                                  }`}
-                                  title="Select INV Box"
-                                  aria-pressed={lvibSubMode === 'invBox'}
-                                >
-                                  {lvibSubMode === 'invBox' && <span className="text-xs font-bold">✓</span>}
-                                </button>
-                                  <div className={`text-xs font-bold ${lvibSubMode === 'invBox' ? 'text-white' : 'text-slate-500'}`}>INV Box:</div>
-                                <div className={COUNTER_BOX}>
-                                  <div className={COUNTER_GRID}>
-                                    <span className={COUNTER_LABEL}>Total</span>
-                                    <span className={COUNTER_VALUE}>{lvibInvBoxTotal}</span>
-                                  </div>
-                                </div>
-                                <div className={COUNTER_BOX}>
-                                  <div className={COUNTER_GRID}>
-                                    <span className={COUNTER_LABEL}>Done</span>
-                                    <span className={COUNTER_VALUE}>{invDone} ({invPct}%)</span>
-                                  </div>
-                                </div>
-                                <div className={COUNTER_BOX}>
-                                  <div className={COUNTER_GRID}>
-                                    <span className={COUNTER_LABEL}>Remaining</span>
-                                    <span className={COUNTER_VALUE}>{invRem}</span>
-                                  </div>
-                                </div>
-                              </div>
-                            </>
-                          );
-                        })()}
+              {plListDropdownOpen && (
+                <div
+                  className="absolute top-[calc(100%+4px)] left-0 min-w-[200px] bg-slate-900 border-2 border-slate-600 shadow-2xl flex flex-col z-[2000] rounded-sm overflow-hidden"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="bg-slate-950/50 px-3 py-2 text-[9px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800">
+                    My Lists
+                  </div>
+                  <div className="max-h-[250px] overflow-y-auto">
+                    {plLists.map(l => (
+                      <div
+                        key={l.id}
+                        onClick={() => plSwitchList(l.id)}
+                        className={`px-3 py-2.5 border-b border-slate-800 hover:bg-slate-800/80 cursor-pointer text-xs flex items-center justify-between group ${l.id === plActiveListId ? 'text-amber-400 font-bold bg-slate-800/50' : 'text-slate-300'}`}
+                      >
+                        <span>{l.name}</span>
+                        {l.id === plActiveListId && <span className="text-amber-400">✓</span>}
                       </div>
-                    ) : isTIP ? (
-                      <>
-                        {/* Right group: Total / Completed / Remaining */}
-                        <div className="flex items-center gap-3 self-center">
-                          <div className="min-w-[120px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
-                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
-                              <span className="text-xs font-bold text-slate-200">Total</span>
-                              <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{tipTotal}</span>
-                            </div>
-                          </div>
+                    ))}
+                  </div>
+                  <div className="bg-slate-900 p-1.5">
+                    <button
+                      onClick={plCreateNewList}
+                      className="w-full text-center px-3 py-1.5 bg-emerald-700/20 hover:bg-emerald-700/40 text-emerald-400 hover:text-emerald-200 border border-emerald-800/50 hover:border-emerald-500/50 font-bold text-[10px] uppercase tracking-wider rounded transition-all"
+                    >
+                      + New List
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
-                          <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
-                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
-                              <span className="text-xs font-bold text-emerald-400">Completed</span>
-                              <span className="text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap">
-                                {tipCompletedTables}, {completedPct.toFixed(2)}%
-                              </span>
-                            </div>
-                          </div>
+        <div className="w-full">
+          <div className="grid grid-cols-[1fr_auto] items-center gap-1">
+            {/* Counters (left) */}
+            {showCounters ? (
+              effectiveCustomCounters ? (
+                effectiveCustomCounters
+              ) : (
+                <div className={`flex min-w-0 gap-3 overflow-x-auto pb-1 justify-self-start ${isLVIB ? 'flex-col items-start gap-1' : 'items-center'}`}>
+                  {useSimpleCounters ? (
+                    <>
+                      {/* LVIB: LV Box / INV Box counters with checkbox toggle (MC4 style) */}
+                      {isLVIB ? (
+                        <div className="flex flex-col gap-2">
+                          {(() => {
+                            // Match DC cable pulling counters typography + spacing
+                            // - smaller padding
+                            // - same label/value fonts
+                            // Also reduce label-to-counters gap by shrinking label column and gap-x.
+                            const ROW = 'grid grid-cols-[24px_140px_repeat(3,max-content)] items-center gap-x-2 gap-y-2 cursor-pointer';
 
-                          <div className="min-w-[140px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
-                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
-                              <span className="text-xs font-bold text-slate-200">Remaining</span>
-                              <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingTotal}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </>
-                    ) : isPTEP ? (
-                      <>
-                        {/* PTEP: MC4-style sub-mode selector with counters */}
-                        {(() => {
-                          const isTTMode = ptepSubMode === 'tabletotable';
-                          const isParamMode = ptepSubMode === 'parameter';
-                          const ttTotal = ptepTotalTableToTable;
-                          const ttDone = ptepCompletedTableToTable.size;
-                          const ttRem = Math.max(0, ttTotal - ttDone);
-                          const ttPct = ttTotal > 0 ? ((ttDone / ttTotal) * 100).toFixed(2) : '0.00';
-                          const paramTotal = ptepTotalParameterMeters;
-                          const paramDone = ptepCompletedParameterMeters;
-                          const paramRem = Math.max(0, paramTotal - paramDone);
-                          const paramPct = paramTotal > 0 ? ((paramDone / paramTotal) * 100).toFixed(2) : '0.00';
-                          // Fixed-width counter box style for alignment
-                          const PTEP_COUNTER_BOX = 'w-[160px] border-2 border-slate-700 bg-slate-800 py-2 px-3';
-                          return (
-                            <div className="min-w-[900px] border-2 border-slate-700 bg-slate-900/40 py-3 px-3">
-                              <div className="flex flex-col gap-2">
-                                {/* Table-to-Table row */}
+                            const lvDone = lvibSelectedLvBoxes.size;
+                            const lvPct = lvibLvBoxTotal > 0 ? ((lvDone / lvibLvBoxTotal) * 100).toFixed(1) : '0.0';
+                            const lvRem = Math.max(0, lvibLvBoxTotal - lvDone);
+
+                            const invDone = lvibSelectedInvBoxes.size;
+                            const invPct = lvibInvBoxTotal > 0 ? ((invDone / lvibInvBoxTotal) * 100).toFixed(1) : '0.0';
+                            const invRem = Math.max(0, lvibInvBoxTotal - invDone);
+
+                            const checkboxBase = 'w-5 h-5 border-2 rounded flex items-center justify-center transition-colors';
+
+                            return (
+                              <>
+                                {/* LV Box row */}
                                 <div
-                                  className="grid grid-cols-[24px_180px_160px_160px_160px] items-center gap-x-3 cursor-pointer"
+                                  className={ROW}
                                   onClick={() => {
-                                    if (!isTTMode) {
-                                      ptepSubModeRef.current = 'tabletotable';
-                                      setPtepSubMode('tabletotable');
-                                      try {
-                                        const map = mapRef.current;
-                                        if (map) {
-                                          const ttPane = map.getPane('ptepTableToTablePane');
-                                          const paramPane = map.getPane('ptepParameterPane');
-                                          if (ttPane) ttPane.style.pointerEvents = 'auto';
-                                          if (paramPane) paramPane.style.pointerEvents = 'none';
-                                        }
-                                      } catch (_e) {
-                                        void _e;
-                                      }
-                                    }
+                                    if (lvibSubMode !== 'lvBox') setLvibSubMode('lvBox');
                                   }}
                                 >
                                   <button
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
+                                      if (lvibSubMode !== 'lvBox') setLvibSubMode('lvBox');
+                                    }}
+                                    className={`${checkboxBase} ${lvibSubMode === 'lvBox'
+                                      ? 'border-slate-200 bg-slate-200 text-slate-900'
+                                      : 'border-slate-500 bg-slate-800 hover:border-slate-200'
+                                      }`}
+                                    title="Select LV Box"
+                                    aria-pressed={lvibSubMode === 'lvBox'}
+                                  >
+                                    {lvibSubMode === 'lvBox' && <span className="text-xs font-bold">✓</span>}
+                                  </button>
+                                  <div className={`text-xs font-bold ${lvibSubMode === 'lvBox' ? 'text-white' : 'text-slate-500'}`}>LV Box:</div>
+                                  <div className={COUNTER_BOX}>
+                                    <div className={COUNTER_GRID}>
+                                      <span className={COUNTER_LABEL}>Total</span>
+                                      <span className={COUNTER_VALUE}>{lvibLvBoxTotal}</span>
+                                    </div>
+                                  </div>
+                                  <div className={COUNTER_BOX}>
+                                    <div className={COUNTER_GRID}>
+                                      <span className={COUNTER_LABEL}>Done</span>
+                                      <span className={COUNTER_VALUE}>{lvDone} ({lvPct}%)</span>
+                                    </div>
+                                  </div>
+                                  <div className={COUNTER_BOX}>
+                                    <div className={COUNTER_GRID}>
+                                      <span className={COUNTER_LABEL}>Remaining</span>
+                                      <span className={COUNTER_VALUE}>{lvRem}</span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* INV Box row */}
+                                <div
+                                  className={ROW}
+                                  onClick={() => {
+                                    if (lvibSubMode !== 'invBox') setLvibSubMode('invBox');
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (lvibSubMode !== 'invBox') setLvibSubMode('invBox');
+                                    }}
+                                    className={`${checkboxBase} ${lvibSubMode === 'invBox'
+                                      ? 'border-slate-200 bg-slate-200 text-slate-900'
+                                      : 'border-slate-500 bg-slate-800 hover:border-slate-200'
+                                      }`}
+                                    title="Select INV Box"
+                                    aria-pressed={lvibSubMode === 'invBox'}
+                                  >
+                                    {lvibSubMode === 'invBox' && <span className="text-xs font-bold">✓</span>}
+                                  </button>
+                                  <div className={`text-xs font-bold ${lvibSubMode === 'invBox' ? 'text-white' : 'text-slate-500'}`}>INV Box:</div>
+                                  <div className={COUNTER_BOX}>
+                                    <div className={COUNTER_GRID}>
+                                      <span className={COUNTER_LABEL}>Total</span>
+                                      <span className={COUNTER_VALUE}>{lvibInvBoxTotal}</span>
+                                    </div>
+                                  </div>
+                                  <div className={COUNTER_BOX}>
+                                    <div className={COUNTER_GRID}>
+                                      <span className={COUNTER_LABEL}>Done</span>
+                                      <span className={COUNTER_VALUE}>{invDone} ({invPct}%)</span>
+                                    </div>
+                                  </div>
+                                  <div className={COUNTER_BOX}>
+                                    <div className={COUNTER_GRID}>
+                                      <span className={COUNTER_LABEL}>Remaining</span>
+                                      <span className={COUNTER_VALUE}>{invRem}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      ) : isTIP ? (
+                        <>
+                          {/* Right group: Total / Completed / Remaining */}
+                          <div className="flex items-center gap-3 self-center">
+                            <div className="min-w-[120px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
+                              <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                                <span className="text-xs font-bold text-slate-200">Total</span>
+                                <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{tipTotal}</span>
+                              </div>
+                            </div>
+
+                            <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
+                              <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                                <span className="text-xs font-bold text-emerald-400">Completed</span>
+                                <span className="text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap">
+                                  {tipCompletedTables}, {completedPct.toFixed(2)}%
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="min-w-[140px] border-2 border-slate-700 bg-slate-800 py-3 px-3">
+                              <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4">
+                                <span className="text-xs font-bold text-slate-200">Remaining</span>
+                                <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingTotal}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      ) : isPTEP ? (
+                        <>
+                          {/* PTEP: MC4-style sub-mode selector with counters */}
+                          {(() => {
+                            const isTTMode = ptepSubMode === 'tabletotable';
+                            const isParamMode = ptepSubMode === 'parameter';
+                            const ttTotal = ptepTotalTableToTable;
+                            const ttDone = ptepCompletedTableToTable.size;
+                            const ttRem = Math.max(0, ttTotal - ttDone);
+                            const ttPct = ttTotal > 0 ? ((ttDone / ttTotal) * 100).toFixed(2) : '0.00';
+                            const paramTotal = ptepTotalParameterMeters;
+                            const paramDone = ptepCompletedParameterMeters;
+                            const paramRem = Math.max(0, paramTotal - paramDone);
+                            const paramPct = paramTotal > 0 ? ((paramDone / paramTotal) * 100).toFixed(2) : '0.00';
+                            // Fixed-width counter box style for alignment
+                            const PTEP_COUNTER_BOX = 'w-[160px] border-2 border-slate-700 bg-slate-800 py-2 px-3';
+                            return (
+                              <div className="min-w-[900px] border-2 border-slate-700 bg-slate-900/40 py-3 px-3">
+                                <div className="flex flex-col gap-2">
+                                  {/* Table-to-Table row */}
+                                  <div
+                                    className="grid grid-cols-[24px_180px_160px_160px_160px] items-center gap-x-3 cursor-pointer"
+                                    onClick={() => {
                                       if (!isTTMode) {
                                         ptepSubModeRef.current = 'tabletotable';
                                         setPtepSubMode('tabletotable');
@@ -16370,61 +16678,60 @@ export default function BaseModule({
                                         }
                                       }
                                     }}
-                                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
-                                      isTTMode 
-                                        ? 'border-white bg-white text-slate-900' 
-                                        : 'border-slate-500 bg-slate-800 hover:border-white'
-                                    }`}
-                                    title="Select Table-to-Table mode"
                                   >
-                                    {isTTMode && <span className="text-xs font-bold">✓</span>}
-                                  </button>
-                                  <div className={`text-xs font-bold ${isTTMode ? 'text-white' : 'text-slate-500'}`}>Table-to-Table:</div>
-                                  <div className={PTEP_COUNTER_BOX}>
-                                    <div className="flex justify-between items-center">
-                                      <span className={COUNTER_LABEL}>Total</span>
-                                      <span className={COUNTER_VALUE}>{ttTotal}</span>
-                                    </div>
-                                  </div>
-                                  <div className={PTEP_COUNTER_BOX}>
-                                    <div className="flex justify-between items-center">
-                                      <span className={isTTMode ? 'text-xs font-bold text-emerald-400' : 'text-xs font-bold text-slate-500'}>Completed</span>
-                                      <span className={isTTMode ? 'text-xs font-bold text-emerald-400 tabular-nums' : 'text-xs font-bold text-slate-500 tabular-nums'}>{ttDone}</span>
-                                    </div>
-                                  </div>
-                                  <div className={PTEP_COUNTER_BOX}>
-                                    <div className="flex justify-between items-center">
-                                      <span className={COUNTER_LABEL}>Remaining</span>
-                                      <span className={COUNTER_VALUE}>{ttRem}</span>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* Parameter-Earthing row */}
-                                <div
-                                  className="grid grid-cols-[24px_180px_160px_160px_160px] items-center gap-x-3 cursor-pointer"
-                                  onClick={() => {
-                                    if (!isParamMode) {
-                                      ptepSubModeRef.current = 'parameter';
-                                      setPtepSubMode('parameter');
-                                      try {
-                                        const map = mapRef.current;
-                                        if (map) {
-                                          const ttPane = map.getPane('ptepTableToTablePane');
-                                          const paramPane = map.getPane('ptepParameterPane');
-                                          if (ttPane) ttPane.style.pointerEvents = 'none';
-                                          if (paramPane) paramPane.style.pointerEvents = 'auto';
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!isTTMode) {
+                                          ptepSubModeRef.current = 'tabletotable';
+                                          setPtepSubMode('tabletotable');
+                                          try {
+                                            const map = mapRef.current;
+                                            if (map) {
+                                              const ttPane = map.getPane('ptepTableToTablePane');
+                                              const paramPane = map.getPane('ptepParameterPane');
+                                              if (ttPane) ttPane.style.pointerEvents = 'auto';
+                                              if (paramPane) paramPane.style.pointerEvents = 'none';
+                                            }
+                                          } catch (_e) {
+                                            void _e;
+                                          }
                                         }
-                                      } catch (_e) {
-                                        void _e;
-                                      }
-                                    }
-                                  }}
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
+                                      }}
+                                      className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${isTTMode
+                                        ? 'border-white bg-white text-slate-900'
+                                        : 'border-slate-500 bg-slate-800 hover:border-white'
+                                        }`}
+                                      title="Select Table-to-Table mode"
+                                    >
+                                      {isTTMode && <span className="text-xs font-bold">✓</span>}
+                                    </button>
+                                    <div className={`text-xs font-bold ${isTTMode ? 'text-white' : 'text-slate-500'}`}>Table-to-Table:</div>
+                                    <div className={PTEP_COUNTER_BOX}>
+                                      <div className="flex justify-between items-center">
+                                        <span className={COUNTER_LABEL}>Total</span>
+                                        <span className={COUNTER_VALUE}>{ttTotal}</span>
+                                      </div>
+                                    </div>
+                                    <div className={PTEP_COUNTER_BOX}>
+                                      <div className="flex justify-between items-center">
+                                        <span className={isTTMode ? 'text-xs font-bold text-emerald-400' : 'text-xs font-bold text-slate-500'}>Completed</span>
+                                        <span className={isTTMode ? 'text-xs font-bold text-emerald-400 tabular-nums' : 'text-xs font-bold text-slate-500 tabular-nums'}>{ttDone}</span>
+                                      </div>
+                                    </div>
+                                    <div className={PTEP_COUNTER_BOX}>
+                                      <div className="flex justify-between items-center">
+                                        <span className={COUNTER_LABEL}>Remaining</span>
+                                        <span className={COUNTER_VALUE}>{ttRem}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Parameter-Earthing row */}
+                                  <div
+                                    className="grid grid-cols-[24px_180px_160px_160px_160px] items-center gap-x-3 cursor-pointer"
+                                    onClick={() => {
                                       if (!isParamMode) {
                                         ptepSubModeRef.current = 'parameter';
                                         setPtepSubMode('parameter');
@@ -16441,792 +16748,801 @@ export default function BaseModule({
                                         }
                                       }
                                     }}
-                                    className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
-                                      isParamMode 
-                                        ? 'border-amber-400 bg-amber-400 text-slate-900' 
-                                        : 'border-slate-500 bg-slate-800 hover:border-amber-400'
-                                    }`}
-                                    title="Select Parameter-Earthing mode"
                                   >
-                                    {isParamMode && <span className="text-xs font-bold">✓</span>}
-                                  </button>
-                                  <div className={`text-xs font-bold ${isParamMode ? 'text-amber-400' : 'text-slate-500'}`}>Parameter-Earthing:</div>
-                                  <div className={PTEP_COUNTER_BOX}>
-                                    <div className="flex justify-between items-center">
-                                      <span className={COUNTER_LABEL}>Total</span>
-                                      <span className={COUNTER_VALUE}>{paramTotal.toFixed(0)} m</span>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!isParamMode) {
+                                          ptepSubModeRef.current = 'parameter';
+                                          setPtepSubMode('parameter');
+                                          try {
+                                            const map = mapRef.current;
+                                            if (map) {
+                                              const ttPane = map.getPane('ptepTableToTablePane');
+                                              const paramPane = map.getPane('ptepParameterPane');
+                                              if (ttPane) ttPane.style.pointerEvents = 'none';
+                                              if (paramPane) paramPane.style.pointerEvents = 'auto';
+                                            }
+                                          } catch (_e) {
+                                            void _e;
+                                          }
+                                        }
+                                      }}
+                                      className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${isParamMode
+                                        ? 'border-amber-400 bg-amber-400 text-slate-900'
+                                        : 'border-slate-500 bg-slate-800 hover:border-amber-400'
+                                        }`}
+                                      title="Select Parameter-Earthing mode"
+                                    >
+                                      {isParamMode && <span className="text-xs font-bold">✓</span>}
+                                    </button>
+                                    <div className={`text-xs font-bold ${isParamMode ? 'text-amber-400' : 'text-slate-500'}`}>Parameter-Earthing:</div>
+                                    <div className={PTEP_COUNTER_BOX}>
+                                      <div className="flex justify-between items-center">
+                                        <span className={COUNTER_LABEL}>Total</span>
+                                        <span className={COUNTER_VALUE}>{paramTotal.toFixed(0)} m</span>
+                                      </div>
                                     </div>
-                                  </div>
-                                  <div className={PTEP_COUNTER_BOX}>
-                                    <div className="flex justify-between items-center">
-                                      <span className={isParamMode ? 'text-xs font-bold text-emerald-400' : 'text-xs font-bold text-slate-500'}>Completed</span>
-                                      <span className={isParamMode ? 'text-xs font-bold text-emerald-400 tabular-nums' : 'text-xs font-bold text-slate-500 tabular-nums'}>{paramDone.toFixed(0)} m</span>
+                                    <div className={PTEP_COUNTER_BOX}>
+                                      <div className="flex justify-between items-center">
+                                        <span className={isParamMode ? 'text-xs font-bold text-emerald-400' : 'text-xs font-bold text-slate-500'}>Completed</span>
+                                        <span className={isParamMode ? 'text-xs font-bold text-emerald-400 tabular-nums' : 'text-xs font-bold text-slate-500 tabular-nums'}>{paramDone.toFixed(0)} m</span>
+                                      </div>
                                     </div>
-                                  </div>
-                                  <div className={PTEP_COUNTER_BOX}>
-                                    <div className="flex justify-between items-center">
-                                      <span className={COUNTER_LABEL}>Remaining</span>
-                                      <span className={COUNTER_VALUE}>{paramRem.toFixed(0)} m</span>
+                                    <div className={PTEP_COUNTER_BOX}>
+                                      <div className="flex justify-between items-center">
+                                        <span className={COUNTER_LABEL}>Remaining</span>
+                                        <span className={COUNTER_VALUE}>{paramRem.toFixed(0)} m</span>
+                                      </div>
                                     </div>
                                   </div>
                                 </div>
                               </div>
+                            );
+                          })()}
+                        </>
+                      ) : (
+                        <>
+                          {/* Non-TIP simple counters */}
+                          <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                              <span className="text-xs font-bold text-slate-200">Total</span>
+                              <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{formatSimpleCounter(overallTotal)}</span>
                             </div>
-                          );
-                        })()}
-                      </>
-                    ) : (
-                      <>
-                        {/* Non-TIP simple counters */}
-                        <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-                          <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                            <span className="text-xs font-bold text-slate-200">Total</span>
-                            <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{formatSimpleCounter(overallTotal)}</span>
                           </div>
-                        </div>
 
-                        <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-                          <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                            <span className="text-xs font-bold text-emerald-400">Completed</span>
-                            <span className="text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap">
-                              {formatSimpleCounter(completedTotal)}, {completedPct.toFixed(2)}%
-                            </span>
+                          <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                              <span className="text-xs font-bold text-emerald-400">Completed</span>
+                              <span className="text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap">
+                                {formatSimpleCounter(completedTotal)}, {completedPct.toFixed(2)}%
+                              </span>
+                            </div>
                           </div>
-                        </div>
 
-                        <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-                          <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                            <span className="text-xs font-bold text-slate-200">Remaining</span>
-                            <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{formatSimpleCounter(remainingTotal)}</span>
+                          <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                            <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                              <span className="text-xs font-bold text-slate-200">Remaining</span>
+                              <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{formatSimpleCounter(remainingTotal)}</span>
+                            </div>
                           </div>
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                        <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                          <span className="text-xs font-bold text-slate-200">+DC Cable</span>
+                          <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{totalPlus.toFixed(0)} m</span>
+
+                          <span className="text-xs font-bold text-slate-200">-DC Cable</span>
+                          <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{totalMinus.toFixed(0)} m</span>
+
+                          <span className="text-xs font-bold text-slate-200">Total</span>
+                          <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{(totalPlus + totalMinus).toFixed(0)} m</span>
                         </div>
-                      </>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <div className="min-w-[220px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-                      <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                        <span className="text-xs font-bold text-slate-200">+DC Cable</span>
-                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{totalPlus.toFixed(0)} m</span>
-
-                        <span className="text-xs font-bold text-slate-200">-DC Cable</span>
-                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{totalMinus.toFixed(0)} m</span>
-
-                        <span className="text-xs font-bold text-slate-200">Total</span>
-                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{(totalPlus + totalMinus).toFixed(0)} m</span>
                       </div>
-                    </div>
 
-                    <div className="min-w-[260px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-                      <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                        <span className="text-xs font-bold text-slate-200">+DC Cable</span>
-                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{completedPlus.toFixed(0)} m</span>
+                      <div className="min-w-[260px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                        <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                          <span className="text-xs font-bold text-slate-200">+DC Cable</span>
+                          <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{completedPlus.toFixed(0)} m</span>
 
-                        <span className="text-xs font-bold text-slate-200">-DC Cable</span>
-                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{completedMinus.toFixed(0)} m</span>
+                          <span className="text-xs font-bold text-slate-200">-DC Cable</span>
+                          <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{completedMinus.toFixed(0)} m</span>
 
-                        <span className="text-xs font-bold text-emerald-400">Completed ({completedPct.toFixed(2)}%)</span>
-                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{completedTotal.toFixed(0)} m</span>
+                          <span className="text-xs font-bold text-emerald-400">Completed ({completedPct.toFixed(2)}%)</span>
+                          <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{completedTotal.toFixed(0)} m</span>
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
-                      <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
-                        <span className="text-xs font-bold text-slate-200">+DC Cable</span>
-                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingPlus.toFixed(0)} m</span>
+                      <div className="min-w-[180px] border-2 border-slate-700 bg-slate-800 py-3 px-2">
+                        <div className="grid w-full grid-cols-[max-content_max-content] items-center justify-between gap-x-4 gap-y-2">
+                          <span className="text-xs font-bold text-slate-200">+DC Cable</span>
+                          <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingPlus.toFixed(0)} m</span>
 
-                        <span className="text-xs font-bold text-slate-200">-DC Cable</span>
-                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingMinus.toFixed(0)} m</span>
+                          <span className="text-xs font-bold text-slate-200">-DC Cable</span>
+                          <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingMinus.toFixed(0)} m</span>
 
-                        <span className="text-xs font-bold text-slate-200">Remaining</span>
-                        <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingTotal.toFixed(0)} m</span>
+                          <span className="text-xs font-bold text-slate-200">Remaining</span>
+                          <span className="text-xs font-bold text-slate-200 tabular-nums whitespace-nowrap">{remainingTotal.toFixed(0)} m</span>
+                        </div>
                       </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            )
-          ) : (
-            <div />
-          )}
+                    </>
+                  )}
+                </div>
+              )
+            ) : (
+              <div />
+            )}
 
-          {/* Controls (right) */}
-          <div className="flex flex-shrink-0 items-center gap-2 justify-self-end">
-            {noteMode && selectedNotes.size > 0 && (
-              <button onClick={deleteSelectedNotes} className={BTN_DANGER} title="Delete Selected" aria-label="Delete Selected">
-                <svg className={ICON} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
-                  <line x1="10" y1="11" x2="10" y2="17"/>
-                  <line x1="14" y1="11" x2="14" y2="17"/>
+            {/* Controls (right) */}
+            <div className="flex flex-shrink-0 items-center gap-2 justify-self-end">
+              {noteMode && selectedNotes.size > 0 && (
+                <button onClick={deleteSelectedNotes} className={BTN_DANGER} title="Delete Selected" aria-label="Delete Selected">
+                  <svg className={ICON} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                    <line x1="10" y1="11" x2="10" y2="17" />
+                    <line x1="14" y1="11" x2="14" y2="17" />
+                  </svg>
+                </button>
+              )}
+
+              {/* Filter Export Buttons (MVT/DCCT testing filter) */}
+              {isMVT && String(mvtSubMode || 'termination') === 'testing' && mvtTestFilter ? (
+                <button
+                  type="button"
+                  onClick={mvtExportFilteredTestResultsCsv}
+                  disabled={mvtTestResultsDirty}
+                  className={`${BTN_COMPACT_NEUTRAL} w-auto h-6 px-2 py-0 leading-none text-[10px] font-medium whitespace-nowrap`}
+                  title={mvtTestResultsDirty ? 'Submit first, then export selected' : 'Export selected test results (CSV)'}
+                  aria-label="Export Selected MV Test Results"
+                >
+                  Export {mvtTestFilter === 'passed' ? 'Passed' : mvtTestFilter === 'failed' ? 'Failed' : 'Not Tested'}
+                </button>
+              ) : null}
+              {isDCCT && dcctFilter ? (
+                <button
+                  type="button"
+                  onClick={dcctExportFilteredTestResultsCsv}
+                  disabled={dcctTestResultsDirty}
+                  className={`${BTN_COMPACT_NEUTRAL} w-auto h-6 px-2 py-0 leading-none text-[10px] font-medium whitespace-nowrap`}
+                  title={dcctTestResultsDirty ? 'Submit first, then export selected' : 'Export selected test results (CSV)'}
+                  aria-label="Export Selected Test Results"
+                >
+                  Export {dcctFilter === 'passed' ? 'Passed' : dcctFilter === 'failed' ? 'Failed' : 'Not Tested'}
+                </button>
+              ) : null}
+
+              {/* Filter Export Button (LVTT testing filter) */}
+              {isLVTT && String(lvttSubMode || 'termination') === 'testing' && lvttTestFilter ? (
+                <button
+                  type="button"
+                  onClick={lvttExportFilteredTestResultsCsv}
+                  disabled={lvttTestResultsDirty}
+                  className={`${BTN_COMPACT_NEUTRAL} w-auto h-6 px-2 py-0 leading-none text-[10px] font-medium whitespace-nowrap`}
+                  title={lvttTestResultsDirty ? 'Submit first, then export selected' : 'Export selected test results (CSV)'}
+                  aria-label="Export Selected LV Test Results"
+                >
+                  Export {lvttTestFilter === 'passed' ? 'Passed' : lvttTestFilter === 'failed' ? 'Failed' : 'Not Tested'}
+                </button>
+              ) : null}
+
+              <div className="mx-1 h-10 w-[2px] bg-slate-600" />
+
+              <button
+                onClick={() => {
+                  globalUndo();
+                }}
+                disabled={!globalCanUndo}
+                className={BTN_SMALL_NEUTRAL}
+                title="Undo (Ctrl+Z)"
+                aria-label="Undo"
+              >
+                <svg className={ICON_SMALL} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 14l-4-4 4-4" />
+                  <path d="M5 10h9a6 6 0 010 12h-1" />
                 </svg>
               </button>
-            )}
 
-            {/* Filter Export Buttons (MVT/DCCT testing filter) */}
-            {isMVT && String(mvtSubMode || 'termination') === 'testing' && mvtTestFilter ? (
               <button
-                type="button"
-                onClick={mvtExportFilteredTestResultsCsv}
-                disabled={mvtTestResultsDirty}
-                className={`${BTN_COMPACT_NEUTRAL} w-auto h-6 px-2 py-0 leading-none text-[10px] font-medium whitespace-nowrap`}
-                title={mvtTestResultsDirty ? 'Submit first, then export selected' : 'Export selected test results (CSV)'}
-                aria-label="Export Selected MV Test Results"
+                onClick={() => {
+                  globalRedo();
+                }}
+                disabled={!globalCanRedo}
+                className={BTN_SMALL_NEUTRAL}
+                title="Redo (Ctrl+Y / Ctrl+Shift+Z)"
+                aria-label="Redo"
               >
-                Export {mvtTestFilter === 'passed' ? 'Passed' : mvtTestFilter === 'failed' ? 'Failed' : 'Not Tested'}
+                <svg className={ICON_SMALL} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M15 14l4-4-4-4" />
+                  <path d="M19 10H10a6 6 0 000 12h1" />
+                </svg>
               </button>
-            ) : null}
-            {isDCCT && dcctFilter ? (
-              <button
-                type="button"
-                onClick={dcctExportFilteredTestResultsCsv}
-                disabled={dcctTestResultsDirty}
-                className={`${BTN_COMPACT_NEUTRAL} w-auto h-6 px-2 py-0 leading-none text-[10px] font-medium whitespace-nowrap`}
-                title={dcctTestResultsDirty ? 'Submit first, then export selected' : 'Export selected test results (CSV)'}
-                aria-label="Export Selected Test Results"
-              >
-                Export {dcctFilter === 'passed' ? 'Passed' : dcctFilter === 'failed' ? 'Failed' : 'Not Tested'}
-              </button>
-            ) : null}
 
-            {/* Filter Export Button (LVTT testing filter) */}
-            {isLVTT && String(lvttSubMode || 'termination') === 'testing' && lvttTestFilter ? (
-              <button
-                type="button"
-                onClick={lvttExportFilteredTestResultsCsv}
-                disabled={lvttTestResultsDirty}
-                className={`${BTN_COMPACT_NEUTRAL} w-auto h-6 px-2 py-0 leading-none text-[10px] font-medium whitespace-nowrap`}
-                title={lvttTestResultsDirty ? 'Submit first, then export selected' : 'Export selected test results (CSV)'}
-                aria-label="Export Selected LV Test Results"
-              >
-                Export {lvttTestFilter === 'passed' ? 'Passed' : lvttTestFilter === 'failed' ? 'Failed' : 'Not Tested'}
-              </button>
-            ) : null}
+              {isDCCT ? (
+                <>
+                  <button
+                    onClick={dcctSubmitTestResults}
+                    disabled={noteMode || !dcctTestResultsDirty}
+                    className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                    title={dcctTestResultsDirty ? 'Submit (save) DC test results' : 'No changes to submit'}
+                    aria-label="Submit Test Results"
+                  >
+                    Submit
+                  </button>
 
-            <div className="mx-1 h-10 w-[2px] bg-slate-600" />
-
-            <button
-              onClick={() => {
-                globalUndo();
-              }}
-              disabled={!globalCanUndo}
-              className={BTN_SMALL_NEUTRAL}
-              title="Undo (Ctrl+Z)"
-              aria-label="Undo"
-            >
-              <svg className={ICON_SMALL} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M9 14l-4-4 4-4" />
-                <path d="M5 10h9a6 6 0 010 12h-1" />
-              </svg>
-            </button>
-
-            <button
-              onClick={() => {
-                globalRedo();
-              }}
-              disabled={!globalCanRedo}
-              className={BTN_SMALL_NEUTRAL}
-              title="Redo (Ctrl+Y / Ctrl+Shift+Z)"
-              aria-label="Redo"
-            >
-              <svg className={ICON_SMALL} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M15 14l4-4-4-4" />
-                <path d="M19 10H10a6 6 0 000 12h1" />
-              </svg>
-            </button>
-
-            {isDCCT ? (
-              <>
-                <button
-                  onClick={dcctSubmitTestResults}
-                  disabled={noteMode || !dcctTestResultsDirty}
-                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-                  title={dcctTestResultsDirty ? 'Submit (save) DC test results' : 'No changes to submit'}
-                  aria-label="Submit Test Results"
-                >
-                  Submit
-                </button>
-
-                <input
-                  ref={dcctTestImportFileInputRef}
-                  type="file"
-                  accept=".csv"
-                  style={{ display: 'none' }}
-                  onChange={(e) => {
-                    const file = e.target?.files?.[0];
-                    if (file) {
-                      const reader = new FileReader();
-                      reader.onload = () => {
-                        const text = String(reader.result || '');
-                        dcctImportTestResultsFromText(text, 'import');
-                      };
-                      reader.readAsText(file);
+                  <input
+                    ref={dcctTestImportFileInputRef}
+                    type="file"
+                    accept=".csv"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      const file = e.target?.files?.[0];
+                      if (file) {
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                          const text = String(reader.result || '');
+                          dcctImportTestResultsFromText(text, 'import');
+                        };
+                        reader.readAsText(file);
+                      }
+                      if (e.target) e.target.value = '';
+                    }}
+                  />
+                  <button
+                    onClick={() => dcctTestImportFileInputRef.current?.click()}
+                    className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                    title="Import Test Results (CSV)"
+                    aria-label="Import Test Results"
+                  >
+                    Import Test Results
+                  </button>
+                  <button
+                    onClick={dcctExportTestResultsCsv}
+                    className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                    title={dcctTestResultsDirty ? 'Submit first, then export' : 'Export submitted test results (CSV)'}
+                    aria-label="Export Test Results"
+                  >
+                    Export Test Results
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => {
+                      // Punch List: open PL-specific submit modal
+                      if (isPL) {
+                        setPlShowSubmitModal(true);
+                        return;
+                      }
+                      if (isMVT && String(mvtSubMode || 'termination') === 'testing') {
+                        mvtSubmitTestResults();
+                        return;
+                      }
+                      if (isLVTT && String(lvttSubMode || 'termination') === 'testing') {
+                        lvttSubmitTestResults();
+                        return;
+                      }
+                      if (isDCTT && String(dcttSubMode || 'termination') === 'testing') {
+                        dcttTestSubmitResults();
+                        return;
+                      }
+                      setModalOpen(true);
+                    }}
+                    disabled={
+                      isPL
+                        ? false // PL Submit is always enabled
+                        : (isDCTT && String(dcttSubMode || 'termination') === 'testing')
+                          ? (noteMode || !dcttTestResultsDirty)
+                          : (
+                            noteMode ||
+                            (isMVT && String(mvtSubMode || 'termination') === 'testing'
+                              ? !mvtTestResultsDirty
+                              : false) ||
+                            (isLVTT && String(lvttSubMode || 'termination') === 'testing'
+                              ? !lvttTestResultsDirty
+                              : false) ||
+                            (isMC4 && !mc4SelectionMode) ||
+                            (isDCTT && String(dcttSubMode || 'termination') !== 'testing' && !dcttSelectionMode) ||
+                            (isDCTT && String(dcttSubMode || 'termination') !== 'testing'
+                              ? (dcttSelectionMode === 'termination_panel'
+                                ? (dcttCounts?.terminatedCompleted || 0) === 0
+                                : Object.keys(dcttInvTerminationByInv || {}).filter((k) => Number(dcttInvTerminationByInv[k]) > 0).length === 0)
+                              : (isMVF
+                                ? (mvfSelectedTrenchParts.length === 0 && mvfActiveSegmentKeys.size === 0)
+                                : (isDATP
+                                  ? datpCompletedForSubmit === 0
+                                  : (isMVFT
+                                    ? mvftCompletedForSubmit === 0
+                                    : isPTEP
+                                      ? (ptepSubMode === 'tabletotable'
+                                        ? ptepCompletedTableToTable.size === 0
+                                        : ptepCompletedParameterMeters === 0)
+                                      : isLVTT
+                                        ? (String(lvttSubMode || 'termination') === 'testing' ? false : lvttCompletedForSubmit === 0)
+                                        : isMVT
+                                          ? (String(mvtSubMode || 'termination') === 'testing' ? false : mvtCompletedForSubmit === 0)
+                                          : isLV
+                                            ? workAmount === 0
+                                            : workSelectionCount === 0))))
+                          )
                     }
-                    if (e.target) e.target.value = '';
-                  }}
-                />
-                <button
-                  onClick={() => dcctTestImportFileInputRef.current?.click()}
-                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-                  title="Import Test Results (CSV)"
-                  aria-label="Import Test Results"
-                >
-                  Import Test Results
-                </button>
-                <button
-                  onClick={dcctExportTestResultsCsv}
-                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-                  title={dcctTestResultsDirty ? 'Submit first, then export' : 'Export submitted test results (CSV)'}
-                  aria-label="Export Test Results"
-                >
-                  Export Test Results
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={() => {
-                    if (isMVT && String(mvtSubMode || 'termination') === 'testing') {
-                      mvtSubmitTestResults();
-                      return;
+                    className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                    title={
+                      isMVT && String(mvtSubMode || 'termination') === 'testing'
+                        ? (mvtTestResultsDirty ? 'Submit (save) MV test results' : 'No changes to submit')
+                        : (isLVTT && String(lvttSubMode || 'termination') === 'testing'
+                          ? (lvttTestResultsDirty ? 'Submit (save) LV test results' : 'No changes to submit')
+                          : (isDCTT && String(dcttSubMode || 'termination') === 'testing'
+                            ? (dcttTestResultsDirty ? 'Submit (save) DC test results' : 'No changes to submit')
+                            : (isMC4 && !mc4SelectionMode
+                              ? 'Select MC4 Install / Cable Termination Panel Side / Cable Termination Inv. Side first'
+                              : 'Submit Work')))
                     }
-                    if (isLVTT && String(lvttSubMode || 'termination') === 'testing') {
-                      lvttSubmitTestResults();
-                      return;
-                    }
-                    if (isDCTT && String(dcttSubMode || 'termination') === 'testing') {
-                      dcttTestSubmitResults();
-                      return;
-                    }
-                    setModalOpen(true);
-                  }}
-                  disabled={
-                    (isDCTT && String(dcttSubMode || 'termination') === 'testing')
-                      ? (noteMode || !dcttTestResultsDirty)
-                      : (
-                        noteMode ||
-                        (isMVT && String(mvtSubMode || 'termination') === 'testing'
-                          ? !mvtTestResultsDirty
-                          : false) ||
-                        (isLVTT && String(lvttSubMode || 'termination') === 'testing'
-                          ? !lvttTestResultsDirty
-                          : false) ||
-                        (isMC4 && !mc4SelectionMode) ||
-                        (isDCTT && String(dcttSubMode || 'termination') !== 'testing' && !dcttSelectionMode) ||
-                        (isDCTT && String(dcttSubMode || 'termination') !== 'testing'
-                          ? (dcttSelectionMode === 'termination_panel'
-                            ? (dcttCounts?.terminatedCompleted || 0) === 0
-                            : Object.keys(dcttInvTerminationByInv || {}).filter((k) => Number(dcttInvTerminationByInv[k]) > 0).length === 0)
-                          : (isMVF
-                            ? (mvfSelectedTrenchParts.length === 0 && mvfActiveSegmentKeys.size === 0)
-                            : (isDATP
-                              ? datpCompletedForSubmit === 0
-                              : (isMVFT
-                                ? mvftCompletedForSubmit === 0
-                                : isPTEP
-                                  ? (ptepSubMode === 'tabletotable'
-                                    ? ptepCompletedTableToTable.size === 0
-                                    : ptepCompletedParameterMeters === 0)
-                                  : isLVTT
-                                    ? (String(lvttSubMode || 'termination') === 'testing' ? false : lvttCompletedForSubmit === 0)
-                                    : isMVT
-                                      ? (String(mvtSubMode || 'termination') === 'testing' ? false : mvtCompletedForSubmit === 0)
-                                      : isLV
-                                        ? workAmount === 0
-                                        : workSelectionCount === 0))))
-                      )
-                  }
-                  className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-                  title={
-                    isMVT && String(mvtSubMode || 'termination') === 'testing'
-                      ? (mvtTestResultsDirty ? 'Submit (save) MV test results' : 'No changes to submit')
-                      : (isLVTT && String(lvttSubMode || 'termination') === 'testing'
-                        ? (lvttTestResultsDirty ? 'Submit (save) LV test results' : 'No changes to submit')
-                        : (isDCTT && String(dcttSubMode || 'termination') === 'testing'
-                          ? (dcttTestResultsDirty ? 'Submit (save) DC test results' : 'No changes to submit')
-                          : (isMC4 && !mc4SelectionMode
-                            ? 'Select MC4 Install / Cable Termination Panel Side / Cable Termination Inv. Side first'
-                            : 'Submit Work')))
-                  }
-                  aria-label={
-                    isMVT && String(mvtSubMode || 'termination') === 'testing'
-                      ? 'Submit Test Results'
-                      : (isLVTT && String(lvttSubMode || 'termination') === 'testing'
+                    aria-label={
+                      isMVT && String(mvtSubMode || 'termination') === 'testing'
                         ? 'Submit Test Results'
-                        : (isDCTT && String(dcttSubMode || 'termination') === 'testing'
+                        : (isLVTT && String(lvttSubMode || 'termination') === 'testing'
                           ? 'Submit Test Results'
-                          : 'Submit Work'))
-                  }
-                >
-                  Submit
-                </button>
+                          : (isDCTT && String(dcttSubMode || 'termination') === 'testing'
+                            ? 'Submit Test Results'
+                            : 'Submit Work'))
+                    }
+                  >
+                    Submit
+                  </button>
 
-                {isMVT && String(mvtSubMode || 'termination') === 'testing' ? (
-                  <>
-                    <input
-                      ref={mvtTestImportFileInputRef}
-                      type="file"
-                      accept=".csv"
-                      style={{ display: 'none' }}
-                      onChange={(e) => {
-                        const file = e.target?.files?.[0];
-                        if (file) {
-                          const reader = new FileReader();
-                          reader.onload = () => {
-                            const text = String(reader.result || '');
-                            mvtImportTestResultsFromText(text);
-                          };
-                          reader.readAsText(file);
-                        }
-                        if (e.target) e.target.value = '';
-                      }}
-                    />
-                    <button
-                      onClick={() => mvtTestImportFileInputRef.current?.click()}
-                      className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-                      title="Import Test Results (CSV)"
-                      aria-label="Import Test Results"
-                    >
-                      Import Test Results
-                    </button>
-                    <button
-                      onClick={mvtExportTestResultsCsv}
-                      className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-                      title={mvtTestResultsDirty ? 'Submit first, then export' : 'Export submitted test results (CSV)'}
-                      aria-label="Export Test Results"
-                    >
-                      Export Test Results
-                    </button>
-                  </>
-                ) : (isDCTT && String(dcttSubMode || 'termination') === 'testing') ? (
-                  <>
-                    <input
-                      ref={dcttTestImportFileInputRef}
-                      type="file"
-                      accept=".csv"
-                      style={{ display: 'none' }}
-                      onChange={(e) => {
-                        const file = e.target?.files?.[0];
-                        if (file) {
-                          const reader = new FileReader();
-                          reader.onload = () => {
-                            const text = String(reader.result || '');
-                            dcttTestImportFromText(text, 'import');
-                          };
-                          reader.readAsText(file);
-                        }
-                        if (e.target) e.target.value = '';
-                      }}
-                    />
-                    <button
-                      onClick={() => dcttTestImportFileInputRef.current?.click()}
-                      className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-                      title="Import Test Results (CSV)"
-                      aria-label="Import Test Results"
-                    >
-                      <span className="flex flex-col items-center leading-[1.05]">
-                        <span>Import</span>
-                        <span>Test Results</span>
-                      </span>
-                    </button>
-                    <button
-                      onClick={dcttTestExportCsv}
-                      className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-                      title={dcttTestResultsDirty ? 'Submit first, then export' : 'Export submitted test results (CSV)'}
-                      aria-label="Export Test Results"
-                    >
-                      <span className="flex flex-col items-center leading-[1.05]">
-                        <span>Export</span>
-                        <span>Test Results</span>
-                      </span>
-                    </button>
-                  </>
-                ) : (isLVTT && String(lvttSubMode || 'termination') === 'testing') ? (
-                  <>
-                    <input
-                      ref={lvttTestImportFileInputRef}
-                      type="file"
-                      accept=".csv"
-                      style={{ display: 'none' }}
-                      onChange={(e) => {
-                        const file = e.target?.files?.[0];
-                        if (file) {
-                          const reader = new FileReader();
-                          reader.onload = () => {
-                            const text = String(reader.result || '');
-                            lvttImportTestResultsFromText(text);
-                          };
-                          reader.readAsText(file);
-                        }
-                        if (e.target) e.target.value = '';
-                      }}
-                    />
-                    <button
-                      onClick={() => lvttTestImportFileInputRef.current?.click()}
-                      className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-                      title="Import Test Results (CSV)"
-                      aria-label="Import Test Results"
-                    >
-                      <span className="flex flex-col items-center leading-[1.05]">
-                        <span>Import</span>
-                        <span>Test Results</span>
-                      </span>
-                    </button>
-                    <button
-                      onClick={lvttExportTestResultsCsv}
-                      className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-                      title={lvttTestResultsDirty ? 'Submit first, then export' : 'Export submitted test results (CSV)'}
-                      aria-label="Export Test Results"
-                    >
-                      <span className="flex flex-col items-center leading-[1.05]">
-                        <span>Export</span>
-                        <span>Test Results</span>
-                      </span>
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => setHistoryOpen(true)}
-                      disabled={isLVTT && String(lvttSubMode || 'termination') === 'testing'}
-                      className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-                      title={isLVTT && String(lvttSubMode || 'termination') === 'testing'
-                        ? 'History disabled in LV_TESTING'
-                        : 'History'}
-                      aria-label="History"
-                    >
-                      History
-                    </button>
+                  {isMVT && String(mvtSubMode || 'termination') === 'testing' ? (
+                    <>
+                      <input
+                        ref={mvtTestImportFileInputRef}
+                        type="file"
+                        accept=".csv"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const file = e.target?.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              const text = String(reader.result || '');
+                              mvtImportTestResultsFromText(text);
+                            };
+                            reader.readAsText(file);
+                          }
+                          if (e.target) e.target.value = '';
+                        }}
+                      />
+                      <button
+                        onClick={() => mvtTestImportFileInputRef.current?.click()}
+                        className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                        title="Import Test Results (CSV)"
+                        aria-label="Import Test Results"
+                      >
+                        Import Test Results
+                      </button>
+                      <button
+                        onClick={mvtExportTestResultsCsv}
+                        className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                        title={mvtTestResultsDirty ? 'Submit first, then export' : 'Export submitted test results (CSV)'}
+                        aria-label="Export Test Results"
+                      >
+                        Export Test Results
+                      </button>
+                    </>
+                  ) : (isDCTT && String(dcttSubMode || 'termination') === 'testing') ? (
+                    <>
+                      <input
+                        ref={dcttTestImportFileInputRef}
+                        type="file"
+                        accept=".csv"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const file = e.target?.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              const text = String(reader.result || '');
+                              dcttTestImportFromText(text, 'import');
+                            };
+                            reader.readAsText(file);
+                          }
+                          if (e.target) e.target.value = '';
+                        }}
+                      />
+                      <button
+                        onClick={() => dcttTestImportFileInputRef.current?.click()}
+                        className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                        title="Import Test Results (CSV)"
+                        aria-label="Import Test Results"
+                      >
+                        <span className="flex flex-col items-center leading-[1.05]">
+                          <span>Import</span>
+                          <span>Test Results</span>
+                        </span>
+                      </button>
+                      <button
+                        onClick={dcttTestExportCsv}
+                        className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                        title={dcttTestResultsDirty ? 'Submit first, then export' : 'Export submitted test results (CSV)'}
+                        aria-label="Export Test Results"
+                      >
+                        <span className="flex flex-col items-center leading-[1.05]">
+                          <span>Export</span>
+                          <span>Test Results</span>
+                        </span>
+                      </button>
+                    </>
+                  ) : (isLVTT && String(lvttSubMode || 'termination') === 'testing') ? (
+                    <>
+                      <input
+                        ref={lvttTestImportFileInputRef}
+                        type="file"
+                        accept=".csv"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const file = e.target?.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              const text = String(reader.result || '');
+                              lvttImportTestResultsFromText(text);
+                            };
+                            reader.readAsText(file);
+                          }
+                          if (e.target) e.target.value = '';
+                        }}
+                      />
+                      <button
+                        onClick={() => lvttTestImportFileInputRef.current?.click()}
+                        className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                        title="Import Test Results (CSV)"
+                        aria-label="Import Test Results"
+                      >
+                        <span className="flex flex-col items-center leading-[1.05]">
+                          <span>Import</span>
+                          <span>Test Results</span>
+                        </span>
+                      </button>
+                      <button
+                        onClick={lvttExportTestResultsCsv}
+                        className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                        title={lvttTestResultsDirty ? 'Submit first, then export' : 'Export submitted test results (CSV)'}
+                        aria-label="Export Test Results"
+                      >
+                        <span className="flex flex-col items-center leading-[1.05]">
+                          <span>Export</span>
+                          <span>Test Results</span>
+                        </span>
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => setHistoryOpen(true)}
+                        disabled={isLVTT && String(lvttSubMode || 'termination') === 'testing'}
+                        className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                        title={isLVTT && String(lvttSubMode || 'termination') === 'testing'
+                          ? 'History disabled in LV_TESTING'
+                          : 'History'}
+                        aria-label="History"
+                      >
+                        History
+                      </button>
 
-                    {!isLVTT && (
-                    <button
-                      onClick={() => {
-                        const exportModuleKey = String(
-                          isMC4
-                            ? (mc4SelectionMode === 'termination_panel'
-                              ? 'MC4_TERM_PANEL'
-                              : (mc4SelectionMode === 'termination_inv'
-                                ? 'MC4_TERM_INV'
-                                : 'MC4_INST'))
-                            : (isDATP
-                              ? 'DATP'
-                              : (isMVFT
-                                ? 'MVFT'
-                                : (isPTEP
-                                  ? (ptepSubMode === 'tabletotable' ? 'PTEP_TT' : 'PTEP_PARAM')
-                                  : (isMVT
-                                    ? 'MVT_TERM'
-                                    : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-                                      ? 'LVTT_TERM'
-                                      : (activeMode?.key || '')))))
-                        ).toUpperCase();
+                      {!isLVTT && (
+                        <button
+                          onClick={() => {
+                            const exportModuleKey = String(
+                              isMC4
+                                ? (mc4SelectionMode === 'termination_panel'
+                                  ? 'MC4_TERM_PANEL'
+                                  : (mc4SelectionMode === 'termination_inv'
+                                    ? 'MC4_TERM_INV'
+                                    : 'MC4_INST'))
+                                : (isDATP
+                                  ? 'DATP'
+                                  : (isMVFT
+                                    ? 'MVFT'
+                                    : (isPTEP
+                                      ? (ptepSubMode === 'tabletotable' ? 'PTEP_TT' : 'PTEP_PARAM')
+                                      : (isMVT
+                                        ? 'MVT_TERM'
+                                        : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                                          ? 'LVTT_TERM'
+                                          : (activeMode?.key || '')))))
+                            ).toUpperCase();
 
-                        const exportLog = isMC4
-                          ? (dailyLog || []).filter((r) => String(r?.module_key || '').toUpperCase() === exportModuleKey)
-                          : dailyLog;
+                            const exportLog = isMC4
+                              ? (dailyLog || []).filter((r) => String(r?.module_key || '').toUpperCase() === exportModuleKey)
+                              : dailyLog;
 
-                        exportToExcel(exportLog, {
-                          moduleKey: exportModuleKey,
-                          moduleLabel: isMC4
-                            ? (mc4SelectionMode === 'termination_panel'
-                              ? 'Cable Termination Panel Side'
-                              : (mc4SelectionMode === 'termination_inv'
-                                ? 'Cable Termination Inv. Side'
-                                : 'MC4 Installation'))
-                            : (isDATP
-                              ? 'DC&AC Trench'
-                              : (isMVFT
-                                ? 'MV&Fibre Trench'
-                                : (isPTEP
-                                  ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
-                                  : (isMVT
+                            exportToExcel(exportLog, {
+                              moduleKey: exportModuleKey,
+                              moduleLabel: isMC4
+                                ? (mc4SelectionMode === 'termination_panel'
+                                  ? 'Cable Termination Panel Side'
+                                  : (mc4SelectionMode === 'termination_inv'
+                                    ? 'Cable Termination Inv. Side'
+                                    : 'MC4 Installation'))
+                                : (isDATP
+                                  ? 'DC&AC Trench'
+                                  : (isMVFT
+                                    ? 'MV&Fibre Trench'
+                                    : (isPTEP
+                                      ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+                                      : (isMVT
+                                        ? 'Cable Termination'
+                                        : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                                          ? 'Cable Termination'
+                                          : moduleName)))),
+                              unit: isMC4
+                                ? 'ends'
+                                : (isDATP || isMVFT
+                                  ? 'm'
+                                  : (isPTEP
+                                    ? (ptepSubMode === 'tabletotable' ? 'pcs' : 'm')
+                                    : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination')) ? 'cables' : 'm'))),
+                              chartSheetName: isDATP
+                                ? 'DC&AC Trench Progress'
+                                : (isMVFT
+                                  ? 'MV&Fibre Trench Progress'
+                                  : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
                                     ? 'Cable Termination'
-                                    : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-                                      ? 'Cable Termination'
-                                      : moduleName)))),
-                          unit: isMC4
-                            ? 'ends'
-                            : (isDATP || isMVFT
-                              ? 'm'
-                              : (isPTEP
-                                ? (ptepSubMode === 'tabletotable' ? 'pcs' : 'm')
-                                : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination')) ? 'cables' : 'm'))),
-                          chartSheetName: isDATP
-                            ? 'DC&AC Trench Progress'
-                            : (isMVFT
-                              ? 'MV&Fibre Trench Progress'
-                              : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
-                                ? 'Cable Termination'
-                                : (isPTEP
-                                  ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
-                                  : undefined))),
-                          chartTitle: isDATP
-                            ? 'DC&AC Trench Progress'
-                            : (isMVFT
-                              ? 'MV&Fibre Trench Progress'
-                              : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
-                                ? 'Cable Termination'
-                                : (isPTEP
-                                  ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
-                                  : undefined))),
+                                    : (isPTEP
+                                      ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+                                      : undefined))),
+                              chartTitle: isDATP
+                                ? 'DC&AC Trench Progress'
+                                : (isMVFT
+                                  ? 'MV&Fibre Trench Progress'
+                                  : ((isMVT || (isLVTT && String(lvttSubMode || 'termination') === 'termination'))
+                                    ? 'Cable Termination'
+                                    : (isPTEP
+                                      ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+                                      : undefined))),
+                            });
+                          }}
+                          disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || dailyLog.length === 0}
+                          className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
+                          title={isLVTT && String(lvttSubMode || 'termination') === 'testing'
+                            ? 'Export disabled in LV_TESTING'
+                            : 'Export Excel'}
+                          aria-label="Export Excel"
+                        >
+                          Export
+                        </button>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* MV PULLING: segments panel - simple list, click to select/unselect (green on map) */}
+          {isMVF && mvfSegments.length > 0 && (
+            <div className="fixed left-3 sm:left-5 top-[190px] z-[1190] w-[220px] border border-slate-600 bg-slate-900/95 text-white shadow-[0_10px_26px_rgba(0,0,0,0.5)] rounded">
+              <div className="border-b border-slate-700 px-3 py-2">
+                <div className="text-[10px] font-extrabold uppercase tracking-wide text-slate-300">{isFIB ? 'fibre cable route and length' : 'mv cable route and length'}</div>
+              </div>
+              <div className="max-h-[280px] overflow-y-auto p-2">
+                {mvfSegments.map((s) => {
+                  const active = mvfActiveSegmentKeys.has(s.key);
+                  return (
+                    <button
+                      key={s.key}
+                      type="button"
+                      onClick={() => {
+                        const ck = String(s.key || '');
+                        // Toggle selection - when selected, route shows GREEN on map
+                        setMvfActiveSegmentKeys((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(ck)) next.delete(ck);
+                          else next.add(ck);
+                          return next;
+                        });
+                        // Also mark as done when selected (so it appears green)
+                        setMvfDoneSegmentKeys((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(ck)) next.delete(ck);
+                          else next.add(ck);
+                          return next;
                         });
                       }}
-                      disabled={(isLVTT && String(lvttSubMode || 'termination') === 'testing') || dailyLog.length === 0}
-                      className={`${BTN_NEUTRAL} w-auto min-w-14 h-6 px-2 leading-none text-[11px] font-extrabold uppercase tracking-wide`}
-                      title={isLVTT && String(lvttSubMode || 'termination') === 'testing'
-                        ? 'Export disabled in LV_TESTING'
-                        : 'Export Excel'}
-                      aria-label="Export Excel"
-                    >
-                      Export
-                    </button>
-                    )}
-                  </>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* MV PULLING: segments panel - simple list, click to select/unselect (green on map) */}
-        {isMVF && mvfSegments.length > 0 && (
-          <div className="fixed left-3 sm:left-5 top-[190px] z-[1190] w-[220px] border border-slate-600 bg-slate-900/95 text-white shadow-[0_10px_26px_rgba(0,0,0,0.5)] rounded">
-            <div className="border-b border-slate-700 px-3 py-2">
-              <div className="text-[10px] font-extrabold uppercase tracking-wide text-slate-300">{isFIB ? 'fibre cable route and length' : 'mv cable route and length'}</div>
-            </div>
-            <div className="max-h-[280px] overflow-y-auto p-2">
-              {mvfSegments.map((s) => {
-                const active = mvfActiveSegmentKeys.has(s.key);
-                return (
-                  <button
-                    key={s.key}
-                    type="button"
-                    onClick={() => {
-                      const ck = String(s.key || '');
-                      // Toggle selection - when selected, route shows GREEN on map
-                      setMvfActiveSegmentKeys((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(ck)) next.delete(ck);
-                        else next.add(ck);
-                        return next;
-                      });
-                      // Also mark as done when selected (so it appears green)
-                      setMvfDoneSegmentKeys((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(ck)) next.delete(ck);
-                        else next.add(ck);
-                        return next;
-                      });
-                    }}
-                    className={`mb-1 flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-[12px] transition-colors ${
-                      active
+                      className={`mb-1 flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-[12px] transition-colors ${active
                         ? 'bg-emerald-600 text-white font-semibold'
                         : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                    }`}
-                    title={active ? `${s.label} (selected - click to unselect)` : `${s.label} (click to select)`}
-                  >
-                    <span className="min-w-0 truncate">{s.label}</span>
-                    <span className="ml-2 tabular-nums text-[11px] opacity-80">
-                      {mvfCircuitsMultiplier > 1
-                        ? `${Math.round(Number(s.length || 0) / mvfCircuitsMultiplier)}*${mvfCircuitsMultiplier}`
-                        : `${Math.round(Number(s.length || 0))}`}
-                    </span>
-                  </button>
-                );
-              })}
+                        }`}
+                      title={active ? `${s.label} (selected - click to unselect)` : `${s.label} (click to select)`}
+                    >
+                      <span className="min-w-0 truncate">{s.label}</span>
+                      <span className="ml-2 tabular-nums text-[11px] opacity-80">
+                        {mvfCircuitsMultiplier > 1
+                          ? `${Math.round(Number(s.length || 0) / mvfCircuitsMultiplier)}*${mvfCircuitsMultiplier}`
+                          : `${Math.round(Number(s.length || 0))}`}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Legend / DWG / Notes (right aligned, vertically centered on screen) */}
-        {/* For PUNCH_LIST: Show Punch and Contractor buttons instead of Legend/DWG/TEXT */}
-        {isPL ? (
-          <div className="fixed right-3 sm:right-5 top-[40%] -translate-y-1/2 z-[1090] flex flex-col items-end gap-4">
-            {/* Punch button with red pulsing dot */}
-            <button
-              type="button"
-              onClick={() => {
-                setNoteMode((prev) => !prev);
-              }}
-              aria-pressed={noteMode}
-              aria-label={noteMode ? 'Exit Punch Mode' : 'Punch Mode'}
-              title={noteMode ? 'Exit Punch Mode' : 'Punch Mode'}
-              className="relative inline-flex h-8 items-center justify-center border-2 border-slate-700 bg-slate-900 px-3 text-[11px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
-            >
-              Punch
-              {/* Red corner indicator (pulses when active) */}
-              <svg
-                className={`note-dot absolute -right-1 -top-1 ${noteMode ? 'h-3 w-3 note-dot--active' : 'h-2 w-2'}`}
-                viewBox="0 0 12 12"
-                aria-hidden="true"
+          {/* Legend / DWG / Notes (right aligned, vertically centered on screen) */}
+          {/* For PUNCH_LIST: Show Punch and Contractor buttons instead of Legend/DWG/TEXT */}
+          {isPL ? (
+            <div className="fixed right-3 sm:right-5 top-[40%] -translate-y-1/2 z-[1090] flex flex-col items-end gap-4">
+              {/* Punch button with red pulsing dot */}
+              <button
+                type="button"
+                onClick={() => {
+                  setNoteMode((prev) => !prev);
+                }}
+                aria-pressed={noteMode}
+                aria-label={noteMode ? 'Exit Punch Mode' : 'Punch Mode'}
+                title={noteMode ? 'Exit Punch Mode' : 'Punch Mode'}
+                className="relative inline-flex h-8 items-center justify-center border-2 border-slate-700 bg-slate-900 px-3 text-[11px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
               >
-                <circle cx="6" cy="6" r="4" fill="#e23a3a" stroke="#7a0f0f" strokeWidth="2" />
-              </svg>
-            </button>
-            
-            {/* Selected punches indicator */}
-            {plSelectedPunches.size > 0 && (
-              <div className="inline-flex h-8 items-center gap-2 border-2 border-red-700 bg-red-900/80 px-3 text-[11px] font-extrabold uppercase tracking-wide text-red-200">
-                <span>{plSelectedPunches.size} Selected</span>
-                <button
-                  type="button"
-                  onClick={() => plDeleteSelectedPunches()}
-                  className="text-red-400 hover:text-white ml-1"
-                  title="Delete Selected (Delete key)"
+                Punch
+                {/* Red corner indicator (pulses when active) */}
+                <svg
+                  className={`note-dot absolute -right-1 -top-1 ${noteMode ? 'h-3 w-3 note-dot--active' : 'h-2 w-2'}`}
+                  viewBox="0 0 12 12"
+                  aria-hidden="true"
                 >
-                  🗑️
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPlSelectedPunches(new Set())}
-                  className="text-red-400 hover:text-white"
-                  title="Clear Selection (Escape)"
-                >
-                  ✕
-                </button>
-              </div>
-            )}
-            
-            {/* Legend for PUNCH_LIST - in the middle */}
-            <div className="border-2 border-slate-700 bg-slate-900 px-4 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
-              <div className="text-base font-black uppercase tracking-wide text-white">Legend</div>
-              <div className="mt-2 border-2 border-slate-700 bg-slate-800 px-3 py-2">
-                {/* Completed punch indicator */}
-                <div className="flex items-center gap-2">
-                  <span 
-                    className="h-3 w-3 rounded-full border-2 border-emerald-300" 
-                    style={{ backgroundColor: PUNCH_COMPLETED_COLOR }}
-                    aria-hidden="true" 
-                  />
-                  <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-400">Completed</span>
-                </div>
-                {/* Contractor colors */}
-                {plContractors.length > 0 && (
-                  <div className="mt-2 pt-2 border-t border-slate-600">
-                    {plContractors.map((c) => (
-                      <div key={c.id} className="flex items-center gap-2 mt-1 first:mt-0">
-                        <span 
-                          className="h-3 w-3 rounded-full border border-white/40" 
-                          style={{ backgroundColor: c.color }}
-                          aria-hidden="true" 
-                        />
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-slate-300">{c.name}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
+                  <circle cx="6" cy="6" r="4" fill="#e23a3a" stroke="#7a0f0f" strokeWidth="2" />
+                </svg>
+              </button>
 
-            {/* Contractor button - at the bottom, always shows "Contractor" */}
-            <button
-              type="button"
-              id="pl-contractor-btn"
-              onClick={() => setPlContractorDropdownOpen((v) => !v)}
-              className="inline-flex h-8 min-w-[120px] items-center justify-between gap-2 border-2 border-slate-700 bg-slate-900 px-3 text-[11px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
-            >
-              {plSelectedContractorId && (
-                <span
-                  className="inline-block h-3 w-3 rounded-full border border-white/40 flex-shrink-0"
-                  style={{ backgroundColor: plGetContractor(plSelectedContractorId)?.color || '#888' }}
-                />
+              {/* Selected punches indicator */}
+              {plSelectedPunches.size > 0 && (
+                <div className="inline-flex h-8 items-center gap-2 border-2 border-red-700 bg-red-900/80 px-3 text-[11px] font-extrabold uppercase tracking-wide text-red-200">
+                  <span>{plSelectedPunches.size} Selected</span>
+                  <button
+                    type="button"
+                    onClick={() => plDeleteSelectedPunches()}
+                    className="text-red-400 hover:text-white ml-1"
+                    title="Delete Selected (Delete key)"
+                  >
+                    🗑️
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPlSelectedPunches(new Set())}
+                    className="text-red-400 hover:text-white"
+                    title="Clear Selection (Escape)"
+                  >
+                    ✕
+                  </button>
+                </div>
               )}
-              <span className={plSelectedContractorId ? 'text-white' : 'text-amber-400'}>Contractor</span>
-              <svg className="h-3 w-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-            </button>
-          </div>
-        ) : (
-        <div className="fixed right-3 sm:right-5 top-[40%] -translate-y-1/2 z-[1090] flex flex-col items-end gap-2">
-          <div className="border-2 border-slate-700 bg-slate-900 px-4 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
-            <div className="text-base font-black uppercase tracking-wide text-white">Legend</div>
-            <div className="mt-2 border-2 border-slate-700 bg-slate-800 px-3 py-2">
-              {isMC4 ? (
-                <>
+
+              {/* Legend for PUNCH_LIST - in the middle */}
+              <div className="border-2 border-slate-700 bg-slate-900 px-4 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
+                <div className="text-base font-black uppercase tracking-wide text-white">Legend</div>
+                <div className="mt-2 border-2 border-slate-700 bg-slate-800 px-3 py-2">
+                  {/* Completed punch indicator */}
                   <div className="flex items-center gap-2">
-                    <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-white">Uncompleted</span>
-                  </div>
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="h-3 w-3 rounded-full border-2 border-blue-700 bg-blue-500" aria-hidden="true" />
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-blue-400">Completed MC4</span>
-                  </div>
-                </>
-              ) : isPTEP ? (
-                <>
-                  {/* Blue dashed line for Table to Table */}
-                  <div className="flex items-center gap-2">
-                    <svg width="24" height="12" aria-hidden="true">
-                      <line x1="0" y1="6" x2="24" y2="6" stroke="#3b82f6" strokeWidth="2" strokeDasharray="4 3" />
-                    </svg>
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-blue-400">Table to Table</span>
-                  </div>
-                  {/* Yellow line for Parameter Earthing */}
-                  <div className="mt-2 flex items-center gap-2">
-                    <svg width="24" height="12" aria-hidden="true">
-                      <line x1="0" y1="6" x2="24" y2="6" stroke="#facc15" strokeWidth="2" />
-                    </svg>
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-yellow-400">Parameter Earthing</span>
-                  </div>
-                  {/* Green line for Completed */}
-                  <div className="mt-2 flex items-center gap-2">
-                    <svg width="24" height="12" aria-hidden="true">
-                      <line x1="0" y1="6" x2="24" y2="6" stroke="#22c55e" strokeWidth="2" />
-                    </svg>
+                    <span
+                      className="h-3 w-3 rounded-full border-2 border-emerald-300"
+                      style={{ backgroundColor: PUNCH_COMPLETED_COLOR }}
+                      aria-hidden="true"
+                    />
                     <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-400">Completed</span>
                   </div>
-                </>
-              ) : isDATP ? (
-                <>
-                  {/* Blue line for Uncompleted */}
-                  <div className="flex items-center gap-2">
-                    <svg width="24" height="12" aria-hidden="true">
-                      <line x1="0" y1="6" x2="24" y2="6" stroke={datpTrenchLineColor} strokeWidth="2" />
-                    </svg>
-                    <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: datpTrenchLineColor }}>Uncompleted</span>
-                  </div>
-                  {/* Green line for Completed */}
-                  <div className="mt-2 flex items-center gap-2">
-                    <svg width="24" height="12" aria-hidden="true">
-                      <line x1="0" y1="6" x2="24" y2="6" stroke={datpCompletedLineColor} strokeWidth="2" />
-                    </svg>
-                    <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: datpCompletedLineColor }}>Completed</span>
-                  </div>
-                </>
-              ) : isMVFT ? (
-                <>
-                  {/* Blue line for Uncompleted */}
-                  <div className="flex items-center gap-2">
-                    <svg width="24" height="12" aria-hidden="true">
-                      <line x1="0" y1="6" x2="24" y2="6" stroke={mvftTrenchLineColor} strokeWidth="2" />
-                    </svg>
-                    <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: mvftTrenchLineColor }}>Uncompleted</span>
-                  </div>
-                  {/* Green line for Completed */}
-                  <div className="mt-2 flex items-center gap-2">
-                    <svg width="24" height="12" aria-hidden="true">
-                      <line x1="0" y1="6" x2="24" y2="6" stroke={mvftCompletedLineColor} strokeWidth="2" />
-                    </svg>
-                    <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: mvftCompletedLineColor }}>Completed</span>
-                  </div>
-                </>
-              ) : isDCCT ? (
-                <>
-                  <div className="flex items-center gap-2">
-                    <span className="h-3 w-3 border-2 border-emerald-900 bg-emerald-500" aria-hidden="true" />
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">PASSED</span>
-                  </div>
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="h-3 w-3 border-2 border-red-900 bg-red-500" aria-hidden="true" />
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">FAILED</span>
-                  </div>
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-white">NOT TESTED</span>
-                  </div>
-                </>
-              ) : isDCTT ? (
-                <>
-                  {String(dcttSubMode || 'termination') === 'testing' ? (
+                  {/* Contractor colors */}
+                  {plContractors.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-slate-600">
+                      {plContractors.map((c) => (
+                        <div key={c.id} className="flex items-center gap-2 mt-1 first:mt-0">
+                          <span
+                            className="h-3 w-3 rounded-full border border-white/40"
+                            style={{ backgroundColor: c.color }}
+                            aria-hidden="true"
+                          />
+                          <span className="text-[11px] font-bold uppercase tracking-wide text-slate-300">{c.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Contractor button - at the bottom, always shows "Contractor" */}
+              <button
+                type="button"
+                id="pl-contractor-btn"
+                onClick={() => setPlContractorDropdownOpen((v) => !v)}
+                className="inline-flex h-8 min-w-[120px] items-center justify-between gap-2 border-2 border-slate-700 bg-slate-900 px-3 text-[11px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
+              >
+                {plSelectedContractorId && (
+                  <span
+                    className="inline-block h-3 w-3 rounded-full border border-white/40 flex-shrink-0"
+                    style={{ backgroundColor: plGetContractor(plSelectedContractorId)?.color || '#888' }}
+                  />
+                )}
+                <span className={plSelectedContractorId ? 'text-white' : 'text-amber-400'}>Contractor</span>
+                <svg className="h-3 w-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+              </button>
+            </div>
+          ) : (
+            <div className="fixed right-3 sm:right-5 top-[40%] -translate-y-1/2 z-[1090] flex flex-col items-end gap-2">
+              <div className="border-2 border-slate-700 bg-slate-900 px-4 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.55)]">
+                <div className="text-base font-black uppercase tracking-wide text-white">Legend</div>
+                <div className="mt-2 border-2 border-slate-700 bg-slate-800 px-3 py-2">
+                  {isMC4 ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-white">Uncompleted</span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="h-3 w-3 rounded-full border-2 border-blue-700 bg-blue-500" aria-hidden="true" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-blue-400">Completed MC4</span>
+                      </div>
+                    </>
+                  ) : isPTEP ? (
+                    <>
+                      {/* Blue dashed line for Table to Table */}
+                      <div className="flex items-center gap-2">
+                        <svg width="24" height="12" aria-hidden="true">
+                          <line x1="0" y1="6" x2="24" y2="6" stroke="#3b82f6" strokeWidth="2" strokeDasharray="4 3" />
+                        </svg>
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-blue-400">Table to Table</span>
+                      </div>
+                      {/* Yellow line for Parameter Earthing */}
+                      <div className="mt-2 flex items-center gap-2">
+                        <svg width="24" height="12" aria-hidden="true">
+                          <line x1="0" y1="6" x2="24" y2="6" stroke="#facc15" strokeWidth="2" />
+                        </svg>
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-yellow-400">Parameter Earthing</span>
+                      </div>
+                      {/* Green line for Completed */}
+                      <div className="mt-2 flex items-center gap-2">
+                        <svg width="24" height="12" aria-hidden="true">
+                          <line x1="0" y1="6" x2="24" y2="6" stroke="#22c55e" strokeWidth="2" />
+                        </svg>
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-400">Completed</span>
+                      </div>
+                    </>
+                  ) : isDATP ? (
+                    <>
+                      {/* Blue line for Uncompleted */}
+                      <div className="flex items-center gap-2">
+                        <svg width="24" height="12" aria-hidden="true">
+                          <line x1="0" y1="6" x2="24" y2="6" stroke={datpTrenchLineColor} strokeWidth="2" />
+                        </svg>
+                        <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: datpTrenchLineColor }}>Uncompleted</span>
+                      </div>
+                      {/* Green line for Completed */}
+                      <div className="mt-2 flex items-center gap-2">
+                        <svg width="24" height="12" aria-hidden="true">
+                          <line x1="0" y1="6" x2="24" y2="6" stroke={datpCompletedLineColor} strokeWidth="2" />
+                        </svg>
+                        <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: datpCompletedLineColor }}>Completed</span>
+                      </div>
+                    </>
+                  ) : isMVFT ? (
+                    <>
+                      {/* Blue line for Uncompleted */}
+                      <div className="flex items-center gap-2">
+                        <svg width="24" height="12" aria-hidden="true">
+                          <line x1="0" y1="6" x2="24" y2="6" stroke={mvftTrenchLineColor} strokeWidth="2" />
+                        </svg>
+                        <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: mvftTrenchLineColor }}>Uncompleted</span>
+                      </div>
+                      {/* Green line for Completed */}
+                      <div className="mt-2 flex items-center gap-2">
+                        <svg width="24" height="12" aria-hidden="true">
+                          <line x1="0" y1="6" x2="24" y2="6" stroke={mvftCompletedLineColor} strokeWidth="2" />
+                        </svg>
+                        <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: mvftCompletedLineColor }}>Completed</span>
+                      </div>
+                    </>
+                  ) : isDCCT ? (
                     <>
                       <div className="flex items-center gap-2">
                         <span className="h-3 w-3 border-2 border-emerald-900 bg-emerald-500" aria-hidden="true" />
@@ -17241,53 +17557,16 @@ export default function BaseModule({
                         <span className="text-[11px] font-bold uppercase tracking-wide text-white">NOT TESTED</span>
                       </div>
                     </>
-                  ) : dcttSelectionMode === 'termination_panel' ? (
+                  ) : isDCTT ? (
                     <>
-                      <div className="flex items-center gap-2">
-                        <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-white">Uncompleted</span>
-                      </div>
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className="h-3 w-3 rounded-full border-2 border-emerald-700 bg-emerald-500" aria-hidden="true" />
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-400">Completed</span>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex items-center gap-2">
-                        <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-white">Uncompleted</span>
-                      </div>
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Completed</span>
-                      </div>
-                    </>
-                  )}
-                </>
-              ) : (
-                <>
-                  {isMVT ? (
-                    <>
-                      {String(mvtSubMode || 'termination') === 'termination' ? (
+                      {String(dcttSubMode || 'termination') === 'testing' ? (
                         <>
                           <div className="flex items-center gap-2">
-                            <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
-                            <span className="text-[11px] font-bold uppercase tracking-wide text-white">Unterminated</span>
-                          </div>
-                          <div className="mt-2 flex items-center gap-2">
-                            <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
-                            <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Terminated</span>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="flex items-center gap-2">
-                            <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
+                            <span className="h-3 w-3 border-2 border-emerald-900 bg-emerald-500" aria-hidden="true" />
                             <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">PASSED</span>
                           </div>
                           <div className="mt-2 flex items-center gap-2">
-                            <span className="h-3 w-3 border-2 border-red-300 bg-red-500" aria-hidden="true" />
+                            <span className="h-3 w-3 border-2 border-red-900 bg-red-500" aria-hidden="true" />
                             <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">FAILED</span>
                           </div>
                           <div className="mt-2 flex items-center gap-2">
@@ -17295,11 +17574,18 @@ export default function BaseModule({
                             <span className="text-[11px] font-bold uppercase tracking-wide text-white">NOT TESTED</span>
                           </div>
                         </>
-                      )}
-                    </>
-                  ) : isLVTT ? (
-                    <>
-                      {String(lvttSubMode || 'termination') === 'termination' ? (
+                      ) : dcttSelectionMode === 'termination_panel' ? (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-white">Uncompleted</span>
+                          </div>
+                          <div className="mt-2 flex items-center gap-2">
+                            <span className="h-3 w-3 rounded-full border-2 border-emerald-700 bg-emerald-500" aria-hidden="true" />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-400">Completed</span>
+                          </div>
+                        </>
+                      ) : (
                         <>
                           <div className="flex items-center gap-2">
                             <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
@@ -17310,107 +17596,154 @@ export default function BaseModule({
                             <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Completed</span>
                           </div>
                         </>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {isMVT ? (
+                        <>
+                          {String(mvtSubMode || 'termination') === 'termination' ? (
+                            <>
+                              <div className="flex items-center gap-2">
+                                <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
+                                <span className="text-[11px] font-bold uppercase tracking-wide text-white">Unterminated</span>
+                              </div>
+                              <div className="mt-2 flex items-center gap-2">
+                                <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
+                                <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Terminated</span>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="flex items-center gap-2">
+                                <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
+                                <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">PASSED</span>
+                              </div>
+                              <div className="mt-2 flex items-center gap-2">
+                                <span className="h-3 w-3 border-2 border-red-300 bg-red-500" aria-hidden="true" />
+                                <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">FAILED</span>
+                              </div>
+                              <div className="mt-2 flex items-center gap-2">
+                                <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
+                                <span className="text-[11px] font-bold uppercase tracking-wide text-white">NOT TESTED</span>
+                              </div>
+                            </>
+                          )}
+                        </>
+                      ) : isLVTT ? (
+                        <>
+                          {String(lvttSubMode || 'termination') === 'termination' ? (
+                            <>
+                              <div className="flex items-center gap-2">
+                                <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
+                                <span className="text-[11px] font-bold uppercase tracking-wide text-white">Uncompleted</span>
+                              </div>
+                              <div className="mt-2 flex items-center gap-2">
+                                <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
+                                <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Completed</span>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="flex items-center gap-2">
+                                <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
+                                <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">PASSED</span>
+                              </div>
+                              <div className="mt-2 flex items-center gap-2">
+                                <span className="h-3 w-3 border-2 border-red-300 bg-red-500" aria-hidden="true" />
+                                <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">FAILED</span>
+                              </div>
+                            </>
+                          )}
+                        </>
+                      ) : isLVIB ? (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <span className="h-3 w-3 border-2 border-red-300 bg-red-500" aria-hidden="true" />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">Uncompleted</span>
+                          </div>
+                          <div className="mt-2 flex items-center gap-2">
+                            <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Completed</span>
+                          </div>
+                        </>
                       ) : (
                         <>
                           <div className="flex items-center gap-2">
-                            <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
-                            <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">PASSED</span>
+                            <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-white">Uncompleted</span>
                           </div>
                           <div className="mt-2 flex items-center gap-2">
-                            <span className="h-3 w-3 border-2 border-red-300 bg-red-500" aria-hidden="true" />
-                            <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">FAILED</span>
+                            <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Completed</span>
                           </div>
                         </>
                       )}
                     </>
-                  ) : isLVIB ? (
-                    <>
-                      <div className="flex items-center gap-2">
-                        <span className="h-3 w-3 border-2 border-red-300 bg-red-500" aria-hidden="true" />
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-red-300">Uncompleted</span>
-                      </div>
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Completed</span>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex items-center gap-2">
-                        <span className="h-3 w-3 border-2 border-white bg-white" aria-hidden="true" />
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-white">Uncompleted</span>
-                      </div>
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className="h-3 w-3 border-2 border-emerald-300 bg-emerald-500" aria-hidden="true" />
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">Completed</span>
-                      </div>
-                    </>
                   )}
-                </>
+                </div>
+              </div>
+
+              {/* MVT popups are rendered near click position (not in the fixed right panel). */}
+
+              <a
+                href={dwgUrl || activeMode.linkPath}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-6 items-center justify-center border-2 border-slate-700 bg-slate-900 px-2 text-[10px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
+                title="Open Original DWG"
+              >
+                Original DWG
+              </a>
+              {isMC4 && mc4Toast ? (
+                <div className="mt-1 max-w-[220px] border border-amber-500/70 bg-amber-950/30 px-2 py-1 text-[10px] font-bold text-amber-200">
+                  {mc4Toast}
+                </div>
+              ) : null}
+
+              {stringTextToggleEnabled && (
+                <button
+                  type="button"
+                  onClick={() => setStringTextUserOn((v) => !v)}
+                  className="inline-flex h-6 items-center justify-center border-2 border-slate-700 bg-slate-900 px-2 text-[10px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
+                  title="Toggle string text"
+                >
+                  TEXT {stringTextUserOn ? 'ON' : 'OFF'}
+                </button>
               )}
             </div>
-          </div>
-
-          {/* MVT popups are rendered near click position (not in the fixed right panel). */}
-
-          <a
-             href={dwgUrl || activeMode.linkPath}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex h-6 items-center justify-center border-2 border-slate-700 bg-slate-900 px-2 text-[10px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
-            title="Open Original DWG"
-          >
-            Original DWG
-          </a>
-          {isMC4 && mc4Toast ? (
-            <div className="mt-1 max-w-[220px] border border-amber-500/70 bg-amber-950/30 px-2 py-1 text-[10px] font-bold text-amber-200">
-              {mc4Toast}
-            </div>
-          ) : null}
-
-          {stringTextToggleEnabled && (
-            <button
-              type="button"
-              onClick={() => setStringTextUserOn((v) => !v)}
-              className="inline-flex h-6 items-center justify-center border-2 border-slate-700 bg-slate-900 px-2 text-[10px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
-              title="Toggle string text"
-            >
-              TEXT {stringTextUserOn ? 'ON' : 'OFF'}
-            </button>
           )}
-        </div>
-        )}
 
-        {/* NOTE button (between header and legend, right-aligned with legend/DWG) */}
-        {/* PUNCH_LIST: Note/Punch button is hidden - punch mode is always active */}
-        {!isPL && (
-        <div className="fixed right-3 sm:right-5 top-[20%] z-[1090] note-btn-wrap flex flex-col items-end gap-1">
-          <button
-            type="button"
-            onClick={() => {
-              setNoteMode((prev) => {
-                const next = !prev;
-                if (!next) setSelectedNotes(new Set());
-                return next;
-              });
-            }}
-            aria-pressed={noteMode}
-            aria-label={noteMode ? 'Exit Notes' : 'Notes'}
-            title={noteMode ? 'Exit Notes' : 'Notes'}
-            className="relative inline-flex h-6 items-center justify-center border-2 border-slate-700 bg-slate-900 px-2 text-[10px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
-          >
-            Note
-            {/* Red corner indicator (always visible; pulses only when note mode is active AND hovered) */}
-            <svg
-              className={`note-dot absolute -right-1 -top-1 ${noteMode ? 'h-3 w-3 note-dot--active' : 'h-2 w-2'}`}
-              viewBox="0 0 12 12"
-              aria-hidden="true"
-            >
-              <circle cx="6" cy="6" r="4" fill="#e23a3a" stroke="#7a0f0f" strokeWidth="2" />
-            </svg>
-          </button>
-        </div>
-        )}
+          {/* NOTE button (between header and legend, right-aligned with legend/DWG) */}
+          {/* PUNCH_LIST: Note/Punch button is hidden - punch mode is always active */}
+          {!isPL && (
+            <div className="fixed right-3 sm:right-5 top-[20%] z-[1090] note-btn-wrap flex flex-col items-end gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setNoteMode((prev) => {
+                    const next = !prev;
+                    if (!next) setSelectedNotes(new Set());
+                    return next;
+                  });
+                }}
+                aria-pressed={noteMode}
+                aria-label={noteMode ? 'Exit Notes' : 'Notes'}
+                title={noteMode ? 'Exit Notes' : 'Notes'}
+                className="relative inline-flex h-6 items-center justify-center border-2 border-slate-700 bg-slate-900 px-2 text-[10px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
+              >
+                Note
+                {/* Red corner indicator (always visible; pulses only when note mode is active AND hovered) */}
+                <svg
+                  className={`note-dot absolute -right-1 -top-1 ${noteMode ? 'h-3 w-3 note-dot--active' : 'h-2 w-2'}`}
+                  viewBox="0 0 12 12"
+                  aria-hidden="true"
+                >
+                  <circle cx="6" cy="6" r="4" fill="#e23a3a" stroke="#7a0f0f" strokeWidth="2" />
+                </svg>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -17521,8 +17854,8 @@ export default function BaseModule({
                 {lvttPopup.mode === 'termination'
                   ? 'LV Termination'
                   : lvttPopup.mode === 'sub_termination'
-                  ? 'LV Termination'
-                  : 'LV Testing'}
+                    ? 'LV Termination'
+                    : 'LV Testing'}
               </div>
               <div className="mt-1 text-sm font-extrabold text-slate-100 truncate">
                 {lvttPopup.mode === 'sub_termination'
@@ -17649,9 +17982,8 @@ export default function BaseModule({
                             const n = Math.max(0, Math.min(3, parseInt(v, 10)));
                             if (Number.isFinite(n)) setDraft(n);
                           }}
-                          className={`w-14 h-8 border-2 bg-slate-900 px-2 text-center text-[13px] font-black tabular-nums outline-none ${
-                            draft === 3 ? 'border-emerald-700 text-emerald-200' : 'border-red-700 text-red-200'
-                          }`}
+                          className={`w-14 h-8 border-2 bg-slate-900 px-2 text-center text-[13px] font-black tabular-nums outline-none ${draft === 3 ? 'border-emerald-700 text-emerald-200' : 'border-red-700 text-red-200'
+                            }`}
                           title="Enter 0..3"
                         />
                       </div>
@@ -17665,9 +17997,8 @@ export default function BaseModule({
                         applyDraft(v);
                         openNextInv(v);
                       }}
-                      className={`flex-1 h-8 border-2 text-[11px] font-extrabold uppercase tracking-wide ${
-                        'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
-                      }`}
+                      className={`flex-1 h-8 border-2 text-[11px] font-extrabold uppercase tracking-wide ${'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
+                        }`}
                       title="Apply and open next inverter"
                     >
                       Next
@@ -17680,9 +18011,8 @@ export default function BaseModule({
                         applyDraft(v);
                         setLvttPopup(null);
                       }}
-                      className={`flex-1 h-8 border-2 text-[11px] font-extrabold uppercase tracking-wide ${
-                        'border-emerald-700 bg-emerald-950/30 text-emerald-200 hover:bg-emerald-950/40'
-                      }`}
+                      className={`flex-1 h-8 border-2 text-[11px] font-extrabold uppercase tracking-wide ${'border-emerald-700 bg-emerald-950/30 text-emerald-200 hover:bg-emerald-950/40'
+                        }`}
                       title="Apply"
                     >
                       OK
@@ -17747,11 +18077,10 @@ export default function BaseModule({
                           const n = Math.max(0, Math.min(maxInv, parseInt(v, 10)));
                           if (Number.isFinite(n)) setDraft(n);
                         }}
-                        className={`w-20 h-8 border-2 bg-slate-900 px-2 text-center text-[13px] font-black tabular-nums outline-none ${
-                          complete
-                            ? 'border-emerald-700 text-emerald-200'
-                            : 'border-red-700 text-red-200'
-                        }`}
+                        className={`w-20 h-8 border-2 bg-slate-900 px-2 text-center text-[13px] font-black tabular-nums outline-none ${complete
+                          ? 'border-emerald-700 text-emerald-200'
+                          : 'border-red-700 text-red-200'
+                          }`}
                         title={`Enter 0..${maxInv}`}
                       />
                     </div>
@@ -17777,7 +18106,7 @@ export default function BaseModule({
               {(['L1', 'L2', 'L3']).map((ph) => {
                 const invNorm = normalizeId(lvttPopup.invIdNorm);
                 const live = lvttTestCsvByInvRef.current?.[invNorm]?.[ph];
-                const obj = (live && typeof live === 'object') ? live : { value: '', status: 'N/A' }; 
+                const obj = (live && typeof live === 'object') ? live : { value: '', status: 'N/A' };
                 const statusRaw = String(obj?.status || 'N/A').trim();
                 const statusU = statusRaw.toUpperCase();
                 const val = String(obj?.value || '').trim();
@@ -17929,11 +18258,10 @@ export default function BaseModule({
                   try { localStorage.removeItem('cew:dcct:test_results_submitted'); } catch (_e) { void _e; }
                   setStringMatchVersion((v) => v + 1);
                 }}
-                className={`h-7 w-[140px] border border-slate-700 bg-slate-900 px-2 text-[11px] font-black uppercase tracking-wide outline-none focus:border-amber-400 ${
-                  dcctPopup.draftStatus === 'passed'
-                    ? 'text-emerald-300'
-                    : (dcctPopup.draftStatus === 'failed' ? 'text-red-300' : 'text-white')
-                }`}
+                className={`h-7 w-[140px] border border-slate-700 bg-slate-900 px-2 text-[11px] font-black uppercase tracking-wide outline-none focus:border-amber-400 ${dcctPopup.draftStatus === 'passed'
+                  ? 'text-emerald-300'
+                  : (dcctPopup.draftStatus === 'failed' ? 'text-red-300' : 'text-white')
+                  }`}
                 aria-label="Status"
               >
                 <option value="">NOT TESTED</option>
@@ -18053,11 +18381,10 @@ export default function BaseModule({
                   try { localStorage.removeItem('cew:dctt:test_results_submitted'); } catch (_e) { void _e; }
                   setStringMatchVersion((v) => v + 1);
                 }}
-                className={`h-7 w-[140px] border border-slate-700 bg-slate-900 px-2 text-[11px] font-black uppercase tracking-wide outline-none focus:border-amber-400 ${
-                  dcttTestPopup.draftStatus === 'passed'
-                    ? 'text-emerald-300'
-                    : (dcttTestPopup.draftStatus === 'failed' ? 'text-red-300' : 'text-white')
-                }`}
+                className={`h-7 w-[140px] border border-slate-700 bg-slate-900 px-2 text-[11px] font-black uppercase tracking-wide outline-none focus:border-amber-400 ${dcttTestPopup.draftStatus === 'passed'
+                  ? 'text-emerald-300'
+                  : (dcttTestPopup.draftStatus === 'failed' ? 'text-red-300' : 'text-white')
+                  }`}
                 aria-label="Status"
               >
                 <option value="">NOT TESTED</option>
@@ -18149,9 +18476,8 @@ export default function BaseModule({
                         if (!Number.isFinite(n)) return;
                         setDraft(n);
                       }}
-                      className={`w-24 h-8 border-2 bg-slate-900 px-2 text-center text-[13px] font-black tabular-nums outline-none ${
-                        complete ? 'border-emerald-700 text-emerald-200' : 'border-red-700 text-red-200'
-                      }`}
+                      className={`w-24 h-8 border-2 bg-slate-900 px-2 text-center text-[13px] font-black tabular-nums outline-none ${complete ? 'border-emerald-700 text-emerald-200' : 'border-red-700 text-red-200'
+                        }`}
                       title={max > 0 ? `Enter 0..${max}` : 'Max not found in dc_strings.csv'}
                     />
                   </div>
@@ -18255,9 +18581,8 @@ export default function BaseModule({
                         if (!Number.isFinite(n)) return;
                         setDraft(n);
                       }}
-                      className={`w-24 h-8 border-2 bg-slate-900 px-2 text-center text-[13px] font-black tabular-nums outline-none ${
-                        complete ? 'border-emerald-700 text-emerald-200' : 'border-red-700 text-red-200'
-                      }`}
+                      className={`w-24 h-8 border-2 bg-slate-900 px-2 text-center text-[13px] font-black tabular-nums outline-none ${complete ? 'border-emerald-700 text-emerald-200' : 'border-red-700 text-red-200'
+                        }`}
                       title={max > 0 ? `Enter 0..${max}` : 'Max not found in CSV'}
                     />
                   </div>
@@ -18410,9 +18735,8 @@ export default function BaseModule({
                           const n = clampMvtTerminationCount(stationNorm, parseInt(v, 10));
                           if (Number.isFinite(n)) setDraft(n);
                         }}
-                        className={`w-14 h-8 border-2 bg-slate-900 px-2 text-center text-[13px] font-black tabular-nums outline-none ${
-                          locked ? 'border-slate-700 text-slate-500 cursor-not-allowed' : (max > 0 && draft === max ? 'border-emerald-700 text-emerald-200' : 'border-red-700 text-red-200')
-                        }`}
+                        className={`w-14 h-8 border-2 bg-slate-900 px-2 text-center text-[13px] font-black tabular-nums outline-none ${locked ? 'border-slate-700 text-slate-500 cursor-not-allowed' : (max > 0 && draft === max ? 'border-emerald-700 text-emerald-200' : 'border-red-700 text-red-200')
+                          }`}
                         title={max ? `Enter 0..${max}` : 'Enter value'}
                       />
                     </div>
@@ -18428,9 +18752,8 @@ export default function BaseModule({
                       applyDraft(draft);
                       openNextStation();
                     }}
-                    className={`flex-1 h-8 border-2 text-[11px] font-extrabold uppercase tracking-wide ${
-                      locked ? 'border-slate-700 bg-slate-900/40 text-slate-500 cursor-not-allowed' : 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
-                    }`}
+                    className={`flex-1 h-8 border-2 text-[11px] font-extrabold uppercase tracking-wide ${locked ? 'border-slate-700 bg-slate-900/40 text-slate-500 cursor-not-allowed' : 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
+                      }`}
                     title={locked ? (max ? `Locked at ${max}/${max}` : 'Locked') : 'Apply and open next station'}
                   >
                     Next
@@ -18443,9 +18766,8 @@ export default function BaseModule({
                       applyDraft(draft);
                       setMvtTermPopup(null);
                     }}
-                    className={`flex-1 h-8 border-2 text-[11px] font-extrabold uppercase tracking-wide ${
-                      locked ? 'border-slate-700 bg-slate-900/40 text-slate-500 cursor-not-allowed' : 'border-emerald-700 bg-emerald-950/30 text-emerald-200 hover:bg-emerald-950/40'
-                    }`}
+                    className={`flex-1 h-8 border-2 text-[11px] font-extrabold uppercase tracking-wide ${locked ? 'border-slate-700 bg-slate-900/40 text-slate-500 cursor-not-allowed' : 'border-emerald-700 bg-emerald-950/30 text-emerald-200 hover:bg-emerald-950/40'
+                      }`}
                     title="Apply"
                   >
                     OK
@@ -18458,7 +18780,40 @@ export default function BaseModule({
       ) : null}
 
       {_customFooter}
-      
+
+      {/* PL Legend Bar */}
+      {isPL && (
+        <div className="fixed bottom-4 left-4 z-[400] flex gap-2">
+          <div className="bg-slate-900/90 border border-slate-700 shadow-xl p-2 flex gap-3 items-center rounded">
+            <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Legend</span>
+
+            {/* Contractor Dropdown Trigger */}
+            <button
+              id="pl-contractor-btn"
+              onClick={(e) => { e.stopPropagation(); setPlContractorDropdownOpen(!plContractorDropdownOpen); setPlDisciplineDropdownOpen(false); }}
+              className="flex items-center gap-2 bg-slate-800 border border-slate-600 px-2 py-1 hover:border-amber-400 transition-colors rounded min-w-[120px] justify-between"
+            >
+              <span className="text-xs font-bold text-white max-w-[100px] truncate">
+                {plSelectedContractorId ? plGetContractor(plSelectedContractorId)?.name : 'All Contractors'}
+              </span>
+              <span className="text-[8px] text-slate-400">▼</span>
+            </button>
+
+            {/* Discipline Dropdown Trigger (Live Filter) */}
+            <button
+              id="pl-discipline-btn"
+              onClick={(e) => { e.stopPropagation(); setPlDisciplineDropdownOpen(!plDisciplineDropdownOpen); setPlContractorDropdownOpen(false); }}
+              className="flex items-center gap-2 bg-slate-800 border border-slate-600 px-2 py-1 hover:border-amber-400 transition-colors rounded min-w-[120px] justify-between"
+            >
+              <span className="text-xs font-bold text-white max-w-[100px] truncate">
+                {plSelectedDisciplineFilter || 'All Disciplines'}
+              </span>
+              <span className="text-[8px] text-slate-400">▼</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Note Edit Popup */}
       {editingNote && (
         <div
@@ -18481,9 +18836,9 @@ export default function BaseModule({
                       <stop offset="100%" stopColor="#dc2626" />
                     </linearGradient>
                   </defs>
-                  <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 20 12 20s12-11 12-20c0-6.6-5.4-12-12-12z" fill="url(#popupPinGrad)"/>
-                  <circle cx="12" cy="11" r="5" fill="white" opacity="0.9"/>
-                  <circle cx="12" cy="11" r="3" fill="#dc2626"/>
+                  <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 20 12 20s12-11 12-20c0-6.6-5.4-12-12-12z" fill="url(#popupPinGrad)" />
+                  <circle cx="12" cy="11" r="5" fill="white" opacity="0.9" />
+                  <circle cx="12" cy="11" r="3" fill="#dc2626" />
                 </svg>
                 Note
               </h3>
@@ -18582,7 +18937,7 @@ export default function BaseModule({
         const margin = 20;
         let popupX = (plPopupPosition?.x || window.innerWidth / 2) + margin;
         let popupY = (plPopupPosition?.y || window.innerHeight / 2) - popupHeight / 2;
-        
+
         // Adjust if would go off-screen right
         if (popupX + popupWidth > window.innerWidth - margin) {
           popupX = (plPopupPosition?.x || window.innerWidth / 2) - popupWidth - margin;
@@ -18595,183 +18950,203 @@ export default function BaseModule({
         if (popupY < margin) {
           popupY = margin;
         }
-        
+
         return (
-        <div
-          className="punch-popup-overlay"
-          onClick={() => {
-            setPlEditingPunch(null);
-            setPlPunchText('');
-            setPlPunchContractorId(null);
-            setPlPunchPhotoDataUrl(null);
-            setPlPunchPhotoName('');
-            setPlPopupPosition(null);
-          }}
-        >
-          <div 
-            className="punch-popup-compact" 
-            onClick={(e) => e.stopPropagation()}
-            style={{ left: popupX, top: popupY }}
+          <div
+            className="punch-popup-overlay"
+            onClick={() => {
+              setPlEditingPunch(null);
+              setPlPunchText('');
+              setPlPunchContractorId(null);
+              setPlPunchDiscipline('');
+              setPlPunchPhotoDataUrl(null);
+              setPlPunchPhotoName('');
+              setPlPopupPosition(null);
+            }}
           >
-            <div 
-              className="punch-popup-header-compact punch-popup-draggable"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                const startX = e.clientX;
-                const startY = e.clientY;
-                const startLeft = popupX;
-                const startTop = popupY;
-                
-                const onMouseMove = (ev) => {
-                  const dx = ev.clientX - startX;
-                  const dy = ev.clientY - startY;
-                  setPlPopupPosition({ x: startLeft + dx - 20, y: startTop + dy + 160 });
-                };
-                
-                const onMouseUp = () => {
-                  document.removeEventListener('mousemove', onMouseMove);
-                  document.removeEventListener('mouseup', onMouseUp);
-                };
-                
-                document.addEventListener('mousemove', onMouseMove);
-                document.addEventListener('mouseup', onMouseUp);
-              }}
+            <div
+              className="punch-popup-compact"
+              onClick={(e) => e.stopPropagation()}
+              style={{ left: popupX, top: popupY }}
             >
-              <h3>
-                <span
-                  className="inline-block h-3 w-3 rounded-full border border-white/40"
-                  style={{ backgroundColor: plGetContractor(plPunchContractorId)?.color || '#888' }}
-                />
-                Punch
-              </h3>
-              <button
-                className="punch-close-btn-compact"
-                onClick={() => {
-                  setPlEditingPunch(null);
-                  setPlPunchText('');
-                  setPlPunchContractorId(null);
-                  setPlPunchPhotoDataUrl(null);
-                  setPlPunchPhotoName('');
-                  setPlPopupPosition(null);
+              <div
+                className="punch-popup-header-compact punch-popup-draggable"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  const startX = e.clientX;
+                  const startY = e.clientY;
+                  const startLeft = popupX;
+                  const startTop = popupY;
+
+                  const onMouseMove = (ev) => {
+                    const dx = ev.clientX - startX;
+                    const dy = ev.clientY - startY;
+                    setPlPopupPosition({ x: startLeft + dx - 20, y: startTop + dy + 160 });
+                  };
+
+                  const onMouseUp = () => {
+                    document.removeEventListener('mousemove', onMouseMove);
+                    document.removeEventListener('mouseup', onMouseUp);
+                  };
+
+                  document.addEventListener('mousemove', onMouseMove);
+                  document.addEventListener('mouseup', onMouseUp);
                 }}
               >
-                ×
-              </button>
-            </div>
-
-            {/* Contractor selector */}
-            <div className="punch-form-row-compact">
-              <select
-                className="punch-select-compact"
-                value={plPunchContractorId || ''}
-                onChange={(e) => setPlPunchContractorId(e.target.value || null)}
-              >
-                <option value="">Contractor...</option>
-                {plContractors.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Photo section */}
-            <div className="punch-photo-section-compact">
-              <input
-                ref={plPunchPhotoInputRef}
-                type="file"
-                accept="image/*"
-                style={{ display: 'none' }}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  handlePlPunchPhotoSelected(file);
-                  e.target.value = '';
-                }}
-              />
-              <button
-                className="punch-btn-photo-compact"
-                onClick={() => plPunchPhotoInputRef.current?.click()}
-                type="button"
-              >
-                📷
-              </button>
-              {plPunchPhotoDataUrl && (
+                <h3>
+                  <span
+                    className="inline-block h-3 w-3 rounded-full border border-white/40"
+                    style={{ backgroundColor: plGetContractor(plPunchContractorId)?.color || '#888' }}
+                  />
+                  Punch
+                </h3>
                 <button
-                  className="punch-btn-remove-photo-compact"
+                  className="punch-close-btn-compact"
                   onClick={() => {
+                    setPlEditingPunch(null);
+                    setPlPunchText('');
+                    setPlPunchContractorId(null);
                     setPlPunchPhotoDataUrl(null);
                     setPlPunchPhotoName('');
+                    setPlPopupPosition(null);
                   }}
+                >
+                  ×
+                </button>
+              </div>
+
+              {/* Contractor selector */}
+              <div className="punch-form-row-compact">
+                <select
+                  className="punch-select-compact"
+                  value={plPunchContractorId || ''}
+                  onChange={(e) => setPlPunchContractorId(e.target.value || null)}
+                >
+                  <option value="">Contractor...</option>
+                  {plContractors.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Discipline selector */}
+              {plDisciplines.length > 0 && (
+                <div className="punch-form-row-compact">
+                  <select
+                    className="punch-select-compact"
+                    value={plPunchDiscipline || ''}
+                    onChange={(e) => setPlPunchDiscipline(e.target.value || '')}
+                  >
+                    <option value="">Discipline...</option>
+                    {plDisciplines.map((d) => (
+                      <option key={d.id} value={d.name}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+
+              {/* Photo section */}
+              <div className="punch-photo-section-compact">
+                <input
+                  ref={plPunchPhotoInputRef}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    handlePlPunchPhotoSelected(file);
+                    e.target.value = '';
+                  }}
+                />
+                <button
+                  className="punch-btn-photo-compact"
+                  onClick={() => plPunchPhotoInputRef.current?.click()}
                   type="button"
                 >
-                  ✕
+                  📷
                 </button>
-              )}
-            </div>
-
-            {plPunchPhotoDataUrl && (
-              <div 
-                className="punch-photo-preview-medium"
-                onClick={(e) => {
-                  // Open lightbox on click
-                  e.stopPropagation();
-                  // Position lightbox dynamically - offset from popup
-                  const lightboxX = popupX + 280;
-                  const lightboxY = popupY;
-                  // If would go off-screen right, put it on the left
-                  const finalX = lightboxX + 350 > window.innerWidth ? popupX - 370 : lightboxX;
-                  setPlPhotoLightbox({ url: plPunchPhotoDataUrl, name: plPunchPhotoName, x: finalX, y: lightboxY });
-                }}
-                title="Click to enlarge"
-              >
-                <img src={plPunchPhotoDataUrl} alt={plPunchPhotoName || 'Punch attachment'} draggable={false} />
-                <div className="punch-photo-zoom-hint">🔍 Click to enlarge</div>
+                {plPunchPhotoDataUrl && (
+                  <button
+                    className="punch-btn-remove-photo-compact"
+                    onClick={() => {
+                      setPlPunchPhotoDataUrl(null);
+                      setPlPunchPhotoName('');
+                    }}
+                    type="button"
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
-            )}
 
-            {/* Description */}
-            <div className="punch-form-row-compact">
-              <textarea
-                className="punch-textarea-compact"
-                value={plPunchText}
-                onChange={(e) => setPlPunchText(e.target.value)}
-                placeholder="Description..."
-                autoFocus
-              />
-            </div>
-
-            {/* Actions - compact */}
-            <div className="punch-actions-compact">
-              <button className="punch-btn-delete-compact" onClick={() => plDeletePunch(plEditingPunch.id)} title="Delete">
-                🗑️
-              </button>
-              {!plEditingPunch.completed ? (
-                <button
-                  className="punch-btn-done-compact"
-                  onClick={() => plMarkPunchCompleted(plEditingPunch.id)}
-                  title="Mark as completed"
+              {plPunchPhotoDataUrl && (
+                <div
+                  className="punch-photo-preview-medium"
+                  onClick={(e) => {
+                    // Open lightbox on click
+                    e.stopPropagation();
+                    // Position lightbox dynamically - offset from popup
+                    const lightboxX = popupX + 280;
+                    const lightboxY = popupY;
+                    // If would go off-screen right, put it on the left
+                    const finalX = lightboxX + 350 > window.innerWidth ? popupX - 370 : lightboxX;
+                    setPlPhotoLightbox({ url: plPunchPhotoDataUrl, name: plPunchPhotoName, x: finalX, y: lightboxY });
+                  }}
+                  title="Click to enlarge"
                 >
-                  ✓
-                </button>
-              ) : (
-                <button
-                  className="punch-btn-uncomplete-compact"
-                  onClick={() => plMarkPunchUncompleted(plEditingPunch.id)}
-                  title="Mark as uncompleted"
-                >
-                  ↩
-                </button>
+                  <img src={plPunchPhotoDataUrl} alt={plPunchPhotoName || 'Punch attachment'} draggable={false} />
+                  <div className="punch-photo-zoom-hint">🔍 Click to enlarge</div>
+                </div>
               )}
-              <button className="punch-btn-save-compact" onClick={plSavePunch} title="Save">
-                💾
-              </button>
-            </div>
 
-            {plEditingPunch.completed && (
-              <div className="punch-completed-badge">✓ COMPLETED</div>
-            )}
+              {/* Description */}
+              <div className="punch-form-row-compact">
+                <textarea
+                  className="punch-textarea-compact"
+                  value={plPunchText}
+                  onChange={(e) => setPlPunchText(e.target.value)}
+                  placeholder="Description..."
+                  autoFocus
+                />
+              </div>
+
+              {/* Actions - compact */}
+              <div className="punch-actions-compact">
+                <button className="punch-btn-delete-compact" onClick={() => plDeletePunch(plEditingPunch.id)} title="Delete">
+                  🗑️
+                </button>
+                {!plEditingPunch.completed ? (
+                  <button
+                    className="punch-btn-done-compact"
+                    onClick={() => plMarkPunchCompleted(plEditingPunch.id)}
+                    title="Mark as completed"
+                  >
+                    ✓
+                  </button>
+                ) : (
+                  <button
+                    className="punch-btn-uncomplete-compact"
+                    onClick={() => plMarkPunchUncompleted(plEditingPunch.id)}
+                    title="Mark as uncompleted"
+                  >
+                    ↩
+                  </button>
+                )}
+                <button className="punch-btn-save-compact" onClick={plSavePunch} title="Save">
+                  💾
+                </button>
+              </div>
+
+              {plEditingPunch.completed && (
+                <div className="punch-completed-badge">✓ COMPLETED</div>
+              )}
+            </div>
           </div>
-        </div>
         );
       })()}
 
@@ -18787,47 +19162,47 @@ export default function BaseModule({
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => {
               e.preventDefault();
-              
+
               // Middle mouse button (button === 1) = pan the image
               if (e.button === 1) {
                 const startX = e.clientX;
                 const startY = e.clientY;
                 const startPanX = plPhotoLightbox.panX || 0;
                 const startPanY = plPhotoLightbox.panY || 0;
-                
+
                 const onMouseMove = (ev) => {
                   const dx = ev.clientX - startX;
                   const dy = ev.clientY - startY;
                   setPlPhotoLightbox(prev => ({ ...prev, panX: startPanX + dx, panY: startPanY + dy }));
                 };
-                
+
                 const onMouseUp = () => {
                   document.removeEventListener('mousemove', onMouseMove);
                   document.removeEventListener('mouseup', onMouseUp);
                 };
-                
+
                 document.addEventListener('mousemove', onMouseMove);
                 document.addEventListener('mouseup', onMouseUp);
                 return;
               }
-              
+
               // Left mouse button = drag the lightbox
               const startX = e.clientX;
               const startY = e.clientY;
               const startLeft = plPhotoLightbox.x;
               const startTop = plPhotoLightbox.y;
-              
+
               const onMouseMove = (ev) => {
                 const dx = ev.clientX - startX;
                 const dy = ev.clientY - startY;
                 setPlPhotoLightbox(prev => ({ ...prev, x: startLeft + dx, y: startTop + dy }));
               };
-              
+
               const onMouseUp = () => {
                 document.removeEventListener('mousemove', onMouseMove);
                 document.removeEventListener('mouseup', onMouseUp);
               };
-              
+
               document.addEventListener('mousemove', onMouseMove);
               document.addEventListener('mouseup', onMouseUp);
             }}
@@ -18849,533 +19224,631 @@ export default function BaseModule({
             >
               ×
             </button>
-            <img 
-              src={plPhotoLightbox.url} 
-              alt={plPhotoLightbox.name || 'Punch photo'} 
-              draggable={false}
-              style={{ 
-                transform: `scale(${plPhotoLightbox.zoom || 1}) translate(${(plPhotoLightbox.panX || 0) / (plPhotoLightbox.zoom || 1)}px, ${(plPhotoLightbox.panY || 0) / (plPhotoLightbox.zoom || 1)}px)` 
-              }}
-            />
+            <div className="punch-lightbox-content">
+              <img
+                src={plPhotoLightbox.url}
+                alt={plPhotoLightbox.name || 'Punch attachment'}
+                style={{
+                  transform: `scale(${plPhotoLightbox.zoom || 1}) translate(${(plPhotoLightbox.panX || 0) / (plPhotoLightbox.zoom || 1)}px, ${(plPhotoLightbox.panY || 0) / (plPhotoLightbox.zoom || 1)}px)`
+                }}
+                draggable={false}
+              />
+            </div>
             <div className="punch-lightbox-zoom-hint">
               🖱️ Scroll: Zoom ({Math.round((plPhotoLightbox.zoom || 1) * 100)}%) | Middle click + drag: Pan
+            </div>
+            <div className="punch-lightbox-caption">{plPhotoLightbox.name}</div>
+          </div>
+        </div>
+      )}
+
+      {/* PL Submit Modal */}
+      {isPL && plShowSubmitModal && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="w-[400px] border-2 border-slate-700 bg-slate-900 p-6 shadow-2xl">
+            <h2 className="mb-4 text-xl font-bold text-white">Submit Punch List</h2>
+            <div className="mb-4 text-sm text-slate-300">
+              <p>This will create a snapshot of the current punches in History.</p>
+              <p>Current punches will remain on the map.</p>
+              <div className="mt-2 text-xs">
+                Open: {plPunches.filter(p => !p.completed).length},
+                Completed: {plPunches.filter(p => p.completed).length}
+              </div>
+            </div>
+            <div className="mb-6">
+              <label className="mb-1 block text-xs font-bold uppercase text-slate-400">Punch List Name / Reference</label>
+              <input
+                type="text"
+                className="w-full border border-slate-600 bg-slate-800 px-3 py-2 text-white outline-none focus:border-amber-400"
+                placeholder="e.g. Block A Inspection 1"
+                value={plSubmitName}
+                onChange={(e) => setPlSubmitName(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                className="px-4 py-2 text-sm font-bold text-slate-400 hover:text-white"
+                onClick={() => setPlShowSubmitModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="bg-amber-600 px-6 py-2 text-sm font-bold text-white hover:bg-amber-500"
+                onClick={plSubmitPunchList}
+              >
+                Submit Snapshot
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ─────────────────────────────────────────────────────────────────
-          PUNCH LIST: Contractor Dropdown Menu (appears below button)
-          ───────────────────────────────────────────────────────────────── */}
-      {isPL && plContractorDropdownOpen && !plShowAddContractorForm && !plEditingContractor && (() => {
-        // Position dropdown below the contractor button
-        const btn = document.getElementById('pl-contractor-btn');
-        const btnRect = btn?.getBoundingClientRect();
-        const dropdownTop = btnRect ? btnRect.bottom + 4 : 300;
-        const dropdownRight = btnRect ? (window.innerWidth - btnRect.right) : 12;
-        
+      {/* PL History Panel (Draggable, Non-blocking) */}
+      {isPL && historyOpen && (() => {
+        const viewingRecord = plViewingHistoryId ? plHistory.find(r => r.id === plViewingHistoryId) : null;
+
         return (
-        <div
-          className="contractor-dropdown-overlay"
-          onClick={() => setPlContractorDropdownOpen(false)}
-        >
-          <div 
-            className="contractor-dropdown-menu"
-            style={{ top: dropdownTop, right: dropdownRight }}
-            onClick={(e) => e.stopPropagation()}
+          <div
+            className="fixed z-[1900] h-[650px] w-[950px] flex flex-col border-2 border-slate-700 bg-slate-900 shadow-2xl"
+            style={{ left: plHistoryPos.x, top: plHistoryPos.y }}
           >
-            {/* Contractor List (if contractors exist) */}
-            {plContractors.length > 0 && (
-              <div className="contractor-dropdown-list">
-                {plContractors.map((c) => (
-                  <div
-                    key={c.id}
-                    className={`contractor-dropdown-item ${plSelectedContractorId === c.id ? 'selected' : ''}`}
-                    onClick={() => {
-                      setPlSelectedContractorId(c.id);
-                      setPlContractorDropdownOpen(false);
-                    }}
-                  >
-                    <span className="contractor-color-dot" style={{ backgroundColor: c.color }} />
-                    <span className="contractor-name">{c.name}</span>
-                    <button
-                      type="button"
-                      className="contractor-dropdown-edit"
-                      title="Edit"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPlEditingContractor(c);
-                        setPlEditContractorName(c.name);
-                        setPlEditContractorColor(c.color);
-                      }}
-                    >
-                      ✎
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            {/* Add Contractor option - always visible */}
-            <div 
-              className="contractor-dropdown-add"
-              onClick={() => {
-                setPlShowAddContractorForm(true);
-              }}
+            {/* Draggable Header */}
+            <div
+              className="flex items-center justify-between border-b border-slate-700 bg-slate-800 px-4 py-3 cursor-move select-none"
+              onMouseDown={plHistoryDragStart}
             >
-              <span className="contractor-add-icon">+</span>
-              <span>Add Contractor</span>
+              <div className="flex items-center gap-3">
+                {viewingRecord && (
+                  <button
+                    className="text-slate-400 hover:text-white text-lg"
+                    onClick={() => setPlViewingHistoryId(null)}
+                    title="Back to list"
+                  >
+                    ←
+                  </button>
+                )}
+                <h2 className="text-lg font-bold text-white">
+                  {viewingRecord ? viewingRecord.name : 'Punch List History'}
+                </h2>
+              </div>
+              <button
+                className="text-slate-400 hover:text-white text-xl"
+                onClick={() => { setHistoryOpen(false); setPlViewingHistoryId(null); }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Content Area */}
+            <div className="flex-1 overflow-auto">
+              {!viewingRecord ? (
+                /* ═══════════════ ALL HISTORY SUMMARY VIEW ═══════════════ */
+                <div className="p-4">
+                  {plHistory.length === 0 ? (
+                    <div className="py-12 text-center text-slate-500">No history records found.</div>
+                  ) : (
+                    <table className="w-full border-collapse text-sm">
+                      <thead>
+                        <tr className="bg-slate-800 text-slate-300 text-left">
+                          <th className="px-3 py-2 border-b border-slate-700 font-semibold">Punch List</th>
+                          <th className="px-3 py-2 border-b border-slate-700 font-semibold">First Created</th>
+                          <th className="px-3 py-2 border-b border-slate-700 font-semibold">Last Updated</th>
+                          <th className="px-3 py-2 border-b border-slate-700 font-semibold text-center">Total Punch</th>
+                          <th className="px-3 py-2 border-b border-slate-700 font-semibold text-center">Open</th>
+                          <th className="px-3 py-2 border-b border-slate-700 font-semibold text-center">Closed</th>
+                          <th className="px-3 py-2 border-b border-slate-700 font-semibold text-center">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {plHistory.map(record => (
+                          <tr
+                            key={record.id}
+                            className="hover:bg-slate-800/50 cursor-pointer"
+                            onClick={() => setPlViewingHistoryId(record.id)}
+                          >
+                            <td className="px-3 py-2 border-b border-slate-700 text-white font-medium">{record.name}</td>
+                            <td className="px-3 py-2 border-b border-slate-700 text-slate-400">{new Date(record.createdAt).toLocaleString()}</td>
+                            <td className="px-3 py-2 border-b border-slate-700 text-slate-400">{new Date(record.updatedAt || record.createdAt).toLocaleString()}</td>
+                            <td className="px-3 py-2 border-b border-slate-700 text-center text-white">{record.punches?.length || 0}</td>
+                            <td className="px-3 py-2 border-b border-slate-700 text-center text-red-400">{record.openCount || 0}</td>
+                            <td className="px-3 py-2 border-b border-slate-700 text-center text-emerald-400">{record.closedCount || 0}</td>
+                            <td className="px-3 py-2 border-b border-slate-700 text-center" onClick={e => e.stopPropagation()}>
+                              <button
+                                onClick={() => setPlViewingHistoryId(record.id)}
+                                className="bg-slate-700 px-2 py-1 text-xs font-bold text-white hover:bg-slate-600 mr-1"
+                              >
+                                View
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              ) : (
+                /* ═══════════════ SINGLE PUNCH LIST DETAIL VIEW ═══════════════ */
+                <div className="p-4">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs text-slate-400">Created: {new Date(viewingRecord.createdAt).toLocaleString()}</div>
+                      <div className="mt-1 text-sm">
+                        <span className="mr-4 text-red-400">Open: {viewingRecord.openCount || 0}</span>
+                        <span className="text-emerald-400">Closed: {viewingRecord.closedCount || 0}</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => plExportHistoryRecord(viewingRecord.id, 'excel')}
+                        className="bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-600"
+                      >
+                        Export Excel
+                      </button>
+                      <button
+                        onClick={() => plExportHistoryRecord(viewingRecord.id, 'pdf')}
+                        className="bg-red-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-600"
+                      >
+                        Export PDF
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Punches Table */}
+                  <table className="w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-slate-800 text-slate-300 text-left">
+                        <th className="px-3 py-2 border-b border-slate-700 font-semibold">Punch No</th>
+                        <th className="px-3 py-2 border-b border-slate-700 font-semibold">Date & Time</th>
+                        <th className="px-3 py-2 border-b border-slate-700 font-semibold">Contractor</th>
+                        <th className="px-3 py-2 border-b border-slate-700 font-semibold">Discipline</th>
+                        <th className="px-3 py-2 border-b border-slate-700 font-semibold">Description</th>
+                        <th className="px-3 py-2 border-b border-slate-700 font-semibold text-center">Photo</th>
+                        <th className="px-3 py-2 border-b border-slate-700 font-semibold text-center">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(viewingRecord.punches || []).map((punch, idx) => (
+                        <tr key={punch.id || idx} className="hover:bg-slate-800/30">
+                          <td className="px-3 py-2 border-b border-slate-700 text-white font-mono">{punch.punchNo || `#${idx + 1}`}</td>
+                          <td className="px-3 py-2 border-b border-slate-700 text-slate-400">{punch.createdAt ? new Date(punch.createdAt).toLocaleString() : '-'}</td>
+                          <td className="px-3 py-2 border-b border-slate-700">
+                            <span className="flex items-center gap-2">
+                              <span className="w-3 h-3 rounded-full" style={{ backgroundColor: punch.contractorColor || '#888' }}></span>
+                              <span className="text-white">{punch.contractorName || '-'}</span>
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 border-b border-slate-700 text-slate-300">{punch.discipline || '-'}</td>
+                          <td className="px-3 py-2 border-b border-slate-700 text-slate-400 max-w-[200px] truncate">{punch.description || '-'}</td>
+                          <td className="px-3 py-2 border-b border-slate-700 text-center">
+                            {punch.photoUrl ? (
+                              <a href={punch.photoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline text-xs">View</a>
+                            ) : '-'}
+                          </td>
+                          <td className="px-3 py-2 border-b border-slate-700 text-center">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                plTogglePunchStatus(viewingRecord.id, punch.id);
+                              }}
+                              className={`px-2 py-0.5 text-xs font-bold rounded border transition-colors border-transparent ${punch.completed ? 'bg-emerald-900/50 text-emerald-400 hover:border-emerald-500' : 'bg-slate-800 text-slate-400 hover:border-slate-500 hover:text-white'}`}
+                              title={punch.completed ? 'Mark as Open' : 'Mark as Closed'}
+                            >
+                              {punch.completed ? 'Closed' : 'Open'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {(!viewingRecord.punches || viewingRecord.punches.length === 0) && (
+                    <div className="py-8 text-center text-slate-500">No punches in this list.</div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Footer with Export All Summary */}
+            <div className="border-t border-slate-700 bg-slate-800 px-4 py-3 flex justify-between items-center">
+              <div className="text-xs text-slate-400">
+                {viewingRecord
+                  ? `${viewingRecord.punches?.length || 0} punch(es)`
+                  : `${plHistory.length} punch list(s)`}
+              </div>
+              {!viewingRecord && plHistory.length > 0 && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => plExportAllHistorySummary('excel')}
+                    className="bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-600"
+                  >
+                    Export All Summary (Excel)
+                  </button>
+                  <button
+                    onClick={() => plExportAllHistorySummary('pdf')}
+                    className="bg-red-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-600"
+                  >
+                    Export All Summary (PDF)
+                  </button>
+                </div>
+              )}
             </div>
           </div>
-        </div>
         );
       })()}
 
       {/* ─────────────────────────────────────────────────────────────────
-          PUNCH LIST: Add/Edit Contractor Modal - Center Screen
+          PUNCH LIST: Contractor Dropdown Menu (appears below button)
           ───────────────────────────────────────────────────────────────── */}
-      {isPL && (plShowAddContractorForm || plEditingContractor) && (
-        <div
-          className="contractor-modal-overlay"
-          onClick={() => {
-            setPlShowAddContractorForm(false);
-            setPlEditingContractor(null);
-            setPlEditContractorName('');
-            setPlEditContractorColor('');
-            setPlNewContractorName('');
-          }}
-        >
-          <div className="contractor-modal" onClick={(e) => e.stopPropagation()}>
-            {/* Header */}
-            <div className="contractor-modal-header">
-              <h3>👷 {plEditingContractor ? 'Edit Contractor' : 'Add Contractor'}</h3>
-              <button
-                className="contractor-modal-close"
-                onClick={() => {
-                  setPlShowAddContractorForm(false);
-                  setPlEditingContractor(null);
-                  setPlEditContractorName('');
-                  setPlEditContractorColor('');
-                  setPlNewContractorName('');
-                }}
+      {
+        isPL && plContractorDropdownOpen && (() => {
+          // Position dropdown below the contractor button
+          const btn = document.getElementById('pl-contractor-btn');
+          const btnRect = btn?.getBoundingClientRect();
+          const dropdownTop = btnRect ? btnRect.bottom + 4 : 300;
+          const dropdownRight = btnRect ? (window.innerWidth - btnRect.right) : 12;
+
+          return (
+            <div
+              className="contractor-dropdown-overlay"
+              onClick={() => setPlContractorDropdownOpen(false)}
+            >
+              <div
+                className="contractor-dropdown-menu"
+                style={{ top: dropdownTop, right: dropdownRight }}
+                onClick={(e) => e.stopPropagation()}
               >
-                ×
-              </button>
+                {/* Contractor List (READ ONLY) */}
+                {plContractors.length > 0 ? (
+                  <div className="contractor-dropdown-list">
+                    {plContractors.map((c) => (
+                      <div
+                        key={c.id}
+                        className={`contractor-dropdown-item ${plSelectedContractorId === c.id ? 'selected' : ''}`}
+                        onClick={() => {
+                          setPlSelectedContractorId(c.id);
+                          setPlContractorDropdownOpen(false);
+                        }}
+                      >
+                        <span className="contractor-color-dot" style={{ backgroundColor: c.color }} />
+                        <span className="contractor-name">{c.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-4 text-center text-xs text-slate-400">
+                    No contractors loaded from config.
+                  </div>
+                )}
+              </div>
             </div>
+          );
+        })()
+      }
 
-            {/* Edit Contractor Form */}
-            {plEditingContractor && (
-              <div className="contractor-form-section compact">
-                <input
-                  type="text"
-                  className="contractor-input compact"
-                  value={plEditContractorName}
-                  onChange={(e) => setPlEditContractorName(e.target.value)}
-                  placeholder="Contractor name"
-                  autoFocus
-                />
-                <div className="contractor-color-picker compact">
-                  {DEFAULT_PUNCH_COLORS.map((clr) => {
-                    const isUsedByOther = plContractors.some(c => c.color === clr && c.id !== plEditingContractor.id);
-                    return (
-                      <button
-                        key={clr}
-                        type="button"
-                        className={`contractor-color-option compact ${plEditContractorColor === clr ? 'selected' : ''} ${isUsedByOther ? 'disabled' : ''}`}
-                        style={{ backgroundColor: clr, opacity: isUsedByOther ? 0.3 : 1 }}
-                        onClick={() => !isUsedByOther && setPlEditContractorColor(clr)}
-                        disabled={isUsedByOther}
-                        title={isUsedByOther ? 'This color is used by another contractor' : ''}
-                      />
-                    );
-                  })}
-                </div>
-                <div className="contractor-form-actions">
-                  <button
-                    type="button"
-                    className="contractor-btn delete"
-                    onClick={() => {
-                      if (window.confirm(`Are you sure you want to delete contractor "${plEditingContractor.name}"?`)) {
-                        plRemoveContractor(plEditingContractor.id);
-                        if (plSelectedContractorId === plEditingContractor.id) setPlSelectedContractorId(null);
-                        setPlEditingContractor(null);
-                        setPlEditContractorName('');
-                        setPlEditContractorColor('');
-                      }
-                    }}
-                  >
-                    Delete
-                  </button>
-                  <button
-                    type="button"
-                    className="contractor-btn cancel"
-                    onClick={() => {
-                      setPlEditingContractor(null);
-                      setPlEditContractorName('');
-                      setPlEditContractorColor('');
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="contractor-btn save"
-                    disabled={!plEditContractorName.trim()}
-                    onClick={() => {
-                      plUpdateContractor(plEditingContractor.id, plEditContractorName, plEditContractorColor);
-                      setPlEditingContractor(null);
-                      setPlEditContractorName('');
-                      setPlEditContractorColor('');
-                    }}
-                  >
-                    Save
-                  </button>
-                </div>
-              </div>
-            )}
+      {/* ─────────────────────────────────────────────────────────────────
+          PUNCH LIST: Discipline Dropdown Menu (Live Filter)
+          ───────────────────────────────────────────────────────────────── */}
+      {
+        isPL && plDisciplineDropdownOpen && (() => {
+          const btn = document.getElementById('pl-discipline-btn');
+          const btnRect = btn?.getBoundingClientRect();
+          const dropdownBottom = btnRect ? (window.innerHeight - btnRect.top + 4) : 80;
+          const dropdownLeft = btnRect ? btnRect.left : 140;
 
-            {/* Add New Contractor Form - Compact style like Edit */}
-            {plShowAddContractorForm && !plEditingContractor && (
-              <div className="contractor-form-section compact">
-                <input
-                  type="text"
-                  className="contractor-input compact"
-                  value={plNewContractorName}
-                  onChange={(e) => setPlNewContractorName(e.target.value)}
-                  placeholder="Contractor name"
-                  autoFocus
-                />
-                <div className="contractor-color-picker compact">
-                  {DEFAULT_PUNCH_COLORS.map((clr) => {
-                    const isUsed = plContractors.some(c => c.color === clr);
-                    return (
-                      <button
-                        key={clr}
-                        type="button"
-                        className={`contractor-color-option compact ${plNewContractorColor === clr ? 'selected' : ''} ${isUsed ? 'disabled' : ''}`}
-                        style={{ backgroundColor: clr, opacity: isUsed ? 0.3 : 1 }}
-                        onClick={() => !isUsed && setPlNewContractorColor(clr)}
-                        disabled={isUsed}
-                        title={isUsed ? 'This color is used by another contractor' : ''}
-                      />
-                    );
-                  })}
+          return (
+            <div
+              className="fixed inset-0 z-[2000] cursor-default"
+              onClick={() => setPlDisciplineDropdownOpen(false)}
+            >
+              <div
+                className="absolute bg-slate-900 border border-slate-700 shadow-xl rounded flex flex-col max-h-[300px] overflow-y-auto min-w-[150px]"
+                style={{ bottom: dropdownBottom, left: dropdownLeft }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div
+                  className={`px-3 py-2 text-xs font-bold text-white hover:bg-slate-800 cursor-pointer border-b border-slate-800 ${plSelectedDisciplineFilter === '' ? 'bg-slate-800' : ''}`}
+                  onClick={() => { setPlSelectedDisciplineFilter(''); setPlDisciplineDropdownOpen(false); }}
+                >
+                  All Disciplines
                 </div>
-                <div className="contractor-form-actions">
-                  <button
-                    type="button"
-                    className="contractor-btn cancel"
-                    onClick={() => {
-                      setPlShowAddContractorForm(false);
-                      setPlNewContractorName('');
-                      setPlNewContractorColor(getFirstAvailableColor());
-                    }}
+                {plDisciplines.map(d => (
+                  <div
+                    key={d.id}
+                    className={`px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer ${plSelectedDisciplineFilter === d.name ? 'bg-slate-800 text-white' : ''}`}
+                    onClick={() => { setPlSelectedDisciplineFilter(d.name); setPlDisciplineDropdownOpen(false); }}
                   >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="contractor-btn save"
-                    disabled={!plNewContractorName.trim()}
-                    onClick={() => {
-                      const newC = plAddContractor(plNewContractorName, plNewContractorColor);
-                      if (newC) {
-                        setPlSelectedContractorId(newC.id);
-                        setPlNewContractorName('');
-                        setPlNewContractorColor(getFirstAvailableColor());
-                        setPlShowAddContractorForm(false);
-                        setPlContractorDropdownOpen(false);
-                      }
-                    }}
-                  >
-                    + Add
-                  </button>
-                </div>
+                    {d.name}
+                  </div>
+                ))}
               </div>
-            )}
-          </div>
-        </div>
-      )}
+            </div>
+          );
+        })()
+      }
 
       {/* ─────────────────────────────────────────────────────────────────
           PUNCH LIST: Isometric Side Panel (fixed right panel, map stays interactive)
           ───────────────────────────────────────────────────────────────── */}
-      {isPL && plIsometricOpen && plIsometricTableId && (
-        <div
-          className="fixed right-0 w-[380px] z-[1100] bg-slate-900 border-l-2 border-slate-700 shadow-2xl flex flex-col"
-          style={{ pointerEvents: 'auto', top: '60px', height: 'calc(100vh - 60px)' }}
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700 bg-slate-800 flex-shrink-0">
-            <div className="flex flex-col">
-              <span className="text-white font-bold text-sm uppercase tracking-wide">Isometric</span>
-              <span className="text-amber-400 font-mono text-base font-bold">{plIsometricTableId}</span>
+      {
+        isPL && plIsometricOpen && plIsometricTableId && (
+          <div
+            className="fixed right-0 w-[380px] z-[1100] bg-slate-900 border-l-2 border-slate-700 shadow-2xl flex flex-col"
+            style={{ pointerEvents: 'auto', top: '60px', height: 'calc(100vh - 60px)' }}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700 bg-slate-800 flex-shrink-0">
+              <div className="flex flex-col">
+                <span className="text-white font-bold text-sm uppercase tracking-wide">Isometric</span>
+                <span className="text-amber-400 font-mono text-base font-bold">{plIsometricTableId}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-slate-400 text-[11px]">
+                  {plPunches.filter(p => p.tableId === plIsometricTableId).length} punch
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPlIsometricOpen(false);
+                    setPlIsometricTableId(null);
+                  }}
+                  className="text-slate-400 hover:text-white text-xl font-bold leading-none"
+                  title="Close"
+                >
+                  ×
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="text-slate-400 text-[11px]">
-                {plPunches.filter(p => p.tableId === plIsometricTableId).length} punch
-              </span>
+
+            {/* Contractor Selector */}
+            <div className="px-3 py-2 border-b border-slate-700 bg-slate-800/50">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400 text-[10px] uppercase">Contractor:</span>
+                <select
+                  className="flex-1 border border-slate-600 bg-slate-800 px-2 py-1 text-[11px] text-white focus:outline-none focus:border-amber-400 rounded"
+                  value={plSelectedContractorId || ''}
+                  onChange={(e) => setPlSelectedContractorId(e.target.value || null)}
+                >
+                  <option value="">Select...</option>
+                  {plContractors.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                {plSelectedContractorId && (
+                  <span
+                    className="w-4 h-4 rounded-full border border-white/40"
+                    style={{ backgroundColor: plGetContractor(plSelectedContractorId)?.color || '#888' }}
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* Isometric content area with zoom/pan */}
+            <div className="flex-1 overflow-hidden p-3 flex flex-col gap-2">
+              {/* Isometric PNG with clickable punch points, zoom & pan support */}
+              <div
+                className="relative flex-1 border border-slate-600 rounded overflow-hidden bg-slate-800"
+                style={{ minHeight: '300px' }}
+                onWheel={(e) => {
+                  e.preventDefault();
+                  const container = e.currentTarget;
+                  const inner = container.querySelector('[data-iso-inner]');
+                  if (!inner) return;
+
+                  // Get current transform values
+                  const currentScale = parseFloat(inner.dataset.scale || '1');
+                  const currentX = parseFloat(inner.dataset.panX || '0');
+                  const currentY = parseFloat(inner.dataset.panY || '0');
+
+                  // Calculate zoom
+                  const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                  const newScale = Math.min(Math.max(currentScale * delta, 0.5), 5);
+
+                  // Get mouse position relative to container
+                  const rect = container.getBoundingClientRect();
+                  const mouseX = e.clientX - rect.left;
+                  const mouseY = e.clientY - rect.top;
+
+                  // Adjust pan to zoom towards mouse position
+                  const scaleChange = newScale / currentScale;
+                  const newX = mouseX - (mouseX - currentX) * scaleChange;
+                  const newY = mouseY - (mouseY - currentY) * scaleChange;
+
+                  inner.dataset.scale = String(newScale);
+                  inner.dataset.panX = String(newX);
+                  inner.dataset.panY = String(newY);
+                  inner.style.transform = `translate(${newX}px, ${newY}px) scale(${newScale})`;
+                }}
+                onMouseDown={(e) => {
+                  // Only middle mouse button (button 1) for pan
+                  if (e.button !== 1) return;
+                  e.preventDefault();
+                  const container = e.currentTarget;
+                  const inner = container.querySelector('[data-iso-inner]');
+                  if (!inner) return;
+
+                  const startX = e.clientX;
+                  const startY = e.clientY;
+                  const startPanX = parseFloat(inner.dataset.panX || '0');
+                  const startPanY = parseFloat(inner.dataset.panY || '0');
+
+                  const onMouseMove = (ev) => {
+                    const dx = ev.clientX - startX;
+                    const dy = ev.clientY - startY;
+                    const newX = startPanX + dx;
+                    const newY = startPanY + dy;
+                    const scale = parseFloat(inner.dataset.scale || '1');
+
+                    inner.dataset.panX = String(newX);
+                    inner.dataset.panY = String(newY);
+                    inner.style.transform = `translate(${newX}px, ${newY}px) scale(${scale})`;
+                  };
+
+                  const onMouseUp = () => {
+                    document.removeEventListener('mousemove', onMouseMove);
+                    document.removeEventListener('mouseup', onMouseUp);
+                  };
+
+                  document.addEventListener('mousemove', onMouseMove);
+                  document.addEventListener('mouseup', onMouseUp);
+                }}
+                onContextMenu={(e) => e.preventDefault()}
+              >
+                {/* Fit button - top right corner of image */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const inner = plIsoInnerRef.current;
+                    if (inner) {
+                      inner.dataset.scale = '1';
+                      inner.dataset.panX = '0';
+                      inner.dataset.panY = '0';
+                      inner.style.transform = 'translate(0px, 0px) scale(1)';
+                    }
+                  }}
+                  className="absolute top-2 right-2 z-10 flex items-center justify-center w-7 h-7 bg-slate-700/80 hover:bg-slate-600 border border-slate-500 rounded transition-colors"
+                  title="Fit to screen"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-300">
+                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                  </svg>
+                </button>
+                <div
+                  ref={plIsoInnerRef}
+                  data-iso-inner="true"
+                  data-scale="1"
+                  data-pan-x="0"
+                  data-pan-y="0"
+                  className="absolute inset-0 origin-top-left cursor-crosshair"
+                  style={{ transform: 'translate(0px, 0px) scale(1)' }}
+                  onClick={(e) => {
+                    // Don't create punch on middle click
+                    if (e.button === 1) return;
+
+                    // Get click position relative to the inner container, accounting for transform
+                    const inner = e.currentTarget;
+                    const scale = parseFloat(inner.dataset.scale || '1');
+                    const panX = parseFloat(inner.dataset.panX || '0');
+                    const panY = parseFloat(inner.dataset.panY || '0');
+
+                    const rect = inner.parentElement.getBoundingClientRect();
+                    const clickX = e.clientX - rect.left;
+                    const clickY = e.clientY - rect.top;
+
+                    // Convert to original coordinates
+                    const x = ((clickX - panX) / scale / rect.width) * 100;
+                    const y = ((clickY - panY) / scale / rect.height) * 100;
+
+                    // Only create punch if click is within bounds
+                    if (x < 0 || x > 100 || y < 0 || y > 100) return;
+
+                    // Check if contractor is selected (use ref for reliability)
+                    const currentContractorId = plSelectedContractorIdRef.current;
+                    if (!currentContractorId) {
+                      // Show warning toast
+                      const toast = document.createElement('div');
+                      toast.className = 'punch-warning-toast';
+                      toast.innerHTML = '⚠️ Please select a contractor first!';
+                      document.body.appendChild(toast);
+                      setTimeout(() => toast.remove(), 2500);
+                      return;
+                    }
+
+                    // Get next punch number using ref (always current) and increment both ref and state
+                    const nextNumber = plPunchCounterRef.current + 1;
+                    plPunchCounterRef.current = nextNumber; // Update ref immediately for next call
+                    setPlPunchCounter(nextNumber); // Update state for persistence
+
+                    // Create punch with isometric position (no popup - click on dot to edit)
+                    const punch = {
+                      id: `punch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                      lat: 0,
+                      lng: 0,
+                      contractorId: currentContractorId,
+                      text: '',
+                      photoDataUrl: null,
+                      photoName: '',
+                      tableId: plIsometricTableId,
+                      isoX: x,
+                      isoY: y,
+                      createdAt: new Date().toISOString(),
+                      punchNumber: nextNumber // Permanent number - never changes
+                    };
+                    setPlPunches(prev => [...prev, punch]);
+                  }}
+                >
+                  <img
+                    src="/PUNCH_LIST/photo/table.png"
+                    alt="Table Isometric"
+                    className="w-full h-full object-contain"
+                    draggable={false}
+                    onError={(e) => {
+                      console.error('Failed to load isometric image');
+                      e.target.style.display = 'none';
+                    }}
+                  />
+                  {/* Punch markers on isometric */}
+                  {plPunches
+                    .filter(p => p.tableId === plIsometricTableId && p.isoX != null && p.isoY != null)
+                    .map((p) => {
+                      const c = plGetContractor(p.contractorId);
+                      // Use green for completed punches
+                      const dotColor = p.completed ? PUNCH_COMPLETED_COLOR : (c?.color || '#888');
+                      const isIsoEditing = plEditingPunch?.id === p.id;
+                      return (
+                        <div
+                          key={p.id}
+                          className={`absolute w-3 h-3 -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-transform ${isIsoEditing ? 'scale-150 z-50' : 'hover:scale-150'}`}
+                          style={{
+                            left: `${p.isoX}%`,
+                            top: `${p.isoY}%`,
+                            ...(isIsoEditing ? { animation: 'punch-editing-pulse 1s ease-in-out infinite' } : {}),
+                          }}
+                          title={`${c?.name || 'No contractor'}: ${p.text || '(no description)'}${p.completed ? ' ✓ COMPLETED' : ''}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPlEditingPunch(p);
+                            setPlPunchText(p.text || '');
+                            setPlPunchContractorId(p.contractorId);
+                            setPlPunchDiscipline(p.discipline || '');
+                            setPlPunchPhotoDataUrl(p.photoDataUrl || null);
+                            setPlPunchPhotoName(p.photoName || '');
+                          }}
+                        >
+                          <div
+                            className={`w-full h-full rounded-full border shadow-md ${isIsoEditing ? 'border-2 border-yellow-400' : 'border border-white'}`}
+                            style={{ backgroundColor: dotColor }}
+                          />
+                          {p.completed && (
+                            <span className="absolute -top-1 -right-1 text-[8px] text-white font-bold">✓</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+
+              {/* Instructions */}
+              <div className="text-slate-500 text-[10px] text-center py-1">
+                Scroll to zoom • Middle-click drag to pan • Click to add punch
+              </div>
+            </div>
+
+            {/* Close button at bottom */}
+            <div className="px-3 py-2 border-t border-slate-700 bg-slate-800">
               <button
                 type="button"
                 onClick={() => {
                   setPlIsometricOpen(false);
                   setPlIsometricTableId(null);
                 }}
-                className="text-slate-400 hover:text-white text-xl font-bold leading-none"
-                title="Close"
+                className="w-full border border-slate-600 bg-slate-700 px-3 py-2 text-[11px] font-bold uppercase text-white hover:bg-slate-600 rounded"
               >
-                ×
+                Close
               </button>
             </div>
           </div>
-
-          {/* Contractor Selector */}
-          <div className="px-3 py-2 border-b border-slate-700 bg-slate-800/50">
-            <div className="flex items-center gap-2">
-              <span className="text-slate-400 text-[10px] uppercase">Contractor:</span>
-              <select
-                className="flex-1 border border-slate-600 bg-slate-800 px-2 py-1 text-[11px] text-white focus:outline-none focus:border-amber-400 rounded"
-                value={plSelectedContractorId || ''}
-                onChange={(e) => setPlSelectedContractorId(e.target.value || null)}
-              >
-                <option value="">Select...</option>
-                {plContractors.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-              {plSelectedContractorId && (
-                <span
-                  className="w-4 h-4 rounded-full border border-white/40"
-                  style={{ backgroundColor: plGetContractor(plSelectedContractorId)?.color || '#888' }}
-                />
-              )}
-            </div>
-          </div>
-
-          {/* Isometric content area with zoom/pan */}
-          <div className="flex-1 overflow-hidden p-3 flex flex-col gap-2">
-            {/* Isometric PNG with clickable punch points, zoom & pan support */}
-            <div
-              className="relative flex-1 border border-slate-600 rounded overflow-hidden bg-slate-800"
-              style={{ minHeight: '300px' }}
-              onWheel={(e) => {
-                e.preventDefault();
-                const container = e.currentTarget;
-                const inner = container.querySelector('[data-iso-inner]');
-                if (!inner) return;
-                
-                // Get current transform values
-                const currentScale = parseFloat(inner.dataset.scale || '1');
-                const currentX = parseFloat(inner.dataset.panX || '0');
-                const currentY = parseFloat(inner.dataset.panY || '0');
-                
-                // Calculate zoom
-                const delta = e.deltaY > 0 ? 0.9 : 1.1;
-                const newScale = Math.min(Math.max(currentScale * delta, 0.5), 5);
-                
-                // Get mouse position relative to container
-                const rect = container.getBoundingClientRect();
-                const mouseX = e.clientX - rect.left;
-                const mouseY = e.clientY - rect.top;
-                
-                // Adjust pan to zoom towards mouse position
-                const scaleChange = newScale / currentScale;
-                const newX = mouseX - (mouseX - currentX) * scaleChange;
-                const newY = mouseY - (mouseY - currentY) * scaleChange;
-                
-                inner.dataset.scale = String(newScale);
-                inner.dataset.panX = String(newX);
-                inner.dataset.panY = String(newY);
-                inner.style.transform = `translate(${newX}px, ${newY}px) scale(${newScale})`;
-              }}
-              onMouseDown={(e) => {
-                // Only middle mouse button (button 1) for pan
-                if (e.button !== 1) return;
-                e.preventDefault();
-                const container = e.currentTarget;
-                const inner = container.querySelector('[data-iso-inner]');
-                if (!inner) return;
-                
-                const startX = e.clientX;
-                const startY = e.clientY;
-                const startPanX = parseFloat(inner.dataset.panX || '0');
-                const startPanY = parseFloat(inner.dataset.panY || '0');
-                
-                const onMouseMove = (ev) => {
-                  const dx = ev.clientX - startX;
-                  const dy = ev.clientY - startY;
-                  const newX = startPanX + dx;
-                  const newY = startPanY + dy;
-                  const scale = parseFloat(inner.dataset.scale || '1');
-                  
-                  inner.dataset.panX = String(newX);
-                  inner.dataset.panY = String(newY);
-                  inner.style.transform = `translate(${newX}px, ${newY}px) scale(${scale})`;
-                };
-                
-                const onMouseUp = () => {
-                  document.removeEventListener('mousemove', onMouseMove);
-                  document.removeEventListener('mouseup', onMouseUp);
-                };
-                
-                document.addEventListener('mousemove', onMouseMove);
-                document.addEventListener('mouseup', onMouseUp);
-              }}
-              onContextMenu={(e) => e.preventDefault()}
-            >
-              {/* Fit button - top right corner of image */}
-              <button
-                type="button"
-                onClick={() => {
-                  const inner = plIsoInnerRef.current;
-                  if (inner) {
-                    inner.dataset.scale = '1';
-                    inner.dataset.panX = '0';
-                    inner.dataset.panY = '0';
-                    inner.style.transform = 'translate(0px, 0px) scale(1)';
-                  }
-                }}
-                className="absolute top-2 right-2 z-10 flex items-center justify-center w-7 h-7 bg-slate-700/80 hover:bg-slate-600 border border-slate-500 rounded transition-colors"
-                title="Fit to screen"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-300">
-                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-                </svg>
-              </button>
-              <div
-                ref={plIsoInnerRef}
-                data-iso-inner="true"
-                data-scale="1"
-                data-pan-x="0"
-                data-pan-y="0"
-                className="absolute inset-0 origin-top-left cursor-crosshair"
-                style={{ transform: 'translate(0px, 0px) scale(1)' }}
-                onClick={(e) => {
-                  // Don't create punch on middle click
-                  if (e.button === 1) return;
-                  
-                  // Get click position relative to the inner container, accounting for transform
-                  const inner = e.currentTarget;
-                  const scale = parseFloat(inner.dataset.scale || '1');
-                  const panX = parseFloat(inner.dataset.panX || '0');
-                  const panY = parseFloat(inner.dataset.panY || '0');
-                  
-                  const rect = inner.parentElement.getBoundingClientRect();
-                  const clickX = e.clientX - rect.left;
-                  const clickY = e.clientY - rect.top;
-                  
-                  // Convert to original coordinates
-                  const x = ((clickX - panX) / scale / rect.width) * 100;
-                  const y = ((clickY - panY) / scale / rect.height) * 100;
-                  
-                  // Only create punch if click is within bounds
-                  if (x < 0 || x > 100 || y < 0 || y > 100) return;
-                  
-                  // Check if contractor is selected (use ref for reliability)
-                  const currentContractorId = plSelectedContractorIdRef.current;
-                  if (!currentContractorId) {
-                    // Show warning toast
-                    const toast = document.createElement('div');
-                    toast.className = 'punch-warning-toast';
-                    toast.innerHTML = '⚠️ Please select a contractor first!';
-                    document.body.appendChild(toast);
-                    setTimeout(() => toast.remove(), 2500);
-                    return;
-                  }
-                  
-                  // Get next punch number using ref (always current) and increment both ref and state
-                  const nextNumber = plPunchCounterRef.current + 1;
-                  plPunchCounterRef.current = nextNumber; // Update ref immediately for next call
-                  setPlPunchCounter(nextNumber); // Update state for persistence
-                  
-                  // Create punch with isometric position (no popup - click on dot to edit)
-                  const punch = {
-                    id: `punch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                    lat: 0,
-                    lng: 0,
-                    contractorId: currentContractorId,
-                    text: '',
-                    photoDataUrl: null,
-                    photoName: '',
-                    tableId: plIsometricTableId,
-                    isoX: x,
-                    isoY: y,
-                    createdAt: new Date().toISOString(),
-                    punchNumber: nextNumber // Permanent number - never changes
-                  };
-                  setPlPunches(prev => [...prev, punch]);
-                }}
-              >
-                <img
-                  src="/PUNCH_LIST/photo/table.png"
-                  alt="Table Isometric"
-                  className="w-full h-full object-contain"
-                  draggable={false}
-                  onError={(e) => {
-                    console.error('Failed to load isometric image');
-                    e.target.style.display = 'none';
-                  }}
-                />
-                {/* Punch markers on isometric */}
-                {plPunches
-                  .filter(p => p.tableId === plIsometricTableId && p.isoX != null && p.isoY != null)
-                  .map((p) => {
-                    const c = plGetContractor(p.contractorId);
-                    // Use green for completed punches
-                    const dotColor = p.completed ? PUNCH_COMPLETED_COLOR : (c?.color || '#888');
-                    const isIsoEditing = plEditingPunch?.id === p.id;
-                    return (
-                      <div
-                        key={p.id}
-                        className={`absolute w-3 h-3 -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-transform ${isIsoEditing ? 'scale-150 z-50' : 'hover:scale-150'}`}
-                        style={{
-                          left: `${p.isoX}%`,
-                          top: `${p.isoY}%`,
-                          ...(isIsoEditing ? { animation: 'punch-editing-pulse 1s ease-in-out infinite' } : {}),
-                        }}
-                        title={`${c?.name || 'No contractor'}: ${p.text || '(no description)'}${p.completed ? ' ✓ COMPLETED' : ''}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPlEditingPunch(p);
-                          setPlPunchText(p.text || '');
-                          setPlPunchContractorId(p.contractorId);
-                          setPlPunchPhotoDataUrl(p.photoDataUrl || null);
-                          setPlPunchPhotoName(p.photoName || '');
-                        }}
-                      >
-                        <div
-                          className={`w-full h-full rounded-full border shadow-md ${isIsoEditing ? 'border-2 border-yellow-400' : 'border border-white'}`}
-                          style={{ backgroundColor: dotColor }}
-                        />
-                        {p.completed && (
-                          <span className="absolute -top-1 -right-1 text-[8px] text-white font-bold">✓</span>
-                        )}
-                      </div>
-                    );
-                  })}
-              </div>
-            </div>
-
-            {/* Instructions */}
-            <div className="text-slate-500 text-[10px] text-center py-1">
-              Scroll to zoom • Middle-click drag to pan • Click to add punch
-            </div>
-          </div>
-
-          {/* Close button at bottom */}
-          <div className="px-3 py-2 border-t border-slate-700 bg-slate-800">
-            <button
-              type="button"
-              onClick={() => {
-                setPlIsometricOpen(false);
-                setPlIsometricTableId(null);
-              }}
-              className="w-full border border-slate-600 bg-slate-700 px-3 py-2 text-[11px] font-bold uppercase text-white hover:bg-slate-600 rounded"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
+        )
+      }
 
       {/* Submit Modal */}
       <SubmitModal
@@ -19392,31 +19865,31 @@ export default function BaseModule({
           if (isMVF) {
             const toCommitParts = mvfSelectedTrenchPartsRef.current || [];
             const activeSegments = mvfActiveSegmentKeysRef.current || new Set();
-            
+
             // Check if there's anything to submit
             if (toCommitParts.length === 0 && activeSegments.size === 0) {
               alert('No selections to submit. Please select cable routes.');
               return;
             }
-            
+
             // Calculate meters: from trench parts + from selected segments (via CSV)
             let meters = 0;
             const partIds = [];
             const segmentIds = [];
-            
+
             // Add meters from trench parts
             toCommitParts.forEach((p) => {
               meters += (Number(p?.meters) || 0) * (mvfCircuitsMultiplier || 1);
               partIds.push(String(p?.id || ''));
             });
-            
+
             // Add meters from selected segments (full routes from CSV)
             activeSegments.forEach((segKey) => {
               const segLen = Number(mvfSegmentLenByKeyRef.current?.[segKey]) || 0;
               meters += segLen;
               segmentIds.push(`segment:${segKey}`);
             });
-            
+
             if (recordDate && toCommitParts.length > 0) {
               const key = `${mvfStoragePrefix}:trench_parts_committed:${recordDate}`;
               try {
@@ -19478,10 +19951,10 @@ export default function BaseModule({
             };
             addRecord(recordWithSelections);
 
-              // Clear current selection after submit (submit button disables until new selection)
-              setMvfSelectedTrenchParts([]);
-              setMvfActiveSegmentKeys(new Set());
-            
+            // Clear current selection after submit (submit button disables until new selection)
+            setMvfSelectedTrenchParts([]);
+            setMvfActiveSegmentKeys(new Set());
+
             alert('Work submitted successfully!');
             return;
           }
@@ -19863,17 +20336,17 @@ export default function BaseModule({
               : 'MC4_INST'))
           : (isDCTT
             ? (dcttSelectionMode === 'termination_panel' ? 'DCTT_TERM_PANEL' : 'DCTT_TERM_INV')
-          : (isDATP
-            ? 'DATP'
-            : (isMVFT
-              ? 'MVFT'
-              : (isPTEP
-                ? (ptepSubMode === 'tabletotable' ? 'PTEP_TT' : 'PTEP_PARAM')
-                : (isMVT
-                  ? 'MVT_TERM'
-                  : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
-                    ? 'LVTT_TERM'
-                    : (activeMode?.key || ''))))))}
+            : (isDATP
+              ? 'DATP'
+              : (isMVFT
+                ? 'MVFT'
+                : (isPTEP
+                  ? (ptepSubMode === 'tabletotable' ? 'PTEP_TT' : 'PTEP_PARAM')
+                  : (isMVT
+                    ? 'MVT_TERM'
+                    : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                      ? 'LVTT_TERM'
+                      : (activeMode?.key || ''))))))}
         moduleLabel={isMC4
           ? (mc4SelectionMode === 'termination_panel'
             ? 'Cable Termination Panel Side'
@@ -19882,126 +20355,127 @@ export default function BaseModule({
               : 'MC4 Installation'))
           : (isDCTT
             ? (dcttSelectionMode === 'termination_panel' ? 'DC Termination Panel Side' : 'DC Termination Inv. Side')
-          : (isDATP
-            ? 'DC&AC Trench'
-            : (isMVFT
-              ? 'MV&Fibre Trench'
-              : (isPTEP
-                ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
-                : (isMVT
-                  ? 'Cable Termination'
-                  : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+            : (isDATP
+              ? 'DC&AC Trench'
+              : (isMVFT
+                ? 'MV&Fibre Trench'
+                : (isPTEP
+                  ? (ptepSubMode === 'tabletotable' ? 'Table-to-Table Earthing' : 'Parameter Earthing')
+                  : (isMVT
                     ? 'Cable Termination'
-                    : moduleName)))))}
+                    : (isLVTT && String(lvttSubMode || 'termination') === 'termination')
+                      ? 'Cable Termination'
+                      : moduleName)))))}
         workAmount={isDCTT
           ? (dcttSelectionMode === 'termination_panel'
             ? (dcttCounts?.terminatedCompleted || 0)
             : Object.values(dcttInvTerminationByInv || {}).reduce((sum, v) => sum + (Number(v) || 0), 0))
           : isDATP
-          ? datpCompletedForSubmit
-          : isMVFT
-            ? mvftCompletedForSubmit
-            : isPTEP
-              ? ptepCompletedForSubmit
-              : isMVT
-                ? mvtCompletedForSubmit
-                : isLVTT && String(lvttSubMode || 'termination') === 'termination'
-                  ? lvttCompletedForSubmit
-                  : workAmount
+            ? datpCompletedForSubmit
+            : isMVFT
+              ? mvftCompletedForSubmit
+              : isPTEP
+                ? ptepCompletedForSubmit
+                : isMVT
+                  ? mvtCompletedForSubmit
+                  : isLVTT && String(lvttSubMode || 'termination') === 'termination'
+                    ? lvttCompletedForSubmit
+                    : workAmount
         }
         workUnit={
           isMC4
             ? (mc4SelectionMode === 'termination_panel' || mc4SelectionMode === 'termination_inv' ? 'cables terminated' : 'mc4')
             : isDCTT
               ? 'mc4 terminated'
-            : isDATP
-              ? datpWorkUnit
-              : isMVFT
-                ? mvftWorkUnit
-                : isPTEP
-                  ? ptepWorkUnit
-                  : isMVT
-                    ? 'cables terminated'
-                    : isLVTT && String(lvttSubMode || 'termination') === 'termination'
-                      ? lvttWorkUnit
-                    : activeMode?.submitWorkUnit
-                      ? String(activeMode.submitWorkUnit)
-                      : activeMode?.workUnitWeights
-                        ? 'panels'
-                        : (typeof activeMode?.simpleCounterUnit === 'string' ? String(activeMode.simpleCounterUnit) : 'm')
+              : isDATP
+                ? datpWorkUnit
+                : isMVFT
+                  ? mvftWorkUnit
+                  : isPTEP
+                    ? ptepWorkUnit
+                    : isMVT
+                      ? 'cables terminated'
+                      : isLVTT && String(lvttSubMode || 'termination') === 'termination'
+                        ? lvttWorkUnit
+                        : activeMode?.submitWorkUnit
+                          ? String(activeMode.submitWorkUnit)
+                          : activeMode?.workUnitWeights
+                            ? 'panels'
+                            : (typeof activeMode?.simpleCounterUnit === 'string' ? String(activeMode.simpleCounterUnit) : 'm')
         }
       />
-      
+
       {/* History Panel - Draggable, non-blocking */}
-      {historyOpen && (
-        <div 
-          ref={historyPanelRef}
-          className="history-panel"
-          style={{
-            transform: `translate(${historyPanelPos.x}px, ${historyPanelPos.y}px)`,
-            cursor: historyDragging ? 'grabbing' : 'default'
-          }}
-        >
-          <div 
-            className="history-panel-header"
-            style={{ cursor: historyDragging ? 'grabbing' : 'grab' }}
-            onMouseDown={(e) => {
-              if (e.target.closest('button')) return;
-              setHistoryDragging(true);
-              historyDragOffset.current = {
-                x: e.clientX - historyPanelPos.x,
-                y: e.clientY - historyPanelPos.y
-              };
-            }}
-            onTouchStart={(e) => {
-              if (e.target.closest('button')) return;
-              const touch = e.touches[0];
-              setHistoryDragging(true);
-              historyDragOffset.current = {
-                x: touch.clientX - historyPanelPos.x,
-                y: touch.clientY - historyPanelPos.y
-              };
+      {
+        historyOpen && (
+          <div
+            ref={historyPanelRef}
+            className="history-panel"
+            style={{
+              transform: `translate(${historyPanelPos.x}px, ${historyPanelPos.y}px)`,
+              cursor: historyDragging ? 'grabbing' : 'default'
             }}
           >
-            <div className="history-panel-title">📊 Work History</div>
-            <div className="history-panel-actions">
-              <button 
-                className="history-panel-close" 
-                onClick={() => {
-                  setHistoryOpen(false);
-                  setHistorySelectedRecordId(null);
-                }}
-              >
-                ×
-              </button>
-            </div>
-            </div>
-          
-          {/* Mouse/Touch move handlers for dragging */}
-          {historyDragging && (
-            <div 
-              style={{ position: 'fixed', inset: 0, zIndex: 99999, cursor: 'grabbing' }}
-              onMouseMove={(e) => {
-                setHistoryPanelPos({
-                  x: e.clientX - historyDragOffset.current.x,
-                  y: e.clientY - historyDragOffset.current.y
-                });
+            <div
+              className="history-panel-header"
+              style={{ cursor: historyDragging ? 'grabbing' : 'grab' }}
+              onMouseDown={(e) => {
+                if (e.target.closest('button')) return;
+                setHistoryDragging(true);
+                historyDragOffset.current = {
+                  x: e.clientX - historyPanelPos.x,
+                  y: e.clientY - historyPanelPos.y
+                };
               }}
-              onMouseUp={() => setHistoryDragging(false)}
-              onTouchMove={(e) => {
+              onTouchStart={(e) => {
+                if (e.target.closest('button')) return;
                 const touch = e.touches[0];
-                setHistoryPanelPos({
-                  x: touch.clientX - historyDragOffset.current.x,
-                  y: touch.clientY - historyDragOffset.current.y
-                });
+                setHistoryDragging(true);
+                historyDragOffset.current = {
+                  x: touch.clientX - historyPanelPos.x,
+                  y: touch.clientY - historyPanelPos.y
+                };
               }}
-              onTouchEnd={() => setHistoryDragging(false)}
-            />
-          )}
-            
+            >
+              <div className="history-panel-title">📊 Work History</div>
+              <div className="history-panel-actions">
+                <button
+                  className="history-panel-close"
+                  onClick={() => {
+                    setHistoryOpen(false);
+                    setHistorySelectedRecordId(null);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            {/* Mouse/Touch move handlers for dragging */}
+            {historyDragging && (
+              <div
+                style={{ position: 'fixed', inset: 0, zIndex: 99999, cursor: 'grabbing' }}
+                onMouseMove={(e) => {
+                  setHistoryPanelPos({
+                    x: e.clientX - historyDragOffset.current.x,
+                    y: e.clientY - historyDragOffset.current.y
+                  });
+                }}
+                onMouseUp={() => setHistoryDragging(false)}
+                onTouchMove={(e) => {
+                  const touch = e.touches[0];
+                  setHistoryPanelPos({
+                    x: touch.clientX - historyDragOffset.current.x,
+                    y: touch.clientY - historyDragOffset.current.y
+                  });
+                }}
+                onTouchEnd={() => setHistoryDragging(false)}
+              />
+            )}
+
             <div className="history-sort">
-            <span>Sort:</span>
-              <button 
+              <span>Sort:</span>
+              <button
                 className={`sort-btn ${historySortBy === 'date' ? 'active' : ''}`}
                 onClick={() => {
                   if (historySortBy === 'date') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
@@ -20010,7 +20484,7 @@ export default function BaseModule({
               >
                 Date {historySortBy === 'date' && (historySortOrder === 'desc' ? '↓' : '↑')}
               </button>
-              <button 
+              <button
                 className={`sort-btn ${historySortBy === 'workers' ? 'active' : ''}`}
                 onClick={() => {
                   if (historySortBy === 'workers') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
@@ -20019,7 +20493,7 @@ export default function BaseModule({
               >
                 Workers {historySortBy === 'workers' && (historySortOrder === 'desc' ? '↓' : '↑')}
               </button>
-              <button 
+              <button
                 className={`sort-btn ${historySortBy === 'amount' ? 'active' : ''}`}
                 onClick={() => {
                   if (historySortBy === 'amount') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
@@ -20029,7 +20503,7 @@ export default function BaseModule({
                 Amount {historySortBy === 'amount' && (historySortOrder === 'desc' ? '↓' : '↑')}
               </button>
             </div>
-            
+
             <div className="history-list">
               {(() => {
                 const noteYmd = (n) => n.noteDate || (n.createdAt ? new Date(n.createdAt).toISOString().split('T')[0] : null);
@@ -20069,7 +20543,7 @@ export default function BaseModule({
                 return dates.map((d) => {
                   const recs = [...(recordsByDate[d] || [])];
                   const dayNotes = [...(notesByDate[d] || [])].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-                const dateLabel = new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                  const dateLabel = new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
                   return (
                     <div key={d} className="history-day">
@@ -20077,140 +20551,140 @@ export default function BaseModule({
                         <span className="history-day-date">{dateLabel}</span>
                       </div>
 
-                    {recs.map((record) => {
-                      const isSelected = historySelectedRecordId === record.id;
-                      const recordPolygonIds = record.selectedPolygonIds || [];
-                      
-                      return (
-                        <div 
-                          key={record.id} 
-                          className={`history-item ${isSelected ? 'history-item-selected' : ''}`}
-                          onClick={() => {
-                            // Toggle select/deselect for orange highlight on map
-                            if (historySelectedRecordId === record.id) {
-                              setHistorySelectedRecordId(null);
-                            } else {
-                              setHistorySelectedRecordId(record.id);
-                            }
-                          }}
-                        >
-                          <div className="history-item-header">
-                            <span className="history-subcontractor">{record.subcontractor}</span>
-                            <button
-                              className="history-item-delete"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (window.confirm('Delete this record?')) {
-                                  // LV records store inv_id norms in selectedPolygonIds
-                                  if (isLV) {
-                                    setLvCommittedInvIds((prev) => {
-                                      const next = new Set(prev);
-                                      recordPolygonIds.forEach((id) => next.delete(normalizeId(id)));
-                                      lvCommittedInvIdsRef.current = next;
-                                      return next;
-                                    });
-                                    setLvCompletedInvIds((prev) => {
-                                      const next = new Set(prev);
-                                      recordPolygonIds.forEach((id) => next.delete(normalizeId(id)));
-                                      return next;
-                                    });
-                                  } else if (isMVF) {
-                                    // MVF: remove committed trench parts by ID
-                                    setMvfCommittedTrenchParts((prev) => {
-                                      const idsToRemove = new Set(recordPolygonIds);
-                                      return prev.filter((p) => !idsToRemove.has(String(p?.id || '')));
-                                    });
-                                    mvfCommittedTrenchPartsRef.current = (mvfCommittedTrenchPartsRef.current || []).filter(
-                                      (p) => !recordPolygonIds.includes(String(p?.id || ''))
-                                    );
+                      {recs.map((record) => {
+                        const isSelected = historySelectedRecordId === record.id;
+                        const recordPolygonIds = record.selectedPolygonIds || [];
 
-                                    // MVF/FIBRE: unselect submitted segments when history record is deleted
-                                    const segKeys = recordPolygonIds
-                                      .map((id) => String(id || ''))
-                                      .filter((id) => id.startsWith('segment:'))
-                                      .map((id) => id.replace('segment:', ''))
-                                      .filter(Boolean);
-                                    if (segKeys.length > 0) {
-                                      setMvfDoneSegmentKeys((prev) => {
+                        return (
+                          <div
+                            key={record.id}
+                            className={`history-item ${isSelected ? 'history-item-selected' : ''}`}
+                            onClick={() => {
+                              // Toggle select/deselect for orange highlight on map
+                              if (historySelectedRecordId === record.id) {
+                                setHistorySelectedRecordId(null);
+                              } else {
+                                setHistorySelectedRecordId(record.id);
+                              }
+                            }}
+                          >
+                            <div className="history-item-header">
+                              <span className="history-subcontractor">{record.subcontractor}</span>
+                              <button
+                                className="history-item-delete"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (window.confirm('Delete this record?')) {
+                                    // LV records store inv_id norms in selectedPolygonIds
+                                    if (isLV) {
+                                      setLvCommittedInvIds((prev) => {
                                         const next = new Set(prev);
-                                        segKeys.forEach((k) => next.delete(String(k)));
+                                        recordPolygonIds.forEach((id) => next.delete(normalizeId(id)));
+                                        lvCommittedInvIdsRef.current = next;
                                         return next;
                                       });
-                                      setMvfActiveSegmentKeys((prev) => {
+                                      setLvCompletedInvIds((prev) => {
                                         const next = new Set(prev);
-                                        segKeys.forEach((k) => next.delete(String(k)));
+                                        recordPolygonIds.forEach((id) => next.delete(normalizeId(id)));
                                         return next;
                                       });
-                                    }
-                                  } else if (isMVFT) {
-                                    // MVFT: remove committed trench parts by ID
-                                    setMvftCommittedTrenchParts((prev) => {
-                                      const idsToRemove = new Set(recordPolygonIds.map(String));
-                                      const base = Array.isArray(prev) ? prev : [];
-                                      return base.filter((p) => !idsToRemove.has(String(p?.id || '')));
-                                    });
-                                    mvftCommittedTrenchPartsRef.current = (mvftCommittedTrenchPartsRef.current || []).filter(
-                                      (p) => !recordPolygonIds.map(String).includes(String(p?.id || ''))
-                                    );
-                                  } else if (isDCTT) {
-                                    // DCTT: allow removal ONLY via History by clearing panel states for polygon IDs.
-                                    const idsToRemove = recordPolygonIds
-                                      .map((id) => String(id || ''))
-                                      .filter((id) => Boolean(id) && Boolean(polygonById.current?.[id]));
+                                    } else if (isMVF) {
+                                      // MVF: remove committed trench parts by ID
+                                      setMvfCommittedTrenchParts((prev) => {
+                                        const idsToRemove = new Set(recordPolygonIds);
+                                        return prev.filter((p) => !idsToRemove.has(String(p?.id || '')));
+                                      });
+                                      mvfCommittedTrenchPartsRef.current = (mvfCommittedTrenchPartsRef.current || []).filter(
+                                        (p) => !recordPolygonIds.includes(String(p?.id || ''))
+                                      );
 
-                                    if (idsToRemove.length > 0) {
-                                      setDcttPanelStates((prev) => {
-                                        const out = { ...(prev || {}) };
-                                        idsToRemove.forEach((id) => {
-                                          delete out[id];
+                                      // MVF/FIBRE: unselect submitted segments when history record is deleted
+                                      const segKeys = recordPolygonIds
+                                        .map((id) => String(id || ''))
+                                        .filter((id) => id.startsWith('segment:'))
+                                        .map((id) => id.replace('segment:', ''))
+                                        .filter(Boolean);
+                                      if (segKeys.length > 0) {
+                                        setMvfDoneSegmentKeys((prev) => {
+                                          const next = new Set(prev);
+                                          segKeys.forEach((k) => next.delete(String(k)));
+                                          return next;
                                         });
-                                        return out;
+                                        setMvfActiveSegmentKeys((prev) => {
+                                          const next = new Set(prev);
+                                          segKeys.forEach((k) => next.delete(String(k)));
+                                          return next;
+                                        });
+                                      }
+                                    } else if (isMVFT) {
+                                      // MVFT: remove committed trench parts by ID
+                                      setMvftCommittedTrenchParts((prev) => {
+                                        const idsToRemove = new Set(recordPolygonIds.map(String));
+                                        const base = Array.isArray(prev) ? prev : [];
+                                        return base.filter((p) => !idsToRemove.has(String(p?.id || '')));
                                       });
+                                      mvftCommittedTrenchPartsRef.current = (mvftCommittedTrenchPartsRef.current || []).filter(
+                                        (p) => !recordPolygonIds.map(String).includes(String(p?.id || ''))
+                                      );
+                                    } else if (isDCTT) {
+                                      // DCTT: allow removal ONLY via History by clearing panel states for polygon IDs.
+                                      const idsToRemove = recordPolygonIds
+                                        .map((id) => String(id || ''))
+                                        .filter((id) => Boolean(id) && Boolean(polygonById.current?.[id]));
 
-                                      // Keep committed ref in sync immediately.
-                                      const nextCommitted = new Set(dcttCommittedPanelIdsRef.current || []);
-                                      idsToRemove.forEach((id) => nextCommitted.delete(id));
-                                      dcttCommittedPanelIdsRef.current = nextCommitted;
+                                      if (idsToRemove.length > 0) {
+                                        setDcttPanelStates((prev) => {
+                                          const out = { ...(prev || {}) };
+                                          idsToRemove.forEach((id) => {
+                                            delete out[id];
+                                          });
+                                          return out;
+                                        });
+
+                                        // Keep committed ref in sync immediately.
+                                        const nextCommitted = new Set(dcttCommittedPanelIdsRef.current || []);
+                                        idsToRemove.forEach((id) => nextCommitted.delete(id));
+                                        dcttCommittedPanelIdsRef.current = nextCommitted;
+                                      }
+                                    } else {
+                                      // Remove from committedPolygons
+                                      setCommittedPolygons((prev) => {
+                                        const next = new Set(prev);
+                                        recordPolygonIds.forEach((id) => next.delete(id));
+                                        return next;
+                                      });
+                                      // Also remove from selectedPolygons (make them disappear from map)
+                                      setSelectedPolygons((prev) => {
+                                        const next = new Set(prev);
+                                        recordPolygonIds.forEach((id) => next.delete(id));
+                                        return next;
+                                      });
                                     }
-                                  } else {
-                                    // Remove from committedPolygons
-                                    setCommittedPolygons((prev) => {
-                                      const next = new Set(prev);
-                                      recordPolygonIds.forEach((id) => next.delete(id));
-                                      return next;
-                                    });
-                                    // Also remove from selectedPolygons (make them disappear from map)
-                                    setSelectedPolygons((prev) => {
-                                      const next = new Set(prev);
-                                      recordPolygonIds.forEach((id) => next.delete(id));
-                                      return next;
-                                    });
+                                    deleteRecord(record.id);
+                                    if (historySelectedRecordId === record.id) {
+                                      setHistorySelectedRecordId(null);
+                                    }
                                   }
-                                  deleteRecord(record.id);
-                                  if (historySelectedRecordId === record.id) {
-                                    setHistorySelectedRecordId(null);
-                                  }
-                                }
-                              }}
-                              title="Delete record"
-                            >
-                              🗑️
-                            </button>
-                          </div>
+                                }}
+                                title="Delete record"
+                              >
+                                🗑️
+                              </button>
+                            </div>
 
-                          <div className="history-item-stats">
-                            <div className="stat">
-                              <span>{record.workers} workers</span>
-                            </div>
-                            <div className="stat stat-total">
-                              <span>
-                                {(record.total_cable || 0).toFixed(0)} {record.unit || 'm'}
-                              </span>
+                            <div className="history-item-stats">
+                              <div className="stat">
+                                <span>{record.workers} workers</span>
+                              </div>
+                              <div className="stat stat-total">
+                                <span>
+                                  {(record.total_cable || 0).toFixed(0)} {record.unit || 'm'}
+                                </span>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
 
                       {dayNotes.length > 0 && (
                         <div className="history-day-section">
@@ -20236,9 +20710,10 @@ export default function BaseModule({
                   );
                 });
               })()}
+            </div>
           </div>
-        </div>
-      )}
-    </div>
+        )
+      }
+    </div >
   );
 }
