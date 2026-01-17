@@ -19206,7 +19206,7 @@ export default function BaseModule({
               className="flex items-center gap-2 bg-slate-800 border border-slate-600 px-2 py-1 hover:border-amber-400 transition-colors rounded min-w-[120px] justify-between"
             >
               <span className="text-xs font-bold text-white max-w-[100px] truncate">
-                {plSelectedContractorId ? plGetContractor(plSelectedContractorId)?.name : 'All Contractors'}
+                {plSelectedContractorId ? plGetContractor(plSelectedContractorId)?.name : 'Contractors'}
               </span>
               <span className="text-[8px] text-slate-400">▼</span>
             </button>
@@ -19217,7 +19217,7 @@ export default function BaseModule({
                   className={`px-3 py-2 text-left text-xs font-bold hover:bg-slate-800 ${!plSelectedContractorId ? 'text-amber-400' : 'text-slate-300'}`}
                   onClick={() => { setPlSelectedContractorId(null); setPlContractorDropdownOpen(false); }}
                 >
-                  All Contractors
+                  Contractors
                 </button>
                 {/* Dynamically Filtered List for VIEWING */}
                 {plContractors
@@ -19253,7 +19253,7 @@ export default function BaseModule({
               className="flex items-center gap-2 bg-slate-800 border border-slate-600 px-2 py-1 hover:border-amber-400 transition-colors rounded min-w-[120px] justify-between"
             >
               <span className="text-xs font-bold text-white max-w-[100px] truncate">
-                {plSelectedDisciplineFilter || 'All Disciplines'}
+                {plSelectedDisciplineFilter || 'Disciplines'}
               </span>
               <span className="text-[8px] text-slate-400">▼</span>
             </button>
@@ -19264,7 +19264,7 @@ export default function BaseModule({
                   className={`px-3 py-2 text-left text-xs font-bold hover:bg-slate-800 ${!plSelectedDisciplineFilter ? 'text-amber-400' : 'text-slate-300'}`}
                   onClick={() => { setPlSelectedDisciplineFilter(''); setPlDisciplineDropdownOpen(false); }}
                 >
-                  All Disciplines
+                  Disciplines
                 </button>
                 {/* Dynamically Filtered List for VIEWING */}
                 {plDisciplines
@@ -19971,19 +19971,25 @@ export default function BaseModule({
                 {/* Contractor List (READ ONLY) */}
                 {plContractors.length > 0 ? (
                   <div className="contractor-dropdown-list">
-                    {plContractors.map((c) => (
-                      <div
-                        key={c.id}
-                        className={`contractor-dropdown-item ${plSelectedContractorId === c.id ? 'selected' : ''}`}
-                        onClick={() => {
-                          setPlSelectedContractorId(c.id);
-                          setPlContractorDropdownOpen(false);
-                        }}
-                      >
-                        <span className="contractor-color-dot" style={{ backgroundColor: c.color }} />
-                        <span className="contractor-name">{c.name}</span>
-                      </div>
-                    ))}
+                    {/* Dynamic filtering: only show contractors used in current punches */}
+                    {plContractors
+                      .filter(c => {
+                        const used = new Set(plPunches.map(p => p.contractorId));
+                        return used.has(c.id);
+                      })
+                      .map((c) => (
+                        <div
+                          key={c.id}
+                          className={`contractor-dropdown-item ${plSelectedContractorId === c.id ? 'selected' : ''}`}
+                          onClick={() => {
+                            setPlSelectedContractorId(c.id);
+                            setPlContractorDropdownOpen(false);
+                          }}
+                        >
+                          <span className="contractor-color-dot" style={{ backgroundColor: c.color }} />
+                          <span className="contractor-name">{c.name}</span>
+                        </div>
+                      ))}
                   </div>
                 ) : (
                   <div className="p-4 text-center text-xs text-slate-400">
@@ -20020,17 +20026,23 @@ export default function BaseModule({
                   className={`px-3 py-2 text-xs font-bold text-white hover:bg-slate-800 cursor-pointer border-b border-slate-800 ${plSelectedDisciplineFilter === '' ? 'bg-slate-800' : ''}`}
                   onClick={() => { setPlSelectedDisciplineFilter(''); setPlDisciplineDropdownOpen(false); }}
                 >
-                  All Disciplines
+                  Disciplines
                 </div>
-                {plDisciplines.map(d => (
-                  <div
-                    key={d.id}
-                    className={`px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer ${plSelectedDisciplineFilter === d.name ? 'bg-slate-800 text-white' : ''}`}
-                    onClick={() => { setPlSelectedDisciplineFilter(d.name); setPlDisciplineDropdownOpen(false); }}
-                  >
-                    {d.name}
-                  </div>
-                ))}
+                {/* Dynamic filtering: only show disciplines used in current punches */}
+                {plDisciplines
+                  .filter(d => {
+                    const used = new Set(plPunches.map(p => p.discipline).filter(Boolean));
+                    return used.has(d.name);
+                  })
+                  .map(d => (
+                    <div
+                      key={d.id}
+                      className={`px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer ${plSelectedDisciplineFilter === d.name ? 'bg-slate-800 text-white' : ''}`}
+                      onClick={() => { setPlSelectedDisciplineFilter(d.name); setPlDisciplineDropdownOpen(false); }}
+                    >
+                      {d.name}
+                    </div>
+                  ))}
               </div>
             </div>
           );
