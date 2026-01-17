@@ -2235,6 +2235,18 @@ export default function BaseModule({
   // Map Markers Rendering (Live Filter)
   const plMarkersRef = useRef(null);
   useEffect(() => {
+    // SOFT DISABLE - PENDING REMOVAL
+    // This loop (Loop A) is redundant and causes the "opaque ghosting" bug.
+    // Loop B (lines ~8000+) handles all marker rendering correctly.
+    if (true) {
+      if (plMarkersRef.current) {
+        plMarkersRef.current.clearLayers();
+        plMarkersRef.current.remove();
+        plMarkersRef.current = null;
+      }
+      return;
+    }
+
     if (!isPL || !mapRef.current) {
       if (plMarkersRef.current) {
         plMarkersRef.current.clearLayers();
