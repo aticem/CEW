@@ -15011,8 +15011,10 @@ export default function BaseModule({
       if (!mapRef.current.getPane(paneName)) {
         const pane = mapRef.current.createPane(paneName);
         pane.style.zIndex = '437';
-        pane.style.pointerEvents = 'auto';
+        pane.style.pointerEvents = 'none'; // Fixed: was 'auto', blocked lower layers
       }
+      // Note: L.svg() might need the pane to allow events for child paths?
+      // Leaflet usually handles this via 'leaflet-interactive' class on paths.
       datpSvgRendererRef.current = L.svg({ pane: paneName });
     } catch (_e) {
       void _e;
@@ -15037,7 +15039,7 @@ export default function BaseModule({
       if (!mapRef.current.getPane(paneName)) {
         const pane = mapRef.current.createPane(paneName);
         pane.style.zIndex = '439';
-        pane.style.pointerEvents = 'auto';
+        pane.style.pointerEvents = 'none'; // Fixed: was 'auto', blocked lower layers
       }
       mvftSvgRendererRef.current = L.svg({ pane: paneName });
     } catch (_e) {
@@ -20855,7 +20857,11 @@ export default function BaseModule({
             className="history-panel"
             style={{
               transform: `translate(${historyPanelPos.x}px, ${historyPanelPos.y}px)`,
-              cursor: historyDragging ? 'grabbing' : 'default'
+              cursor: historyDragging ? 'grabbing' : 'default',
+              width: isPL ? '90vw' : undefined,
+              height: isPL ? '85vh' : undefined,
+              maxWidth: isPL ? 'none' : undefined,
+              maxHeight: isPL ? 'none' : undefined
             }}
           >
             <div
