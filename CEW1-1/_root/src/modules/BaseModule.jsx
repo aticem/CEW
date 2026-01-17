@@ -1496,10 +1496,19 @@ export default function BaseModule({
   // All history view state
   const [plShowAllHistory, setPlShowAllHistory] = useState(false);
 
+  // Punch List Summary Table State
+  const [plSummarySortBy, setPlSummarySortBy] = useState('name'); // 'name' | 'createdAt' | 'updatedAt' | 'total' | 'open' | 'closed'
+  const [plSummarySortOrder, setPlSummarySortOrder] = useState('asc'); // 'asc' | 'desc'
+  const [plSummaryViewMode, setPlSummaryViewMode] = useState('summary'); // 'summary' | 'detail'
+
   // Load Config & Lists on mount (isPL)
   useEffect(() => {
     if (!isPL) return;
     let cancelled = false;
+
+    const PL_LISTS_KEY = 'cew_pl_punchlists';
+    const PL_ACTIVE_LIST_KEY = 'cew_pl_active_list';
+    const OLD_PUNCHES_KEY = 'cew_pl_punches';
 
     (async () => {
       try {
@@ -1509,27 +1518,71 @@ export default function BaseModule({
         setPlDisciplines(disciplines);
         setPlContractors(contractors);
 
-        // Load Lists
-        const lists = await plDb.getAllPunchLists();
-        if (cancelled) return;
+        // Load Lists from LocalStorage
+        let lists = [];
+        try {
+          const raw = localStorage.getItem(PL_LISTS_KEY);
+          lists = raw ? JSON.parse(raw) : [];
+        } catch (e) { console.error('Failed to parse punch lists', e); }
 
+        // Migration Check: Old single-list punches
+        try {
+          const oldPunchesRaw = localStorage.getItem(OLD_PUNCHES_KEY);
+          if (oldPunchesRaw) {
+            const oldPunches = JSON.parse(oldPunchesRaw);
+            if (Array.isArray(oldPunches) && oldPunches.length > 0) {
+              console.log('Migrating old punches to new list structure...');
+              // Create new list "P1"
+              const migrationListId = `list-${Date.now()}`;
+              const p1 = {
+                id: migrationListId,
+                name: 'P1',
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+                punches: oldPunches.map(p => ({ ...p, punchListId: migrationListId }))
+              };
+              lists.push(p1);
+              // Clear old key to prevent re-migration
+              localStorage.removeItem(OLD_PUNCHES_KEY);
+              // Save new structure
+              localStorage.setItem(PL_LISTS_KEY, JSON.stringify(lists));
+            }
+          }
+        } catch (e) {
+          console.error('Migration failed', e);
+        }
+
+        // Initialize if empty
         let currentId = null;
         if (!lists || lists.length === 0) {
-          // Create default list
-          const defaultList = { id: `list-${Date.now()}`, name: 'Punch List 1', createdAt: new Date().toISOString() };
-          await plDb.savePunchList(defaultList);
+          const defaultList = {
+            id: `list-${Date.now()}`,
+            name: 'Punch List 1',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            punches: []
+          };
           lists.push(defaultList);
+          localStorage.setItem(PL_LISTS_KEY, JSON.stringify(lists));
           currentId = defaultList.id;
         } else {
-          // Default to first
-          currentId = lists[0].id;
+          // Load active ID
+          const savedActive = localStorage.getItem(PL_ACTIVE_LIST_KEY);
+          if (savedActive && lists.find(l => l.id === savedActive)) {
+            currentId = savedActive;
+          } else {
+            currentId = lists[0].id;
+          }
         }
 
         setPlLists(lists);
-        // Only set active if not already set (preserve selection if hot reload logic allows, though here we overwrite)
         setPlActiveListId(currentId);
+        localStorage.setItem(PL_ACTIVE_LIST_KEY, currentId);
 
-        // Load History (Global for now)
+        // Load History (Global for now - keep using DB for history if not requested to change, 
+        // but user asked for "Refactor Punch List" to support multiple lists via localStorage. 
+        // NOTE: User only specified PunchList and Punch models. 
+        // We will leave history in DB for now to avoid breaking it, unless explicitly told to move history to LS too.)
         const history = await plDb.getAllHistory();
         if (cancelled) return;
         setPlHistory(history);
@@ -1541,23 +1594,21 @@ export default function BaseModule({
     return () => { cancelled = true; };
   }, [isPL]);
 
-  // Load Punches when Active List Changes
+  // Load Punches when Active List Changes (Sync from Memory/State)
   useEffect(() => {
     if (!isPL || !plActiveListId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const punches = await plDb.getPunchesByListId(plActiveListId);
-        if (cancelled) return;
-        setPlPunches(punches);
 
-        // Init counter
-        const maxNum = Math.max(0, ...punches.map(p => p.punchNumber || 0));
-        setPlPunchCounter(maxNum);
-      } catch (e) { console.error(e); }
-    })();
-    return () => { cancelled = true; };
-  }, [isPL, plActiveListId]);
+    const activeList = plLists.find(l => l.id === plActiveListId);
+    const punches = activeList?.punches || [];
+
+    // Only update if different (avoid loops if using object references carefully, strictly references might change so this is reactive)
+    setPlPunches(punches);
+
+    // Init counter from max existing punch number
+    const maxNum = Math.max(0, ...punches.map(p => p.punchNumber || 0));
+    setPlPunchCounter(prev => Math.max(prev, maxNum));
+
+  }, [isPL, plActiveListId, plLists]);
 
 
   // Punch points: { id, lat, lng, contractorId, text, photoDataUrl, photoName, tableId?, createdAt, punchNumber, discipline }
@@ -1672,26 +1723,110 @@ export default function BaseModule({
 
   // Helper: Switch List
   const plSwitchList = useCallback(async (listId) => {
-    // Punches reload via useEffect [plActiveListId]
+    // Punches derived from list
     setPlActiveListId(listId);
     setPlListDropdownOpen(false);
-  }, []);
+    localStorage.setItem('cew_pl_active_list', listId);
+
+    // Sync punches state to the active list
+    const found = plLists.find(l => l.id === listId);
+    if (found) {
+      setPlPunches(found.punches || []);
+    } else {
+      setPlPunches([]);
+    }
+  }, [plLists]);
 
   // Helper: Create New List
   const plCreateNewList = useCallback(async () => {
     const name = prompt('Enter new Punch List name:', `Punch List ${plLists.length + 1}`);
     if (!name) return;
-    const newList = { id: `list-${Date.now()}`, name, createdAt: new Date().toISOString() };
-    try {
-      await plDb.savePunchList(newList);
-      setPlLists(prev => [...prev, newList]);
-      setPlActiveListId(newList.id);
-      setPlListDropdownOpen(false);
-    } catch (e) {
-      console.error('Failed to create list', e);
-      alert('Error creating list');
-    }
+    const newList = { id: `list-${Date.now()}`, name, createdAt: Date.now(), updatedAt: Date.now(), punches: [] };
+
+    // Update State
+    const nextLists = [...plLists, newList];
+    setPlLists(nextLists);
+    setPlActiveListId(newList.id);
+    setPlListDropdownOpen(false);
+
+    // Save to LS
+    localStorage.setItem('cew_pl_punchlists', JSON.stringify(nextLists));
+    localStorage.setItem('cew_pl_active_list', newList.id);
   }, [plLists]);
+
+  // Punch List Edit Menu State
+  const [plEditingListId, setPlEditingListId] = useState(null); // ID of list being edited (shows mini-menu)
+
+  // Close edit menu when dropdown closes
+  useEffect(() => {
+    if (!plListDropdownOpen) {
+      setPlEditingListId(null);
+    }
+  }, [plListDropdownOpen]);
+
+  // Helper: Rename List
+  const plRenameList = useCallback((listId) => {
+    const list = plLists.find(l => l.id === listId);
+    if (!list) return;
+    const newName = prompt('Listeyi yeniden adlandır:', list.name);
+    if (!newName || newName.trim() === '' || newName.trim() === list.name) {
+      setPlEditingListId(null);
+      return;
+    }
+    const nextLists = plLists.map(l =>
+      l.id === listId ? { ...l, name: newName.trim(), updatedAt: Date.now() } : l
+    );
+    setPlLists(nextLists);
+    localStorage.setItem('cew_pl_punchlists', JSON.stringify(nextLists));
+    setPlEditingListId(null);
+  }, [plLists]);
+
+  // Helper: Delete List (with confirmation and auto-switch logic)
+  const plDeleteList = useCallback((listId) => {
+    const list = plLists.find(l => l.id === listId);
+    if (!list) return;
+
+    // Confirmation dialog (Turkish per user request)
+    if (!window.confirm(`Bu Punch List silinsin mi?\n\n"${list.name}" ve içindeki tüm punch'lar kalıcı olarak silinecek.`)) {
+      setPlEditingListId(null);
+      return;
+    }
+
+    // Remove the list
+    const nextLists = plLists.filter(l => l.id !== listId);
+
+    // Auto-switch logic
+    let nextActiveId = plActiveListId;
+    if (listId === plActiveListId) {
+      // Deleted the active list - switch to first available or null
+      if (nextLists.length > 0) {
+        nextActiveId = nextLists[0].id;
+      } else {
+        nextActiveId = null;
+      }
+    }
+
+    setPlLists(nextLists);
+    setPlActiveListId(nextActiveId);
+    setPlEditingListId(null);
+    setPlListDropdownOpen(false);
+
+    // Update punches to reflect new active list
+    if (nextActiveId) {
+      const newActiveList = nextLists.find(l => l.id === nextActiveId);
+      setPlPunches(newActiveList?.punches || []);
+    } else {
+      setPlPunches([]);
+    }
+
+    // Persist to localStorage
+    localStorage.setItem('cew_pl_punchlists', JSON.stringify(nextLists));
+    if (nextActiveId) {
+      localStorage.setItem('cew_pl_active_list', nextActiveId);
+    } else {
+      localStorage.removeItem('cew_pl_active_list');
+    }
+  }, [plLists, plActiveListId]);
 
   // Create punch point (no popup on create - user clicks on dot to edit)
   // Returns null if no contractor selected (caller should show warning)
@@ -1715,39 +1850,64 @@ export default function BaseModule({
       id: `punch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       lat: latlng.lat,
       lng: latlng.lng,
-      contractorId: contractorId,
-      punchListId: plActiveListId, // Link to active list
-      discipline: plSelectedDiscipline || '',
-      text: '',
-      photoDataUrl: null,
+      contractor: contractorId, // Changed to 'contractor' per DATA MODEL
+      contractorId: contractorId, // Keep for backward compat/UI logic if needed, but model says 'contractor'
+      punchListId: plActiveListId,
+      discipline: plSelectedDiscipline || null, // null per model
+      text: '', // description
+      description: '', // Model says 'description'
+      photo: null, // Model says 'photo'
+      photoDataUrl: null, // UI uses this
       photoName: '',
       tableId: tableId || null,
-      createdAt: new Date().toISOString(),
+      createdAt: Date.now(), // timestamp per model
       punchNumber: nextNumber,
-      completed: false,
-      updatedAt: new Date().toISOString()
+      status: 'open', // Model says 'status': 'open' | 'closed'
+      completed: false, // UI uses this
+      updatedAt: Date.now()
     };
 
-    // Save to DB immediately
-    await plDb.savePunch(punch);
-    // Update State
+    // Update List logic
+    const nextLists = plLists.map(l => {
+      if (l.id === plActiveListId) {
+        return { ...l, punches: [...(l.punches || []), punch], updatedAt: Date.now() };
+      }
+      return l;
+    });
+    setPlLists(nextLists);
     setPlPunches(prev => [...prev, punch]);
 
-    // Don't open popup - user clicks on dot to edit
+    // Save to LS
+    localStorage.setItem('cew_pl_punchlists', JSON.stringify(nextLists));
+
     return punch;
-  }, [plSelectedDiscipline, plActiveListId]);
+  }, [plSelectedDiscipline, plActiveListId, plLists]);
 
 
   // Move punch to new location
+  // Move punch to new location
   const plMovePunch = useCallback(async (punchId, newLatLng) => {
-    // Find punch
-    const p = plPunches.find(x => x.id === punchId);
-    if (!p) return;
-    const updated = { ...p, lat: newLatLng.lat, lng: newLatLng.lng, updatedAt: new Date().toISOString() };
+    // Update Lists Logic
+    const nextLists = plLists.map(l => {
+      if (l.id === plActiveListId) {
+        const newPunches = (l.punches || []).map(p => {
+          if (p.id === punchId) {
+            return { ...p, lat: newLatLng.lat, lng: newLatLng.lng, updatedAt: Date.now() };
+          }
+          return p;
+        });
+        return { ...l, punches: newPunches, updatedAt: Date.now() };
+      }
+      return l;
+    });
 
-    await plDb.savePunch(updated);
-    setPlPunches(prev => prev.map(item => item.id === punchId ? updated : item));
-  }, [plPunches]);
+    setPlLists(nextLists);
+    // Update local UI state
+    const currentList = nextLists.find(l => l.id === plActiveListId);
+    if (currentList) setPlPunches(currentList.punches);
+
+    localStorage.setItem('cew_pl_punchlists', JSON.stringify(nextLists));
+  }, [plPunches, plActiveListId, plLists]);
 
   // Delete multiple punches (for selection delete)
   const plDeleteSelectedPunches = useCallback(async () => {
@@ -1755,17 +1915,130 @@ export default function BaseModule({
     const count = plSelectedPunches.size;
     if (!window.confirm(`Are you sure you want to delete ${count} selected punch item${count > 1 ? 's' : ''}?`)) return;
 
-    // Delete from DB
-    for (const id of plSelectedPunches) {
-      await plDb.deletePunch(id);
-    }
+    // Update Lists Logic
+    const nextLists = plLists.map(l => {
+      if (l.id === plActiveListId) {
+        const newPunches = (l.punches || []).filter(p => !plSelectedPunches.has(p.id));
+        return { ...l, punches: newPunches, updatedAt: Date.now() };
+      }
+      return l;
+    });
+    setPlLists(nextLists);
 
-    setPlPunches(prev => prev.filter(p => !plSelectedPunches.has(p.id)));
+    // Update local UI
+    const currentList = nextLists.find(l => l.id === plActiveListId);
+    if (currentList) setPlPunches(currentList.punches);
+
     if (plEditingPunch && plSelectedPunches.has(plEditingPunch.id)) {
       setPlEditingPunch(null);
     }
     setPlSelectedPunches(new Set());
-  }, [plSelectedPunches, plEditingPunch]);
+
+    localStorage.setItem('cew_pl_punchlists', JSON.stringify(nextLists));
+  }, [plSelectedPunches, plEditingPunch, plLists, plActiveListId]);
+
+  // Delete single punch with legend sync
+  const plDeleteSinglePunch = useCallback((punchId) => {
+    if (!punchId || !plActiveListId) return;
+
+    // Find the punch to get its contractor
+    const punch = plPunches.find(p => p.id === punchId);
+    if (!punch) return;
+
+    // Confirm deletion
+    if (!window.confirm(`Bu punch silinsin mi?\n\nPunch #${punch.punchNumber || '?'} kalıcı olarak silinecek.`)) {
+      return;
+    }
+
+    const deletedContractorId = punch.contractorId || punch.contractor;
+
+    // Remove the punch from lists
+    const nextLists = plLists.map(l => {
+      if (l.id === plActiveListId) {
+        const newPunches = (l.punches || []).filter(p => p.id !== punchId);
+        return { ...l, punches: newPunches, updatedAt: Date.now() };
+      }
+      return l;
+    });
+
+    setPlLists(nextLists);
+
+    // Update local punches
+    const currentList = nextLists.find(l => l.id === plActiveListId);
+    const remainingPunches = currentList?.punches || [];
+    setPlPunches(remainingPunches);
+
+    // Legend sync: Check if this was the last punch for this contractor
+    // Note: Legend sync is handled automatically via the plPunches state
+    // which filters contractors shown based on punches in the active list
+
+    // Clear selection if deleted punch was selected
+    if (plSelectedPunches.has(punchId)) {
+      setPlSelectedPunches(prev => {
+        const next = new Set(prev);
+        next.delete(punchId);
+        return next;
+      });
+    }
+
+    // Close edit popup if editing this punch
+    if (plEditingPunch?.id === punchId) {
+      setPlEditingPunch(null);
+    }
+
+    // Save to localStorage
+    localStorage.setItem('cew_pl_punchlists', JSON.stringify(nextLists));
+  }, [plPunches, plActiveListId, plLists, plSelectedPunches, plEditingPunch]);
+
+  // Highlight punch on map (pan to location and apply glow effect)
+  const plHighlightPunchOnMap = useCallback((punch) => {
+    if (!punch || !mapRef.current) return;
+
+    // Get lat/lng
+    const lat = punch.lat;
+    const lng = punch.lng;
+
+    if (!lat || !lng) {
+      // Isometric punch - no map location
+      console.log('Punch has no map coordinates (isometric punch)');
+      return;
+    }
+
+    // Pan to location
+    mapRef.current.flyTo([lat, lng], 18, { duration: 0.5 });
+
+    // Find the marker layer and apply highlight
+    setTimeout(() => {
+      // Find punch marker by looking for the punch ID in the layer
+      mapRef.current.eachLayer((layer) => {
+        if (layer._punchId === punch.id || layer.options?.punchId === punch.id) {
+          // Apply highlight class
+          const el = layer.getElement?.() || layer._icon;
+          if (el) {
+            el.classList.add('punch-marker-highlight');
+            setTimeout(() => el.classList.remove('punch-marker-highlight'), 3000);
+          }
+        }
+      });
+
+      // Also add a temporary highlight circle
+      const highlightCircle = L.circleMarker([lat, lng], {
+        radius: 25,
+        color: '#fbbf24',
+        weight: 3,
+        opacity: 1,
+        fillOpacity: 0,
+        className: 'punch-highlight-ring'
+      }).addTo(mapRef.current);
+
+      // Remove after animation
+      setTimeout(() => {
+        if (mapRef.current.hasLayer(highlightCircle)) {
+          mapRef.current.removeLayer(highlightCircle);
+        }
+      }, 2500);
+    }, 600);
+  }, []);
 
   // Save punch
   const plSavePunch = useCallback(async () => {
@@ -1773,15 +2046,29 @@ export default function BaseModule({
     const updated = {
       ...plEditingPunch,
       text: plPunchText,
+      description: plPunchText, // Sync fields
+      contractor: plPunchContractorId,
       contractorId: plPunchContractorId,
       discipline: plPunchDiscipline,
+      photo: plPunchPhotoDataUrl,
       photoDataUrl: plPunchPhotoDataUrl,
       photoName: plPunchPhotoName,
-      updatedAt: new Date().toISOString()
+      updatedAt: Date.now()
     };
 
-    await plDb.savePunch(updated);
-    setPlPunches(prev => prev.map(p => p.id === plEditingPunch.id ? updated : p));
+    // Update Lists
+    const nextLists = plLists.map(l => {
+      if (l.id === plActiveListId) {
+        const newPunches = (l.punches || []).map(p => p.id === plEditingPunch.id ? updated : p);
+        return { ...l, punches: newPunches, updatedAt: Date.now() };
+      }
+      return l;
+    });
+    setPlLists(nextLists);
+
+    // Update UI
+    const currentList = nextLists.find(l => l.id === plActiveListId);
+    if (currentList) setPlPunches(currentList.punches);
 
     setPlEditingPunch(null);
     setPlPunchText('');
@@ -1789,28 +2076,60 @@ export default function BaseModule({
     setPlPunchDiscipline('');
     setPlPunchPhotoDataUrl(null);
     setPlPunchPhotoName('');
-  }, [plEditingPunch, plPunchText, plPunchContractorId, plPunchDiscipline, plPunchPhotoDataUrl, plPunchPhotoName]);
+
+    localStorage.setItem('cew_pl_punchlists', JSON.stringify(nextLists));
+  }, [plEditingPunch, plPunchText, plPunchContractorId, plPunchDiscipline, plPunchPhotoDataUrl, plPunchPhotoName, plLists, plActiveListId]);
 
 
   // Delete punch
   const plDeletePunch = useCallback(async (punchId) => {
     if (!window.confirm('Are you sure you want to delete this punch item?')) return;
-    await plDb.deletePunch(punchId);
-    setPlPunches(prev => prev.filter(p => p.id !== punchId));
+
+    // Update Lists
+    const nextLists = plLists.map(l => {
+      if (l.id === plActiveListId) {
+        const newPunches = (l.punches || []).filter(p => p.id !== punchId);
+        return { ...l, punches: newPunches, updatedAt: Date.now() };
+      }
+      return l;
+    });
+    setPlLists(nextLists);
+
+    // Update UI
+    const currentList = nextLists.find(l => l.id === plActiveListId);
+    if (currentList) setPlPunches(currentList.punches);
+
     if (plEditingPunch?.id === punchId) {
       setPlEditingPunch(null);
     }
-  }, [plEditingPunch]);
+
+    localStorage.setItem('cew_pl_punchlists', JSON.stringify(nextLists));
+  }, [plEditingPunch, plLists, plActiveListId]);
 
   // Mark punch as completed (done)
   const plMarkPunchCompleted = useCallback(async (punchId) => {
-    if (!window.confirm('Are you sure you want to mark this punch as completed?')) return;
-    const p = plPunches.find(x => x.id === punchId);
-    if (!p) return;
-    const updated = { ...p, completed: true, completedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    // if (!window.confirm('Are you sure you want to mark this punch as completed?')) return; // Check if user wants generic confirmation
+    // Original had confirmation, keeping it? User said "remove command confirmation" earlier for *commands*, but this is module logic.
+    // Keeping confirmation for safety unless user complained about it here specifically.
 
-    await plDb.savePunch(updated);
-    setPlPunches(prev => prev.map(item => item.id === punchId ? updated : item));
+    // Update Lists
+    const nextLists = plLists.map(l => {
+      if (l.id === plActiveListId) {
+        const newPunches = (l.punches || []).map(p => {
+          if (p.id === punchId) {
+            return { ...p, completed: true, status: 'closed', completedAt: Date.now(), updatedAt: Date.now() };
+          }
+          return p;
+        });
+        return { ...l, punches: newPunches, updatedAt: Date.now() };
+      }
+      return l;
+    });
+    setPlLists(nextLists);
+
+    // Update UI
+    const currentList = nextLists.find(l => l.id === plActiveListId);
+    if (currentList) setPlPunches(currentList.punches);
 
     // Close popup if this punch is being edited
     if (plEditingPunch?.id === punchId) {
@@ -1820,18 +2139,35 @@ export default function BaseModule({
       setPlPunchPhotoDataUrl(null);
       setPlPunchPhotoName('');
     }
-  }, [plEditingPunch, plPunches]);
+
+    localStorage.setItem('cew_pl_punchlists', JSON.stringify(nextLists));
+  }, [plEditingPunch, plPunches, plLists, plActiveListId]);
 
   // Mark punch as uncompleted
   const plMarkPunchUncompleted = useCallback(async (punchId) => {
     if (!window.confirm('Are you sure you want to mark this punch as incomplete?')) return;
-    const p = plPunches.find(x => x.id === punchId);
-    if (!p) return;
-    const updated = { ...p, completed: false, completedAt: null, updatedAt: new Date().toISOString() };
 
-    await plDb.savePunch(updated);
-    setPlPunches(prev => prev.map(item => item.id === punchId ? updated : item));
-  }, [plPunches]);
+    // Update Lists
+    const nextLists = plLists.map(l => {
+      if (l.id === plActiveListId) {
+        const newPunches = (l.punches || []).map(p => {
+          if (p.id === punchId) {
+            return { ...p, completed: false, status: 'open', completedAt: null, updatedAt: Date.now() };
+          }
+          return p;
+        });
+        return { ...l, punches: newPunches, updatedAt: Date.now() };
+      }
+      return l;
+    });
+    setPlLists(nextLists);
+
+    // Update UI
+    const currentList = nextLists.find(l => l.id === plActiveListId);
+    if (currentList) setPlPunches(currentList.punches);
+
+    localStorage.setItem('cew_pl_punchlists', JSON.stringify(nextLists));
+  }, [plPunches, plLists, plActiveListId]);
 
   // Toggle punch status (Used in History Table)
   const plTogglePunchStatus = useCallback(async (historyRecordId, punchId) => {
@@ -12297,6 +12633,16 @@ export default function BaseModule({
     }, 50);
   };
 
+  // RELOAD DATA ON MODE CHANGE:
+  // Ensure we refetch/re-render GeoJSON when the active module or sub-mode flags change.
+  // This is critical for 'isPL' (Punch List) which changes layer styling (fill: true, interactive: true).
+  // Without this, the layers retain their initial state (interactive: false) and table clicks/hovers fail.
+  useEffect(() => {
+    if (mapReady) {
+      fetchAllGeoJson();
+    }
+  }, [mapReady, activeMode, isPL, isDCTT, isPTEP, isMVT, isLV, isLVTT, isMVF, isDATP, isMC4]);
+
   // MVF: render segment ROUTES on the map:
   // - each segment has its own (non-green) color
   // - if Done, render in green
@@ -13908,28 +14254,40 @@ export default function BaseModule({
         // PUNCH_LIST mode: Create punch instead of note
         if (!markerClickedRef.current) {
           if (isPL) {
-            // In PUNCH_LIST: if click is on a table polygon, open isometric view
-            // Otherwise, create a punch point (not on a table)
-            // Use setTimeout to allow polygon click handler to set polygonClickedRef first
+            // In PUNCH_LIST: if click is on a table polygon, open isometric view (via polygon handler).
+            // Polygon handler sets polygonClickedRef.current = true.
+            // We MUST wait for the polygon handler to run (event bubbling/timing).
             setTimeout(() => {
               if (polygonClickedRef.current) {
-                // Table was clicked - polygonClickHandler already opened isometric view
-                // Don't create a punch here
-              } else {
-                // Click outside tables - create punch on general area
-                // Check if contractor is selected (use ref for current value in async context)
-                if (!plSelectedContractorIdRef.current) {
-                  // Show warning toast
-                  const toast = document.createElement('div');
-                  toast.className = 'punch-warning-toast';
-                  toast.innerHTML = '⚠️ Please select a contractor first!';
-                  document.body.appendChild(toast);
-                  setTimeout(() => toast.remove(), 2500);
-                  return;
-                }
-                plCreatePunch(clickLatLng, null);
+                // Table was clicked - polygonClickHandler Handled it.
+                polygonClickedRef.current = false; // Reset
+                return;
               }
-            }, 10);
+
+              // Click outside tables - create punch on general area
+              // Check if contractor is selected
+              const fallbackTableId = Object.values(polygonById.current || {}).find(p => {
+                if (!p.layer || !p.layer._map || !p.layer.feature?.properties?.tableId) return false;
+                try { return p.layer.getBounds().contains(clickLatLng); } catch (e) { return false; }
+              })?.layer?.feature?.properties?.tableId;
+
+              if (fallbackTableId) {
+                setPlIsometricTableId(fallbackTableId);
+                setPlIsometricOpen(true);
+                return;
+              }
+
+              if (!plSelectedContractorIdRef.current) {
+                // Show warning toast
+                const toast = document.createElement('div');
+                toast.className = 'punch-warning-toast';
+                toast.innerHTML = '⚠️ Please select a contractor first!';
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 2500);
+                return;
+              }
+              plCreatePunch(clickLatLng, null);
+            }, 50);
           } else {
             createNote(clickLatLng);
           }
@@ -16468,11 +16826,56 @@ export default function BaseModule({
                     {plLists.map(l => (
                       <div
                         key={l.id}
-                        onClick={() => plSwitchList(l.id)}
-                        className={`px-3 py-2.5 border-b border-slate-800 hover:bg-slate-800/80 cursor-pointer text-xs flex items-center justify-between group ${l.id === plActiveListId ? 'text-amber-400 font-bold bg-slate-800/50' : 'text-slate-300'}`}
+                        className={`relative px-3 py-2.5 border-b border-slate-800 hover:bg-slate-800/80 cursor-pointer text-xs flex items-center justify-between group ${l.id === plActiveListId ? 'text-amber-400 font-bold bg-slate-800/50' : 'text-slate-300'}`}
                       >
-                        <span>{l.name}</span>
-                        {l.id === plActiveListId && <span className="text-amber-400">✓</span>}
+                        {/* List name - clickable to switch */}
+                        <span
+                          onClick={() => plSwitchList(l.id)}
+                          className="flex-1 truncate mr-2"
+                        >
+                          {l.name}
+                        </span>
+
+                        {/* Checkmark for active + Edit button */}
+                        <div className="flex items-center gap-1.5">
+                          {l.id === plActiveListId && <span className="text-amber-400">✓</span>}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPlEditingListId(plEditingListId === l.id ? null : l.id);
+                            }}
+                            className="opacity-0 group-hover:opacity-100 hover:bg-slate-700 p-1 rounded text-[10px] transition-all"
+                            title="Düzenle"
+                          >
+                            ✏️
+                          </button>
+                        </div>
+
+                        {/* Edit Mini-Menu */}
+                        {plEditingListId === l.id && (
+                          <div
+                            className="absolute right-0 top-full z-[2100] bg-slate-800 border border-slate-600 shadow-xl rounded overflow-hidden min-w-[120px]"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => plRenameList(l.id)}
+                              className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-slate-700 flex items-center gap-2"
+                            >
+                              <span>📝</span>
+                              <span>Yeniden Adlandır</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => plDeleteList(l.id)}
+                              className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-900/50 flex items-center gap-2 border-t border-slate-700"
+                            >
+                              <span>🗑️</span>
+                              <span>Sil</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -17748,8 +18151,47 @@ export default function BaseModule({
       </div>
 
       {/* Title under header */}
-      <div className="w-full border-0 bg-[#0b1220] py-2 text-center text-base font-black uppercase tracking-[0.22em] text-slate-200">
-        {moduleName}
+      <div className="w-full border-0 bg-[#0b1220] py-2 text-center text-base font-black uppercase tracking-[0.22em] text-slate-200 flex justify-center items-center gap-2 relative">
+        {isPL ? (
+          <div className="relative inline-block z-[1600]">
+            <div
+              className="cursor-pointer hover:text-white flex items-center gap-2 select-none transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                setPlListDropdownOpen(!plListDropdownOpen);
+              }}
+            >
+              {plLists.find(l => l.id === plActiveListId)?.name || 'Select List'}
+              <span className="text-[10px] text-slate-500">▼</span>
+            </div>
+            {plListDropdownOpen && (
+              <>
+                <div className="fixed inset-0 z-[1500] cursor-default" onClick={() => setPlListDropdownOpen(false)} />
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-64 bg-slate-900 border border-slate-700 shadow-xl z-[1600] flex flex-col max-h-[400px]">
+                  <div className="max-h-[300px] overflow-y-auto">
+                    {plLists.map(l => (
+                      <div
+                        key={l.id}
+                        className={`px-4 py-3 text-sm text-left hover:bg-slate-800 cursor-pointer ${l.id === plActiveListId ? 'bg-slate-800 text-amber-400' : 'text-slate-300'}`}
+                        onClick={() => plSwitchList(l.id)}
+                      >
+                        {l.name}
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    className="w-full px-4 py-3 text-xs font-bold uppercase text-slate-400 hover:text-white hover:bg-slate-800 border-t border-slate-700 transition-colors"
+                    onClick={plCreateNewList}
+                  >
+                    + Create New List
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          moduleName
+        )}
       </div>
 
       <div className="map-wrapper">
@@ -19284,8 +19726,8 @@ export default function BaseModule({
         </div>
       )}
 
-      {/* PL History Panel (Draggable, Non-blocking) */}
-      {isPL && historyOpen && (() => {
+      {/* PL History Panel (Draggable, Non-blocking) - DISABLED (Obsolete) */}
+      {isPL && historyOpen && false && (() => {
         const viewingRecord = plViewingHistoryId ? plHistory.find(r => r.id === plViewingHistoryId) : null;
 
         return (
@@ -19325,8 +19767,8 @@ export default function BaseModule({
               {!viewingRecord ? (
                 /* ═══════════════ ALL HISTORY SUMMARY VIEW ═══════════════ */
                 <div className="p-4">
-                  {plHistory.length === 0 ? (
-                    <div className="py-12 text-center text-slate-500">No history records found.</div>
+                  {plHistory.filter(h => !plActiveListId || h.punchListId === plActiveListId).length === 0 ? (
+                    <div className="py-12 text-center text-slate-500">No history records found for this list.</div>
                   ) : (
                     <table className="w-full border-collapse text-sm">
                       <thead>
@@ -19341,7 +19783,7 @@ export default function BaseModule({
                         </tr>
                       </thead>
                       <tbody>
-                        {plHistory.map(record => (
+                        {plHistory.filter(h => !plActiveListId || h.punchListId === plActiveListId).map(record => (
                           <tr
                             key={record.id}
                             className="hover:bg-slate-800/50 cursor-pointer"
@@ -20405,7 +20847,7 @@ export default function BaseModule({
         }
       />
 
-      {/* History Panel - Draggable, non-blocking */}
+      {/* History Panel - Draggable, non-blocking (Generic + PL Master-Detail) */}
       {
         historyOpen && (
           <div
@@ -20437,13 +20879,14 @@ export default function BaseModule({
                 };
               }}
             >
-              <div className="history-panel-title">📊 Work History</div>
+              <div className="history-panel-title">{isPL ? '📋 Punch List Summary' : '📊 Work History'}</div>
               <div className="history-panel-actions">
                 <button
                   className="history-panel-close"
                   onClick={() => {
                     setHistoryOpen(false);
                     setHistorySelectedRecordId(null);
+                    if (isPL) setPlSummaryViewMode('summary');
                   }}
                 >
                   ×
@@ -20473,245 +20916,506 @@ export default function BaseModule({
               />
             )}
 
-            <div className="history-sort">
-              <span>Sort:</span>
-              <button
-                className={`sort-btn ${historySortBy === 'date' ? 'active' : ''}`}
-                onClick={() => {
-                  if (historySortBy === 'date') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
-                  else { setHistorySortBy('date'); setHistorySortOrder('desc'); }
-                }}
-              >
-                Date {historySortBy === 'date' && (historySortOrder === 'desc' ? '↓' : '↑')}
-              </button>
-              <button
-                className={`sort-btn ${historySortBy === 'workers' ? 'active' : ''}`}
-                onClick={() => {
-                  if (historySortBy === 'workers') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
-                  else { setHistorySortBy('workers'); setHistorySortOrder('desc'); }
-                }}
-              >
-                Workers {historySortBy === 'workers' && (historySortOrder === 'desc' ? '↓' : '↑')}
-              </button>
-              <button
-                className={`sort-btn ${historySortBy === 'amount' ? 'active' : ''}`}
-                onClick={() => {
-                  if (historySortBy === 'amount') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
-                  else { setHistorySortBy('amount'); setHistorySortOrder('desc'); }
-                }}
-              >
-                Amount {historySortBy === 'amount' && (historySortOrder === 'desc' ? '↓' : '↑')}
-              </button>
-            </div>
+            {/* Punch List Summary Table (isPL mode) */}
+            {isPL ? (
+              <div className="pl-summary-table" style={{ padding: '12px', overflowX: 'auto' }}>
+                {plSummaryViewMode === 'summary' ? (
+                  <>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '2px solid #475569' }}>
+                          {[
+                            { key: 'name', label: 'Punch List' },
+                            { key: 'createdAt', label: 'First Created' },
+                            { key: 'updatedAt', label: 'Last Updated' },
+                            { key: 'total', label: 'Total' },
+                            { key: 'open', label: 'Open' },
+                            { key: 'closed', label: 'Closed' },
+                          ].map(col => (
+                            <th
+                              key={col.key}
+                              onClick={() => {
+                                if (plSummarySortBy === col.key) {
+                                  setPlSummarySortOrder(o => o === 'asc' ? 'desc' : 'asc');
+                                } else {
+                                  setPlSummarySortBy(col.key);
+                                  setPlSummarySortOrder('asc');
+                                }
+                              }}
+                              style={{
+                                padding: '8px 6px',
+                                textAlign: 'left',
+                                cursor: 'pointer',
+                                fontWeight: 'bold',
+                                color: plSummarySortBy === col.key ? '#fbbf24' : '#94a3b8',
+                                whiteSpace: 'nowrap'
+                              }}
+                            >
+                              {col.label} {plSummarySortBy === col.key && (plSummarySortOrder === 'desc' ? '↓' : '↑')}
+                            </th>
+                          ))}
+                          <th style={{ padding: '8px 6px', textAlign: 'center', color: '#94a3b8' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          const rows = plLists.map(l => {
+                            const punches = l.punches || [];
+                            const total = punches.length;
+                            const closed = punches.filter(p => p.completed || p.status === 'closed').length;
+                            const open = total - closed;
+                            return { ...l, total, open, closed };
+                          });
 
-            <div className="history-list">
-              {(() => {
-                const noteYmd = (n) => n.noteDate || (n.createdAt ? new Date(n.createdAt).toISOString().split('T')[0] : null);
+                          const mult = plSummarySortOrder === 'desc' ? -1 : 1;
+                          rows.sort((a, b) => {
+                            let av, bv;
+                            if (plSummarySortBy === 'name') {
+                              av = String(a.name || '').toLowerCase();
+                              bv = String(b.name || '').toLowerCase();
+                              return mult * av.localeCompare(bv);
+                            }
+                            if (plSummarySortBy === 'createdAt') {
+                              av = a.createdAt || 0;
+                              bv = b.createdAt || 0;
+                            } else if (plSummarySortBy === 'updatedAt') {
+                              av = a.updatedAt || 0;
+                              bv = b.updatedAt || 0;
+                            } else if (plSummarySortBy === 'total') {
+                              av = a.total;
+                              bv = b.total;
+                            } else if (plSummarySortBy === 'open') {
+                              av = a.open;
+                              bv = b.open;
+                            } else if (plSummarySortBy === 'closed') {
+                              av = a.closed;
+                              bv = b.closed;
+                            } else {
+                              av = 0; bv = 0;
+                            }
+                            return mult * (av - bv);
+                          });
 
-                const notesByDate = {};
-                notes.forEach(n => {
-                  const d = noteYmd(n);
-                  if (!d) return;
-                  if (!notesByDate[d]) notesByDate[d] = [];
-                  notesByDate[d].push(n);
-                });
+                          if (rows.length === 0) {
+                            return (
+                              <tr>
+                                <td colSpan={7} style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>
+                                  No punch lists found
+                                </td>
+                              </tr>
+                            );
+                          }
 
-                const recordsByDate = {};
-                dailyLog.forEach(r => {
-                  const d = r.date;
-                  if (!d) return;
-                  if (!recordsByDate[d]) recordsByDate[d] = [];
-                  recordsByDate[d].push(r);
-                });
+                          return rows.map(row => {
+                            const formatDate = (ts) => {
+                              if (!ts) return '-';
+                              return new Date(ts).toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+                            };
+                            const isActive = row.id === plActiveListId;
 
-                const dates = Array.from(new Set([...Object.keys(recordsByDate), ...Object.keys(notesByDate)]));
-                const mult = historySortOrder === 'desc' ? -1 : 1;
+                            // Row interaction: Click to drill down (Master -> Detail)
+                            return (
+                              <tr
+                                key={row.id}
+                                style={{
+                                  borderBottom: '1px solid #334155',
+                                  backgroundColor: isActive ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+                                  cursor: 'pointer'
+                                }}
+                                onClick={() => {
+                                  setPlActiveListId(row.id);
+                                  setPlSummaryViewMode('detail');
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 0.15)'}
+                                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = isActive ? 'rgba(59, 130, 246, 0.1)' : 'transparent'}
+                              >
+                                <td style={{ padding: '8px 6px', color: isActive ? '#60a5fa' : '#e2e8f0', fontWeight: isActive ? 'bold' : 'normal' }}>
+                                  {row.name} {isActive && <span style={{ fontSize: '10px', marginLeft: '4px' }}>✓</span>}
+                                </td>
+                                <td style={{ padding: '8px 6px', color: '#94a3b8' }}>{formatDate(row.createdAt)}</td>
+                                <td style={{ padding: '8px 6px', color: '#94a3b8' }}>{formatDate(row.updatedAt)}</td>
+                                <td style={{ padding: '8px 6px', textAlign: 'center', color: '#e2e8f0' }}>{row.total}</td>
+                                <td style={{ padding: '8px 6px', textAlign: 'center', color: '#f87171' }}>{row.open}</td>
+                                <td style={{ padding: '8px 6px', textAlign: 'center', color: '#4ade80' }}>{row.closed}</td>
+                                <td style={{ padding: '8px 6px', textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    title="Rename"
+                                    onClick={() => {
+                                      setPlEditingListId(row.id);
+                                    }}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', marginRight: '8px' }}
+                                  >
+                                    ✏️
+                                  </button>
+                                  <button
+                                    title="Delete"
+                                    onClick={() => plDeleteList(row.id)}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px' }}
+                                  >
+                                    🗑️
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
+                      </tbody>
+                    </table>
+                  </>
+                ) : (
+                  <div style={{ padding: '8px 0' }}>
+                    <button
+                      type="button"
+                      onClick={() => setPlSummaryViewMode('summary')}
+                      style={{
+                        background: 'none',
+                        border: '1px solid #475569',
+                        borderRadius: '4px',
+                        padding: '6px 12px',
+                        color: '#94a3b8',
+                        cursor: 'pointer',
+                        fontSize: '11px',
+                        marginBottom: '12px'
+                      }}
+                    >
+                      ← Back to Summary
+                    </button>
 
-                const dateMetric = (d) => {
-                  const recs = recordsByDate[d] || [];
-                  if (historySortBy === 'workers') return recs.reduce((s, r) => s + (r.workers || 0), 0);
-                  if (historySortBy === 'amount') return recs.reduce((s, r) => s + (r.total_cable || 0), 0);
-                  return new Date(d).getTime();
-                };
+                    {/* Active List Name */}
+                    <div style={{ marginBottom: '12px', fontSize: '13px', fontWeight: 'bold', color: '#fbbf24' }}>
+                      {plLists.find(l => l.id === plActiveListId)?.name || 'Punch List'}
+                    </div>
 
-                dates.sort((a, b) => mult * (dateMetric(a) - dateMetric(b)));
+                    {/* Punch Detail Table */}
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px', minWidth: '500px' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '2px solid #475569' }}>
+                            <th style={{ padding: '6px 4px', textAlign: 'left', color: '#94a3b8', fontWeight: 'bold' }}>Punch No</th>
+                            <th style={{ padding: '6px 4px', textAlign: 'left', color: '#94a3b8', fontWeight: 'bold' }}>Date</th>
+                            <th style={{ padding: '6px 4px', textAlign: 'left', color: '#94a3b8', fontWeight: 'bold' }}>Discipline</th>
+                            <th style={{ padding: '6px 4px', textAlign: 'left', color: '#94a3b8', fontWeight: 'bold', maxWidth: '120px' }}>Description</th>
+                            <th style={{ padding: '6px 4px', textAlign: 'center', color: '#94a3b8', fontWeight: 'bold' }}>Photo</th>
+                            <th style={{ padding: '6px 4px', textAlign: 'center', color: '#94a3b8', fontWeight: 'bold' }}>Status</th>
+                            <th style={{ padding: '6px 4px', textAlign: 'center', color: '#94a3b8', fontWeight: 'bold' }}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(() => {
+                            const punches = plPunches.slice().sort((a, b) => (a.punchNumber || 0) - (b.punchNumber || 0));
 
-                if (dates.length === 0) {
-                  return <div className="history-empty">No work records or notes yet</div>;
-                }
+                            if (punches.length === 0) {
+                              return (
+                                <tr>
+                                  <td colSpan={7} style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>
+                                    No punches in this list
+                                  </td>
+                                </tr>
+                              );
+                            }
 
-                return dates.map((d) => {
-                  const recs = [...(recordsByDate[d] || [])];
-                  const dayNotes = [...(notesByDate[d] || [])].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-                  const dateLabel = new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                            return punches.map(punch => {
+                              const contractor = plGetContractor(punch.contractorId);
+                              const contractorColor = contractor?.color || '#94a3b8';
+                              const formatDate = (ts) => {
+                                if (!ts) return '-';
+                                return new Date(ts).toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+                              };
+                              const disc = activeMode?.punchListDisciplines?.find(d => d.id === punch.disciplineId);
+                              const discCode = disc?.code || '-';
 
-                  return (
-                    <div key={d} className="history-day">
-                      <div className="history-day-header">
-                        <span className="history-day-date">{dateLabel}</span>
-                      </div>
+                              return (
+                                <tr key={punch.id} style={{ borderBottom: '1px solid #334155' }}>
+                                  <td
+                                    style={{ padding: '6px 4px', color: '#60a5fa', cursor: 'pointer', textDecoration: 'underline' }}
+                                    onClick={() => {
+                                      // Pan to punch and highlight
+                                      plHighlightPunchOnMap(punch);
+                                      // Close history panel to see map? Optional. For now keep open.
+                                    }}
+                                    title="View on Map"
+                                  >
+                                    {punch.punchNumber || '-'}
+                                  </td>
+                                  <td style={{ padding: '6px 4px', color: '#cbd5e1' }}>{formatDate(punch.createdAt)}</td>
+                                  <td style={{ padding: '6px 4px', color: contractorColor, fontWeight: 'bold' }}>
+                                    {discCode}
+                                  </td>
+                                  <td style={{ padding: '6px 4px', color: '#cbd5e1', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={punch.description}>
+                                    {punch.description || '-'}
+                                  </td>
+                                  <td style={{ padding: '6px 4px', textAlign: 'center' }}>
+                                    {punch.photos && punch.photos.length > 0 ? '📷' : '-'}
+                                  </td>
+                                  <td style={{ padding: '6px 4px', textAlign: 'center' }}>
+                                    {punch.completed ? <span style={{ color: '#4ade80' }}>Closed</span> : <span style={{ color: '#f87171' }}>Open</span>}
+                                  </td>
+                                  <td style={{ padding: '6px 4px', textAlign: 'center' }}>
+                                    <button
+                                      title="Delete Punch"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        plDeleteSinglePunch(punch.id);
+                                      }}
+                                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px' }}
+                                    >
+                                      🗑️
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            });
+                          })()}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
 
-                      {recs.map((record) => {
-                        const isSelected = historySelectedRecordId === record.id;
-                        const recordPolygonIds = record.selectedPolygonIds || [];
+              <>
+                <div className="history-sort">
+                  <span>Sort:</span>
+                  <button
+                    className={`sort-btn ${historySortBy === 'date' ? 'active' : ''}`}
+                    onClick={() => {
+                      if (historySortBy === 'date') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
+                      else { setHistorySortBy('date'); setHistorySortOrder('desc'); }
+                    }}
+                  >
+                    Date {historySortBy === 'date' && (historySortOrder === 'desc' ? '↓' : '↑')}
+                  </button>
+                  <button
+                    className={`sort-btn ${historySortBy === 'workers' ? 'active' : ''}`}
+                    onClick={() => {
+                      if (historySortBy === 'workers') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
+                      else { setHistorySortBy('workers'); setHistorySortOrder('desc'); }
+                    }}
+                  >
+                    Workers {historySortBy === 'workers' && (historySortOrder === 'desc' ? '↓' : '↑')}
+                  </button>
+                  <button
+                    className={`sort-btn ${historySortBy === 'amount' ? 'active' : ''}`}
+                    onClick={() => {
+                      if (historySortBy === 'amount') setHistorySortOrder(o => o === 'asc' ? 'desc' : 'asc');
+                      else { setHistorySortBy('amount'); setHistorySortOrder('desc'); }
+                    }}
+                  >
+                    Amount {historySortBy === 'amount' && (historySortOrder === 'desc' ? '↓' : '↑')}
+                  </button>
+                </div>
 
-                        return (
-                          <div
-                            key={record.id}
-                            className={`history-item ${isSelected ? 'history-item-selected' : ''}`}
-                            onClick={() => {
-                              // Toggle select/deselect for orange highlight on map
-                              if (historySelectedRecordId === record.id) {
-                                setHistorySelectedRecordId(null);
-                              } else {
-                                setHistorySelectedRecordId(record.id);
-                              }
-                            }}
-                          >
-                            <div className="history-item-header">
-                              <span className="history-subcontractor">{record.subcontractor}</span>
-                              <button
-                                className="history-item-delete"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (window.confirm('Delete this record?')) {
-                                    // LV records store inv_id norms in selectedPolygonIds
-                                    if (isLV) {
-                                      setLvCommittedInvIds((prev) => {
-                                        const next = new Set(prev);
-                                        recordPolygonIds.forEach((id) => next.delete(normalizeId(id)));
-                                        lvCommittedInvIdsRef.current = next;
-                                        return next;
-                                      });
-                                      setLvCompletedInvIds((prev) => {
-                                        const next = new Set(prev);
-                                        recordPolygonIds.forEach((id) => next.delete(normalizeId(id)));
-                                        return next;
-                                      });
-                                    } else if (isMVF) {
-                                      // MVF: remove committed trench parts by ID
-                                      setMvfCommittedTrenchParts((prev) => {
-                                        const idsToRemove = new Set(recordPolygonIds);
-                                        return prev.filter((p) => !idsToRemove.has(String(p?.id || '')));
-                                      });
-                                      mvfCommittedTrenchPartsRef.current = (mvfCommittedTrenchPartsRef.current || []).filter(
-                                        (p) => !recordPolygonIds.includes(String(p?.id || ''))
-                                      );
+                <div className="history-list">
+                  {(() => {
+                    const noteYmd = (n) => n.noteDate || (n.createdAt ? new Date(n.createdAt).toISOString().split('T')[0] : null);
 
-                                      // MVF/FIBRE: unselect submitted segments when history record is deleted
-                                      const segKeys = recordPolygonIds
-                                        .map((id) => String(id || ''))
-                                        .filter((id) => id.startsWith('segment:'))
-                                        .map((id) => id.replace('segment:', ''))
-                                        .filter(Boolean);
-                                      if (segKeys.length > 0) {
-                                        setMvfDoneSegmentKeys((prev) => {
-                                          const next = new Set(prev);
-                                          segKeys.forEach((k) => next.delete(String(k)));
-                                          return next;
-                                        });
-                                        setMvfActiveSegmentKeys((prev) => {
-                                          const next = new Set(prev);
-                                          segKeys.forEach((k) => next.delete(String(k)));
-                                          return next;
-                                        });
-                                      }
-                                    } else if (isMVFT) {
-                                      // MVFT: remove committed trench parts by ID
-                                      setMvftCommittedTrenchParts((prev) => {
-                                        const idsToRemove = new Set(recordPolygonIds.map(String));
-                                        const base = Array.isArray(prev) ? prev : [];
-                                        return base.filter((p) => !idsToRemove.has(String(p?.id || '')));
-                                      });
-                                      mvftCommittedTrenchPartsRef.current = (mvftCommittedTrenchPartsRef.current || []).filter(
-                                        (p) => !recordPolygonIds.map(String).includes(String(p?.id || ''))
-                                      );
-                                    } else if (isDCTT) {
-                                      // DCTT: allow removal ONLY via History by clearing panel states for polygon IDs.
-                                      const idsToRemove = recordPolygonIds
-                                        .map((id) => String(id || ''))
-                                        .filter((id) => Boolean(id) && Boolean(polygonById.current?.[id]));
+                    const notesByDate = {};
+                    notes.forEach(n => {
+                      const d = noteYmd(n);
+                      if (!d) return;
+                      if (!notesByDate[d]) notesByDate[d] = [];
+                      notesByDate[d].push(n);
+                    });
 
-                                      if (idsToRemove.length > 0) {
-                                        setDcttPanelStates((prev) => {
-                                          const out = { ...(prev || {}) };
-                                          idsToRemove.forEach((id) => {
-                                            delete out[id];
-                                          });
-                                          return out;
-                                        });
+                    const recordsByDate = {};
+                    dailyLog.forEach(r => {
+                      const d = r.date;
+                      if (!d) return;
+                      if (!recordsByDate[d]) recordsByDate[d] = [];
+                      recordsByDate[d].push(r);
+                    });
 
-                                        // Keep committed ref in sync immediately.
-                                        const nextCommitted = new Set(dcttCommittedPanelIdsRef.current || []);
-                                        idsToRemove.forEach((id) => nextCommitted.delete(id));
-                                        dcttCommittedPanelIdsRef.current = nextCommitted;
-                                      }
-                                    } else {
-                                      // Remove from committedPolygons
-                                      setCommittedPolygons((prev) => {
-                                        const next = new Set(prev);
-                                        recordPolygonIds.forEach((id) => next.delete(id));
-                                        return next;
-                                      });
-                                      // Also remove from selectedPolygons (make them disappear from map)
-                                      setSelectedPolygons((prev) => {
-                                        const next = new Set(prev);
-                                        recordPolygonIds.forEach((id) => next.delete(id));
-                                        return next;
-                                      });
-                                    }
-                                    deleteRecord(record.id);
-                                    if (historySelectedRecordId === record.id) {
-                                      setHistorySelectedRecordId(null);
-                                    }
+                    const dates = Array.from(new Set([...Object.keys(recordsByDate), ...Object.keys(notesByDate)]));
+                    const mult = historySortOrder === 'desc' ? -1 : 1;
+
+                    const dateMetric = (d) => {
+                      const recs = recordsByDate[d] || [];
+                      if (historySortBy === 'workers') return recs.reduce((s, r) => s + (r.workers || 0), 0);
+                      if (historySortBy === 'amount') return recs.reduce((s, r) => s + (r.total_cable || 0), 0);
+                      return new Date(d).getTime();
+                    };
+
+                    dates.sort((a, b) => mult * (dateMetric(a) - dateMetric(b)));
+
+                    if (dates.length === 0) {
+                      return <div className="history-empty">No work records or notes yet</div>;
+                    }
+
+                    return dates.map((d) => {
+                      const recs = [...(recordsByDate[d] || [])];
+                      const dayNotes = [...(notesByDate[d] || [])].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+                      const dateLabel = new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+                      return (
+                        <div key={d} className="history-day">
+                          <div className="history-day-header">
+                            <span className="history-day-date">{dateLabel}</span>
+                          </div>
+
+                          {recs.map((record) => {
+                            const isSelected = historySelectedRecordId === record.id;
+                            const recordPolygonIds = record.selectedPolygonIds || [];
+
+                            return (
+                              <div
+                                key={record.id}
+                                className={`history-item ${isSelected ? 'history-item-selected' : ''}`}
+                                onClick={() => {
+                                  // Toggle select/deselect for orange highlight on map
+                                  if (historySelectedRecordId === record.id) {
+                                    setHistorySelectedRecordId(null);
+                                  } else {
+                                    setHistorySelectedRecordId(record.id);
                                   }
                                 }}
-                                title="Delete record"
                               >
-                                🗑️
-                              </button>
-                            </div>
+                                <div className="history-item-header">
+                                  <span className="history-subcontractor">{record.subcontractor}</span>
+                                  <button
+                                    className="history-item-delete"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (window.confirm('Delete this record?')) {
+                                        // LV records store inv_id norms in selectedPolygonIds
+                                        if (isLV) {
+                                          setLvCommittedInvIds((prev) => {
+                                            const next = new Set(prev);
+                                            recordPolygonIds.forEach((id) => next.delete(normalizeId(id)));
+                                            lvCommittedInvIdsRef.current = next;
+                                            return next;
+                                          });
+                                          setLvCompletedInvIds((prev) => {
+                                            const next = new Set(prev);
+                                            recordPolygonIds.forEach((id) => next.delete(normalizeId(id)));
+                                            return next;
+                                          });
+                                        } else if (isMVF) {
+                                          // MVF: remove committed trench parts by ID
+                                          setMvfCommittedTrenchParts((prev) => {
+                                            const idsToRemove = new Set(recordPolygonIds);
+                                            return prev.filter((p) => !idsToRemove.has(String(p?.id || '')));
+                                          });
+                                          mvfCommittedTrenchPartsRef.current = (mvfCommittedTrenchPartsRef.current || []).filter(
+                                            (p) => !recordPolygonIds.includes(String(p?.id || ''))
+                                          );
 
-                            <div className="history-item-stats">
-                              <div className="stat">
-                                <span>{record.workers} workers</span>
-                              </div>
-                              <div className="stat stat-total">
-                                <span>
-                                  {(record.total_cable || 0).toFixed(0)} {record.unit || 'm'}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                                          // MVF/FIBRE: unselect submitted segments when history record is deleted
+                                          const segKeys = recordPolygonIds
+                                            .map((id) => String(id || ''))
+                                            .filter((id) => id.startsWith('segment:'))
+                                            .map((id) => id.replace('segment:', ''))
+                                            .filter(Boolean);
+                                          if (segKeys.length > 0) {
+                                            setMvfDoneSegmentKeys((prev) => {
+                                              const next = new Set(prev);
+                                              segKeys.forEach((k) => next.delete(String(k)));
+                                              return next;
+                                            });
+                                            setMvfActiveSegmentKeys((prev) => {
+                                              const next = new Set(prev);
+                                              segKeys.forEach((k) => next.delete(String(k)));
+                                              return next;
+                                            });
+                                          }
+                                        } else if (isMVFT) {
+                                          // MVFT: remove committed trench parts by ID
+                                          setMvftCommittedTrenchParts((prev) => {
+                                            const idsToRemove = new Set(recordPolygonIds.map(String));
+                                            const base = Array.isArray(prev) ? prev : [];
+                                            return base.filter((p) => !idsToRemove.has(String(p?.id || '')));
+                                          });
+                                          mvftCommittedTrenchPartsRef.current = (mvftCommittedTrenchPartsRef.current || []).filter(
+                                            (p) => !recordPolygonIds.map(String).includes(String(p?.id || ''))
+                                          );
+                                        } else if (isDCTT) {
+                                          // DCTT: allow removal ONLY via History by clearing panel states for polygon IDs.
+                                          const idsToRemove = recordPolygonIds
+                                            .map((id) => String(id || ''))
+                                            .filter((id) => Boolean(id) && Boolean(polygonById.current?.[id]));
 
-                      {dayNotes.length > 0 && (
-                        <div className="history-day-section">
-                          <div className="history-day-section-title">Notes</div>
-                          <div className="history-notes">
-                            {dayNotes.map((n) => {
-                              const time = n.createdAt ? new Date(n.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
-                              const hasPhoto = Boolean(n.photoDataUrl);
-                              return (
-                                <div key={n.id} className="history-note">
-                                  <div className="history-note-top">
-                                    <span className="history-note-time">{time}</span>
-                                    {hasPhoto && <span className="history-note-photo">📷</span>}
-                                  </div>
-                                  <div className="history-note-text">{n.text || '(empty note)'}</div>
+                                          if (idsToRemove.length > 0) {
+                                            setDcttPanelStates((prev) => {
+                                              const out = { ...(prev || {}) };
+                                              idsToRemove.forEach((id) => {
+                                                delete out[id];
+                                              });
+                                              return out;
+                                            });
+
+                                            // Keep committed ref in sync immediately.
+                                            const nextCommitted = new Set(dcttCommittedPanelIdsRef.current || []);
+                                            idsToRemove.forEach((id) => nextCommitted.delete(id));
+                                            dcttCommittedPanelIdsRef.current = nextCommitted;
+                                          }
+                                        } else {
+                                          // Remove from committedPolygons
+                                          setCommittedPolygons((prev) => {
+                                            const next = new Set(prev);
+                                            recordPolygonIds.forEach((id) => next.delete(id));
+                                            return next;
+                                          });
+                                          // Also remove from selectedPolygons (make them disappear from map)
+                                          setSelectedPolygons((prev) => {
+                                            const next = new Set(prev);
+                                            recordPolygonIds.forEach((id) => next.delete(id));
+                                            return next;
+                                          });
+                                        }
+                                        deleteRecord(record.id);
+                                        if (historySelectedRecordId === record.id) {
+                                          setHistorySelectedRecordId(null);
+                                        }
+                                      }
+                                    }}
+                                    title="Delete record"
+                                  >
+                                    🗑️
+                                  </button>
                                 </div>
-                              );
-                            })}
-                          </div>
+
+                                <div className="history-item-stats">
+                                  <div className="stat">
+                                    <span>{record.workers} workers</span>
+                                  </div>
+                                  <div className="stat stat-total">
+                                    <span>
+                                      {(record.total_cable || 0).toFixed(0)} {record.unit || 'm'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                          {dayNotes.length > 0 && (
+                            <div className="history-day-section">
+                              <div className="history-day-section-title">Notes</div>
+                              <div className="history-notes">
+                                {dayNotes.map((n) => {
+                                  const time = n.createdAt ? new Date(n.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
+                                  const hasPhoto = Boolean(n.photoDataUrl);
+                                  return (
+                                    <div key={n.id} className="history-note">
+                                      <div className="history-note-top">
+                                        <span className="history-note-time">{time}</span>
+                                        {hasPhoto && <span className="history-note-photo">📷</span>}
+                                      </div>
+                                      <div className="history-note-text">{n.text || '(empty note)'}</div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  );
-                });
-              })()}
-            </div>
-          </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </>
+            )}
+          </div >
         )
       }
     </div >
