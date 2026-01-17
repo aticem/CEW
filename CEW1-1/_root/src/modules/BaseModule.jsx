@@ -8190,10 +8190,23 @@ export default function BaseModule({
       const isEditing = plEditingPunch?.id === punch.id;
       // Use permanent punch number (never changes even when other punches deleted)
       const punchNumber = punch.punchNumber || (punchIndex + 1);
+
+      // FLEXIBLE FILTER: Wildcard matching (AND with defaults) - calculate BEFORE icon
+      const matchContractor = !plSelectedContractorId || punch.contractorId === plSelectedContractorId;
+      const matchDiscipline = !plSelectedDisciplineFilter || punch.discipline === plSelectedDisciplineFilter;
+      const isVisible = matchContractor && matchDiscipline;
+
+      // VISIBILITY STYLE: Apply to ROOT div (entire marker fades)
+      // Visible: Opaque, Clickable, On Top
+      // Hidden: Transparent (0.15), UNCLICKABLE (pointer-events: none), At Bottom
+      const styleString = isVisible
+        ? 'opacity: 1; pointer-events: auto; z-index: 100;'
+        : 'opacity: 0.15; pointer-events: none; z-index: 0;';
+
       const dotIcon = L.divIcon({
         className: 'custom-punch-pin',
         html: `
-          <div class="punch-dot-hit ${isSelected ? 'selected' : ''} ${isEditing ? 'editing' : ''}" style="--punch-color: ${color};">
+          <div class="punch-dot-hit ${isSelected ? 'selected' : ''} ${isEditing ? 'editing' : ''}" style="--punch-color: ${color}; ${styleString}">
             <div class="punch-dot-core" style="background:${color};${isSelected ? 'box-shadow: 0 0 0 4px rgba(255,255,255,0.6), 0 0 12px rgba(255,255,255,0.4);' : ''}"></div>
             <span class="punch-number">${punchNumber}</span>
           </div>
@@ -8205,9 +8218,22 @@ export default function BaseModule({
 
       const marker = L.marker([markerLat, markerLng], {
         icon: dotIcon,
-        interactive: true,
-        riseOnHover: true,
-        draggable: false // We handle drag manually for better control
+        interactive: isVisible, // Only interactive if visible
+        riseOnHover: isVisible,
+        draggable: false, // We handle drag manually for better control
+        pane: 'plPunchMarkerPane' // Custom pane with pointer-events fix
+      });
+
+      // Also apply to marker element for Leaflet layer consistency
+      marker.on('add', () => {
+        try {
+          const el = marker.getElement();
+          if (el) {
+            el.style.opacity = isVisible ? '1' : '0.15';
+            el.style.pointerEvents = isVisible ? 'auto' : 'none';
+            el.style.zIndex = isVisible ? '100' : '0';
+          }
+        } catch (_e) { void _e; }
       });
 
       // Tooltip
@@ -8342,6 +8368,7 @@ export default function BaseModule({
             setPlEditingPunch(punch);
             setPlPunchText(punch.text || '');
             setPlPunchContractorId(punch.contractorId);
+            setPlPunchDiscipline(punch.discipline || '');
             setPlPunchPhotoDataUrl(punch.photoDataUrl || null);
             setPlPunchPhotoName(punch.photoName || '');
           }
@@ -8355,7 +8382,7 @@ export default function BaseModule({
       marker.addTo(mapRef.current);
       plPunchMarkersRef.current[punch.id] = marker;
     });
-  }, [isPL, plPunches, plContractors, plGetContractor, plSelectedPunches, plEditingPunch]);
+  }, [isPL, plPunches, plContractors, plGetContractor, plSelectedPunches, plEditingPunch, plSelectedContractorId, plSelectedDisciplineFilter]);
 
   // Handle punch drag - global mousemove and mouseup
   useEffect(() => {
@@ -15104,6 +15131,18 @@ export default function BaseModule({
       void _e;
     }
 
+    // PL: Punch marker pane - pointer-events:none on container so mouse passes to tables beneath
+    try {
+      const paneName = 'plPunchMarkerPane';
+      if (!mapRef.current.getPane(paneName)) {
+        const pane = mapRef.current.createPane(paneName);
+        pane.style.zIndex = '500'; // above text labels, high enough to be visible
+        pane.style.pointerEvents = 'none'; // Let mouse events pass through to tables
+      }
+    } catch (_e) {
+      void _e;
+    }
+
     // Dedicated canvas renderer + pane for string_text labels (prevents ghosting when hiding/showing)
     try {
       const paneName = 'stringTextPane';
@@ -19197,92 +19236,118 @@ export default function BaseModule({
       {isPL && (
         <div className="fixed bottom-4 left-4 z-[400] flex gap-2">
           <div className="bg-slate-900/90 border border-slate-700 shadow-xl p-2 flex gap-3 items-center rounded">
-            <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Legend</span>
+            <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">FILTER</span>
 
-            {/* Contractor Dropdown Trigger */}
-            <button
-              id="pl-contractor-btn"
-              onClick={(e) => { e.stopPropagation(); setPlContractorDropdownOpen(!plContractorDropdownOpen); setPlDisciplineDropdownOpen(false); }}
-              className="flex items-center gap-2 bg-slate-800 border border-slate-600 px-2 py-1 hover:border-amber-400 transition-colors rounded min-w-[120px] justify-between"
-            >
-              <span className="text-xs font-bold text-white max-w-[100px] truncate">
-                {plSelectedContractorId ? plGetContractor(plSelectedContractorId)?.name : 'Contractors'}
-              </span>
-              <span className="text-[8px] text-slate-400">▼</span>
-            </button>
-            {/* Contractor Dropdown Menu */}
-            {plContractorDropdownOpen && (
-              <div className="absolute bottom-full left-16 mb-2 w-48 bg-slate-900 border border-slate-700 shadow-xl rounded overflow-hidden flex flex-col z-[1500]">
-                <button
-                  className={`px-3 py-2 text-left text-xs font-bold hover:bg-slate-800 ${!plSelectedContractorId ? 'text-amber-400' : 'text-slate-300'}`}
-                  onClick={() => { setPlSelectedContractorId(null); setPlContractorDropdownOpen(false); }}
-                >
-                  Contractors
-                </button>
-                {/* Dynamically Filtered List for VIEWING */}
-                {plContractors
-                  .filter(c => {
-                    // Logic: Only show contractors that have at least one punch in the current list
-                    // Optimization: We could hoist this Set calculation, but for UI responsiveness here it's acceptable
-                    // as long as punch count isn't massive. For strictly following plan, let's hoist if possible, 
-                    // but since this is inside a return, I will do it inline or if I can access the memoized vars from above.
-                    // Wait, I can't easily insert hooks inside the render return without a refactor. 
-                    // I will stick to the inline filter but ensure it is CORRECT dynamic logic vs static modal logic.
-                    // The Request asked for "Dynamic Filter logic". 
-                    // To be cleaner, I really should simple do the Set check here.
-                    const used = new Set(plPunches.map(p => p.contractorId));
-                    return used.has(c.id);
-                  })
-                  .map(c => (
-                    <button
-                      key={c.id}
-                      className={`px-3 py-2 text-left text-xs font-bold hover:bg-slate-800 flex items-center gap-2 ${plSelectedContractorId === c.id ? 'text-amber-400' : 'text-slate-300'}`}
-                      onClick={() => { setPlSelectedContractorId(c.id); setPlContractorDropdownOpen(false); }}
-                    >
-                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: c.color }} />
-                      {c.name}
-                    </button>
-                  ))}
-              </div>
-            )}
+            {/* Contractor Dropdown */}
+            <div className="relative">
+              <button
+                id="pl-contractor-btn"
+                onClick={(e) => { e.stopPropagation(); setPlContractorDropdownOpen(!plContractorDropdownOpen); setPlDisciplineDropdownOpen(false); }}
+                className="flex items-center gap-2 bg-slate-800 border border-slate-600 px-2 py-1 hover:border-amber-400 transition-colors rounded min-w-[120px] justify-between"
+              >
+                <span className="text-xs font-bold text-white max-w-[100px] truncate">
+                  {plSelectedContractorId ? plGetContractor(plSelectedContractorId)?.name : 'Contractors'}
+                </span>
+                <span className="text-[8px] text-slate-400">▼</span>
+              </button>
 
-            {/* Discipline Dropdown Trigger (Live Filter) */}
-            <button
-              id="pl-discipline-btn"
-              onClick={(e) => { e.stopPropagation(); setPlDisciplineDropdownOpen(!plDisciplineDropdownOpen); setPlContractorDropdownOpen(false); }}
-              className="flex items-center gap-2 bg-slate-800 border border-slate-600 px-2 py-1 hover:border-amber-400 transition-colors rounded min-w-[120px] justify-between"
-            >
-              <span className="text-xs font-bold text-white max-w-[100px] truncate">
-                {plSelectedDisciplineFilter || 'Disciplines'}
-              </span>
-              <span className="text-[8px] text-slate-400">▼</span>
-            </button>
-            {/* Discipline Dropdown Menu */}
-            {plDisciplineDropdownOpen && (
-              <div className="absolute bottom-full left-48 mb-2 w-48 bg-slate-900 border border-slate-700 shadow-xl rounded overflow-hidden flex flex-col z-[1500]">
-                <button
-                  className={`px-3 py-2 text-left text-xs font-bold hover:bg-slate-800 ${!plSelectedDisciplineFilter ? 'text-amber-400' : 'text-slate-300'}`}
-                  onClick={() => { setPlSelectedDisciplineFilter(''); setPlDisciplineDropdownOpen(false); }}
-                >
-                  Disciplines
-                </button>
-                {/* Dynamically Filtered List for VIEWING */}
-                {plDisciplines
-                  .filter(d => {
-                    const used = new Set(plPunches.map(p => p.discipline).filter(Boolean));
-                    return used.has(d.name);
-                  })
-                  .map(d => (
+              {plContractorDropdownOpen && (
+                <>
+                  <div className="fixed inset-0 z-[1400]" onClick={() => setPlContractorDropdownOpen(false)} />
+                  <div className="absolute bottom-full left-0 mb-[5px] w-48 bg-slate-900 border border-slate-700 shadow-xl rounded overflow-hidden flex flex-col z-[1500]">
                     <button
-                      key={d.id}
-                      className={`px-3 py-2 text-left text-xs font-bold hover:bg-slate-800 ${plSelectedDisciplineFilter === d.name ? 'text-amber-400' : 'text-slate-300'}`}
-                      onClick={() => { setPlSelectedDisciplineFilter(d.name); setPlDisciplineDropdownOpen(false); }}
+                      className={`px-3 py-2 text-left text-xs font-bold hover:bg-slate-800 ${!plSelectedContractorId ? 'text-amber-400' : 'text-slate-300'}`}
+                      onClick={() => { setPlSelectedContractorId(null); setPlContractorDropdownOpen(false); }}
                     >
-                      {d.name}
+                      Contractors
                     </button>
-                  ))}
-              </div>
-            )}
+                    {/* Dynamically Filtered List with Cross-Filtering */}
+                    {plContractors
+                      .filter(c => {
+                        const used = new Set(plPunches.map(p => p.contractorId));
+                        return used.has(c.id);
+                      })
+                      .map(c => {
+                        // Cross-filter: check if this contractor has punches matching selected discipline
+                        const isAvailable = !plSelectedDisciplineFilter || plPunches.some(
+                          p => p.contractorId === c.id && p.discipline === plSelectedDisciplineFilter
+                        );
+                        return (
+                          <button
+                            key={c.id}
+                            className={`px-3 py-2 text-left text-xs font-bold flex items-center gap-2 ${plSelectedContractorId === c.id ? 'text-amber-400' : 'text-slate-300'} ${isAvailable ? 'hover:bg-slate-800' : ''}`}
+                            style={isAvailable ? {} : { opacity: 0.4, cursor: 'not-allowed', color: '#999' }}
+                            onClick={() => {
+                              if (isAvailable) {
+                                setPlSelectedContractorId(c.id);
+                                setPlContractorDropdownOpen(false);
+                              }
+                            }}
+                          >
+                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: c.color }} />
+                            {c.name}
+                          </button>
+                        );
+                      })}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Discipline Dropdown */}
+            <div className="relative">
+              <button
+                id="pl-discipline-btn"
+                onClick={(e) => { e.stopPropagation(); setPlDisciplineDropdownOpen(!plDisciplineDropdownOpen); setPlContractorDropdownOpen(false); }}
+                className="flex items-center gap-2 bg-slate-800 border border-slate-600 px-2 py-1 hover:border-amber-400 transition-colors rounded min-w-[120px] justify-between"
+              >
+                <span className="text-xs font-bold text-white max-w-[100px] truncate">
+                  {plSelectedDisciplineFilter || 'Disciplines'}
+                </span>
+                <span className="text-[8px] text-slate-400">▼</span>
+              </button>
+
+              {plDisciplineDropdownOpen && (
+                <>
+                  <div className="fixed inset-0 z-[1400]" onClick={() => setPlDisciplineDropdownOpen(false)} />
+                  <div className="absolute bottom-full left-0 mb-[5px] w-48 bg-slate-900 border border-slate-700 shadow-xl rounded overflow-hidden flex flex-col z-[1500]">
+                    <button
+                      className={`px-3 py-2 text-left text-xs font-bold hover:bg-slate-800 ${!plSelectedDisciplineFilter ? 'text-amber-400' : 'text-slate-300'}`}
+                      onClick={() => { setPlSelectedDisciplineFilter(''); setPlDisciplineDropdownOpen(false); }}
+                    >
+                      Disciplines
+                    </button>
+                    {/* Dynamically Filtered List with Cross-Filtering */}
+                    {plDisciplines
+                      .filter(d => {
+                        const used = new Set(plPunches.map(p => p.discipline).filter(Boolean));
+                        return used.has(d.name);
+                      })
+                      .map(d => {
+                        // Cross-filter: check if this discipline has punches matching selected contractor
+                        const isAvailable = !plSelectedContractorId || plPunches.some(
+                          p => p.discipline === d.name && p.contractorId === plSelectedContractorId
+                        );
+                        return (
+                          <button
+                            key={d.id}
+                            className={`px-3 py-2 text-left text-xs font-bold ${plSelectedDisciplineFilter === d.name ? 'text-amber-400' : 'text-slate-300'} ${isAvailable ? 'hover:bg-slate-800' : ''}`}
+                            style={isAvailable ? {} : { opacity: 0.4, cursor: 'not-allowed', color: '#999' }}
+                            onClick={() => {
+                              if (isAvailable) {
+                                setPlSelectedDisciplineFilter(d.name);
+                                setPlDisciplineDropdownOpen(false);
+                              }
+                            }}
+                          >
+                            {d.name}
+                          </button>
+                        );
+                      })}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -19950,104 +20015,7 @@ export default function BaseModule({
       {/* ─────────────────────────────────────────────────────────────────
           PUNCH LIST: Contractor Dropdown Menu (appears below button)
           ───────────────────────────────────────────────────────────────── */}
-      {
-        isPL && plContractorDropdownOpen && (() => {
-          // Position dropdown below the contractor button
-          const btn = document.getElementById('pl-contractor-btn');
-          const btnRect = btn?.getBoundingClientRect();
-          const dropdownTop = btnRect ? btnRect.bottom + 4 : 300;
-          const dropdownRight = btnRect ? (window.innerWidth - btnRect.right) : 12;
 
-          return (
-            <div
-              className="contractor-dropdown-overlay"
-              onClick={() => setPlContractorDropdownOpen(false)}
-            >
-              <div
-                className="contractor-dropdown-menu"
-                style={{ top: dropdownTop, right: dropdownRight }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {/* Contractor List (READ ONLY) */}
-                {plContractors.length > 0 ? (
-                  <div className="contractor-dropdown-list">
-                    {/* Dynamic filtering: only show contractors used in current punches */}
-                    {plContractors
-                      .filter(c => {
-                        const used = new Set(plPunches.map(p => p.contractorId));
-                        return used.has(c.id);
-                      })
-                      .map((c) => (
-                        <div
-                          key={c.id}
-                          className={`contractor-dropdown-item ${plSelectedContractorId === c.id ? 'selected' : ''}`}
-                          onClick={() => {
-                            setPlSelectedContractorId(c.id);
-                            setPlContractorDropdownOpen(false);
-                          }}
-                        >
-                          <span className="contractor-color-dot" style={{ backgroundColor: c.color }} />
-                          <span className="contractor-name">{c.name}</span>
-                        </div>
-                      ))}
-                  </div>
-                ) : (
-                  <div className="p-4 text-center text-xs text-slate-400">
-                    No contractors loaded from config.
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })()
-      }
-
-      {/* ─────────────────────────────────────────────────────────────────
-          PUNCH LIST: Discipline Dropdown Menu (Live Filter)
-          ───────────────────────────────────────────────────────────────── */}
-      {
-        isPL && plDisciplineDropdownOpen && (() => {
-          const btn = document.getElementById('pl-discipline-btn');
-          const btnRect = btn?.getBoundingClientRect();
-          const dropdownBottom = btnRect ? (window.innerHeight - btnRect.top + 4) : 80;
-          const dropdownLeft = btnRect ? btnRect.left : 140;
-
-          return (
-            <div
-              className="fixed inset-0 z-[2000] cursor-default"
-              onClick={() => setPlDisciplineDropdownOpen(false)}
-            >
-              <div
-                className="absolute bg-slate-900 border border-slate-700 shadow-xl rounded flex flex-col max-h-[300px] overflow-y-auto min-w-[150px]"
-                style={{ bottom: dropdownBottom, left: dropdownLeft }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div
-                  className={`px-3 py-2 text-xs font-bold text-white hover:bg-slate-800 cursor-pointer border-b border-slate-800 ${plSelectedDisciplineFilter === '' ? 'bg-slate-800' : ''}`}
-                  onClick={() => { setPlSelectedDisciplineFilter(''); setPlDisciplineDropdownOpen(false); }}
-                >
-                  Disciplines
-                </div>
-                {/* Dynamic filtering: only show disciplines used in current punches */}
-                {plDisciplines
-                  .filter(d => {
-                    const used = new Set(plPunches.map(p => p.discipline).filter(Boolean));
-                    return used.has(d.name);
-                  })
-                  .map(d => (
-                    <div
-                      key={d.id}
-                      className={`px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer ${plSelectedDisciplineFilter === d.name ? 'bg-slate-800 text-white' : ''}`}
-                      onClick={() => { setPlSelectedDisciplineFilter(d.name); setPlDisciplineDropdownOpen(false); }}
-                    >
-                      {d.name}
-                    </div>
-                  ))}
-              </div>
-            </div>
-          );
-        })()
-      }
 
       {/* ─────────────────────────────────────────────────────────────────
           PUNCH LIST: Isometric Side Panel (fixed right panel, map stays interactive)
