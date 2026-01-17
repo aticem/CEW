@@ -1512,11 +1512,37 @@ export default function BaseModule({
 
     (async () => {
       try {
-        // Sync config
-        const { contractors, disciplines } = await plLoadConfig();
-        if (cancelled) return;
-        setPlDisciplines(disciplines);
-        setPlContractors(contractors);
+        // Load CONFIG from TXT files (Contractors & Disciplines)
+        try {
+          // Fetch raw text files
+          const [contractorRes, typeRes] = await Promise.all([
+            fetch('/PUNCH_LIST/contractors.txt'),
+            fetch('/PUNCH_LIST/types.txt')
+          ]);
+
+          if (contractorRes.ok) {
+            const text = await contractorRes.text();
+            const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            const loadedContractors = lines.map((name, idx) => ({
+              id: `c_${idx}`, // Simple ID
+              name: name,
+              color: DEFAULT_PUNCH_COLORS[idx % DEFAULT_PUNCH_COLORS.length]
+            }));
+            setPlContractors(loadedContractors);
+          }
+
+          if (typeRes.ok) {
+            const text = await typeRes.text();
+            const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            const loadedDisciplines = lines.map((name, idx) => ({
+              id: `d_${idx}`,
+              name: name
+            }));
+            setPlDisciplines(loadedDisciplines);
+          }
+        } catch (err) {
+          console.error('Failed to load Punch List config:', err);
+        }
 
         // Load Lists from LocalStorage
         let lists = [];
@@ -1832,10 +1858,8 @@ export default function BaseModule({
   // Returns null if no contractor selected (caller should show warning)
   const plCreatePunch = useCallback(async (latlng, tableId = null) => {
     // Must have contractor selected - use ref for current value
-    const contractorId = plSelectedContractorIdRef.current;
-    if (!contractorId) {
-      return null;
-    }
+    // Allow punch creation without contractor (will set to null/undefined)
+    const contractorId = plSelectedContractorIdRef.current || null;
     if (!plActiveListId) {
       alert('No active punch list selected');
       return null;
@@ -1881,7 +1905,14 @@ export default function BaseModule({
     localStorage.setItem('cew_pl_punchlists', JSON.stringify(nextLists));
 
     return punch;
+    return punch;
   }, [plSelectedDiscipline, plActiveListId, plLists]);
+
+  // Keep plCreatePunch ref in sync for map click handler (which has empty dependency array)
+  const plCreatePunchRef = useRef(plCreatePunch);
+  useEffect(() => {
+    plCreatePunchRef.current = plCreatePunch;
+  }, [plCreatePunch]);
 
 
   // Move punch to new location
@@ -11157,7 +11188,7 @@ export default function BaseModule({
         const layer = L.geoJSON(data, {
           pane: ptepPaneName || datpPaneName || mvftPaneName,
           renderer: useRenderer,
-          interactive: !disableInteractions && (invInteractive || mvfTrenchInteractive || ptepTableToTableInteractive || ptepParameterInteractive || datpTrenchInteractive || mvftTrenchInteractive),
+          interactive: !disableInteractions && (invInteractive || mvfTrenchInteractive || ptepTableToTableInteractive || ptepParameterInteractive || datpTrenchInteractive || mvftTrenchInteractive || (isPL && file.name === 'full')),
           bubblingMouseEvents: !(ptepTableToTableInteractive || ptepParameterInteractive || datpTrenchInteractive || mvftTrenchInteractive),
 
           style: (feature) => {
@@ -14277,16 +14308,7 @@ export default function BaseModule({
                 return;
               }
 
-              if (!plSelectedContractorIdRef.current) {
-                // Show warning toast
-                const toast = document.createElement('div');
-                toast.className = 'punch-warning-toast';
-                toast.innerHTML = '⚠️ Please select a contractor first!';
-                document.body.appendChild(toast);
-                setTimeout(() => toast.remove(), 2500);
-                return;
-              }
-              plCreatePunch(clickLatLng, null);
+              plCreatePunchRef.current(clickLatLng, null);
             }, 50);
           } else {
             createNote(clickLatLng);
@@ -17857,21 +17879,6 @@ export default function BaseModule({
               </div>
 
               {/* Contractor button - at the bottom, always shows "Contractor" */}
-              <button
-                type="button"
-                id="pl-contractor-btn"
-                onClick={() => setPlContractorDropdownOpen((v) => !v)}
-                className="inline-flex h-8 min-w-[120px] items-center justify-between gap-2 border-2 border-slate-700 bg-slate-900 px-3 text-[11px] font-extrabold uppercase tracking-wide text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
-              >
-                {plSelectedContractorId && (
-                  <span
-                    className="inline-block h-3 w-3 rounded-full border border-white/40 flex-shrink-0"
-                    style={{ backgroundColor: plGetContractor(plSelectedContractorId)?.color || '#888' }}
-                  />
-                )}
-                <span className={plSelectedContractorId ? 'text-white' : 'text-amber-400'}>Contractor</span>
-                <svg className="h-3 w-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-              </button>
             </div>
           ) : (
             <div className="fixed right-3 sm:right-5 top-[40%] -translate-y-1/2 z-[1090] flex flex-col items-end gap-2">
@@ -18154,46 +18161,7 @@ export default function BaseModule({
 
       {/* Title under header */}
       <div className="w-full border-0 bg-[#0b1220] py-2 text-center text-base font-black uppercase tracking-[0.22em] text-slate-200 flex justify-center items-center gap-2 relative">
-        {isPL ? (
-          <div className="relative inline-block z-[1600]">
-            <div
-              className="cursor-pointer hover:text-white flex items-center gap-2 select-none transition-colors"
-              onClick={(e) => {
-                e.stopPropagation();
-                setPlListDropdownOpen(!plListDropdownOpen);
-              }}
-            >
-              {plLists.find(l => l.id === plActiveListId)?.name || 'Select List'}
-              <span className="text-[10px] text-slate-500">▼</span>
-            </div>
-            {plListDropdownOpen && (
-              <>
-                <div className="fixed inset-0 z-[1500] cursor-default" onClick={() => setPlListDropdownOpen(false)} />
-                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-64 bg-slate-900 border border-slate-700 shadow-xl z-[1600] flex flex-col max-h-[400px]">
-                  <div className="max-h-[300px] overflow-y-auto">
-                    {plLists.map(l => (
-                      <div
-                        key={l.id}
-                        className={`px-4 py-3 text-sm text-left hover:bg-slate-800 cursor-pointer ${l.id === plActiveListId ? 'bg-slate-800 text-amber-400' : 'text-slate-300'}`}
-                        onClick={() => plSwitchList(l.id)}
-                      >
-                        {l.name}
-                      </div>
-                    ))}
-                  </div>
-                  <button
-                    className="w-full px-4 py-3 text-xs font-bold uppercase text-slate-400 hover:text-white hover:bg-slate-800 border-t border-slate-700 transition-colors"
-                    onClick={plCreateNewList}
-                  >
-                    + Create New List
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        ) : (
-          moduleName
-        )}
+        {moduleName}
       </div>
 
       <div className="map-wrapper">
@@ -19242,6 +19210,41 @@ export default function BaseModule({
               </span>
               <span className="text-[8px] text-slate-400">▼</span>
             </button>
+            {/* Contractor Dropdown Menu */}
+            {plContractorDropdownOpen && (
+              <div className="absolute bottom-full left-16 mb-2 w-48 bg-slate-900 border border-slate-700 shadow-xl rounded overflow-hidden flex flex-col z-[1500]">
+                <button
+                  className={`px-3 py-2 text-left text-xs font-bold hover:bg-slate-800 ${!plSelectedContractorId ? 'text-amber-400' : 'text-slate-300'}`}
+                  onClick={() => { setPlSelectedContractorId(null); setPlContractorDropdownOpen(false); }}
+                >
+                  All Contractors
+                </button>
+                {/* Dynamically Filtered List for VIEWING */}
+                {plContractors
+                  .filter(c => {
+                    // Logic: Only show contractors that have at least one punch in the current list
+                    // Optimization: We could hoist this Set calculation, but for UI responsiveness here it's acceptable
+                    // as long as punch count isn't massive. For strictly following plan, let's hoist if possible, 
+                    // but since this is inside a return, I will do it inline or if I can access the memoized vars from above.
+                    // Wait, I can't easily insert hooks inside the render return without a refactor. 
+                    // I will stick to the inline filter but ensure it is CORRECT dynamic logic vs static modal logic.
+                    // The Request asked for "Dynamic Filter logic". 
+                    // To be cleaner, I really should simple do the Set check here.
+                    const used = new Set(plPunches.map(p => p.contractorId));
+                    return used.has(c.id);
+                  })
+                  .map(c => (
+                    <button
+                      key={c.id}
+                      className={`px-3 py-2 text-left text-xs font-bold hover:bg-slate-800 flex items-center gap-2 ${plSelectedContractorId === c.id ? 'text-amber-400' : 'text-slate-300'}`}
+                      onClick={() => { setPlSelectedContractorId(c.id); setPlContractorDropdownOpen(false); }}
+                    >
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: c.color }} />
+                      {c.name}
+                    </button>
+                  ))}
+              </div>
+            )}
 
             {/* Discipline Dropdown Trigger (Live Filter) */}
             <button
@@ -19254,6 +19257,32 @@ export default function BaseModule({
               </span>
               <span className="text-[8px] text-slate-400">▼</span>
             </button>
+            {/* Discipline Dropdown Menu */}
+            {plDisciplineDropdownOpen && (
+              <div className="absolute bottom-full left-48 mb-2 w-48 bg-slate-900 border border-slate-700 shadow-xl rounded overflow-hidden flex flex-col z-[1500]">
+                <button
+                  className={`px-3 py-2 text-left text-xs font-bold hover:bg-slate-800 ${!plSelectedDisciplineFilter ? 'text-amber-400' : 'text-slate-300'}`}
+                  onClick={() => { setPlSelectedDisciplineFilter(''); setPlDisciplineDropdownOpen(false); }}
+                >
+                  All Disciplines
+                </button>
+                {/* Dynamically Filtered List for VIEWING */}
+                {plDisciplines
+                  .filter(d => {
+                    const used = new Set(plPunches.map(p => p.discipline).filter(Boolean));
+                    return used.has(d.name);
+                  })
+                  .map(d => (
+                    <button
+                      key={d.id}
+                      className={`px-3 py-2 text-left text-xs font-bold hover:bg-slate-800 ${plSelectedDisciplineFilter === d.name ? 'text-amber-400' : 'text-slate-300'}`}
+                      onClick={() => { setPlSelectedDisciplineFilter(d.name); setPlDisciplineDropdownOpen(false); }}
+                    >
+                      {d.name}
+                    </button>
+                  ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -19476,22 +19505,20 @@ export default function BaseModule({
               </div>
 
               {/* Discipline selector */}
-              {plDisciplines.length > 0 && (
-                <div className="punch-form-row-compact">
-                  <select
-                    className="punch-select-compact"
-                    value={plPunchDiscipline || ''}
-                    onChange={(e) => setPlPunchDiscipline(e.target.value || '')}
-                  >
-                    <option value="">Discipline...</option>
-                    {plDisciplines.map((d) => (
-                      <option key={d.id} value={d.name}>
-                        {d.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+              <div className="punch-form-row-compact">
+                <select
+                  className="punch-select-compact"
+                  value={plPunchDiscipline || ''}
+                  onChange={(e) => setPlPunchDiscipline(e.target.value || '')}
+                >
+                  <option value="">Discipline...</option>
+                  {plDisciplines.map((d) => (
+                    <option key={d.id} value={d.name}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
 
               {/* Photo section */}
@@ -21427,3 +21454,41 @@ export default function BaseModule({
     </div >
   );
 }
+
+// FORCE POINTER EVENTS FIX FOR PUNCH LIST AND TOASTS
+const plStyleFix = document.createElement('style');
+plStyleFix.innerHTML = `
+  /* 
+    CRITICAL FIX: Leaflet Marker Pane blocks events by default.
+    We must DISABLE pointer events on the pane, but ENABLE them on the markers.
+  */
+  .leaflet-marker-pane {
+    pointer-events: none !important;
+  }
+  .leaflet-marker-icon {
+    pointer-events: auto !important;
+  }
+  /* Ensure punch warning toast is visible and non-blocking */
+  .punch-warning-toast {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(220, 38, 38, 0.9);
+    color: white;
+    padding: 12px 24px;
+    border-radius: 4px;
+    font-weight: bold;
+    z-index: 9999;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    pointer-events: none;
+    animation: fadeInOut 2.5s ease-in-out;
+  }
+  @keyframes fadeInOut {
+    0% { opacity: 0; transform: translate(-50%, -20px); }
+    10% { opacity: 1; transform: translate(-50%, 0); }
+    90% { opacity: 1; transform: translate(-50%, 0); }
+    100% { opacity: 0; transform: translate(-50%, -20px); }
+  }
+`;
+document.head.appendChild(plStyleFix);
