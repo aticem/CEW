@@ -8210,10 +8210,10 @@ export default function BaseModule({
 
       // VISIBILITY STYLE: Apply to ROOT div (entire marker fades)
       // Visible: Opaque, Clickable, On Top
-      // Hidden: Transparent (0.15), UNCLICKABLE (pointer-events: none), At Bottom
+      // Hidden: Transparent (0.45), Grayscale (0.5), UNCLICKABLE (pointer-events: none), At Bottom
       const styleString = isVisible
-        ? 'opacity: 1; pointer-events: auto; z-index: 100;'
-        : 'opacity: 0.15; pointer-events: none; z-index: 0;';
+        ? 'opacity: 1; filter: none; pointer-events: auto; z-index: 100;'
+        : 'opacity: 0.45; filter: grayscale(0.5); pointer-events: none; z-index: 0;';
 
       const dotIcon = L.divIcon({
         className: 'custom-punch-pin',
@@ -8241,7 +8241,8 @@ export default function BaseModule({
         try {
           const el = marker.getElement();
           if (el) {
-            el.style.opacity = isVisible ? '1' : '0.15';
+            el.style.opacity = isVisible ? '1' : '0.45';
+            el.style.filter = isVisible ? 'none' : 'grayscale(0.5)';
             el.style.pointerEvents = isVisible ? 'auto' : 'none';
             el.style.zIndex = isVisible ? '100' : '0';
           }
