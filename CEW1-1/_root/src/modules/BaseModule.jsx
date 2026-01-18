@@ -1639,6 +1639,9 @@ export default function BaseModule({
 
   // Punch points: { id, lat, lng, contractorId, text, photoDataUrl, photoName, tableId?, createdAt, punchNumber, discipline }
   const [plPunches, setPlPunches] = useState([]);
+  // Ref to avoid stale closure in event handlers
+  const plPunchesRef = useRef(plPunches);
+  useEffect(() => { plPunchesRef.current = plPunches; }, [plPunches]);
 
   // Punch counter for permanent numbering - always starts from max existing punchNumber
   // Punch counter for permanent numbering - initialized from DB load
@@ -1865,10 +1868,14 @@ export default function BaseModule({
       return null;
     }
 
-    // Get next punch number using ref (always current) and increment both ref and state
-    const nextNumber = plPunchCounterRef.current + 1;
-    plPunchCounterRef.current = nextNumber; // Update ref immediately for next call
-    setPlPunchCounter(nextNumber); // Update state for persistence
+    // Get next punch number dynamically from current list (resets to 1 if list is empty)
+    const currentList = plLists.find(l => l.id === plActiveListId);
+    const existingPunches = currentList?.punches || [];
+    const maxNum = Math.max(0, ...existingPunches.map(p => p.punchNumber || 0));
+    const nextNumber = maxNum + 1;
+
+    plPunchCounterRef.current = nextNumber;
+    setPlPunchCounter(nextNumber);
 
     const punch = {
       id: `punch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -1941,32 +1948,34 @@ export default function BaseModule({
   }, [plPunches, plActiveListId, plLists]);
 
   // Delete multiple punches (for selection delete)
-  const plDeleteSelectedPunches = useCallback(async () => {
+  // Delete multiple punches (for selection delete) - Using functional updates for state reliability
+  const plDeleteSelectedPunches = useCallback(() => {
     if (plSelectedPunches.size === 0) return;
     const count = plSelectedPunches.size;
-    if (!window.confirm(`Are you sure you want to delete ${count} selected punch item${count > 1 ? 's' : ''}?`)) return;
+    if (!window.confirm(`Delete ${count} selected punch points?`)) return;
 
-    // Update Lists Logic
-    const nextLists = plLists.map(l => {
-      if (l.id === plActiveListId) {
-        const newPunches = (l.punches || []).filter(p => !plSelectedPunches.has(p.id));
-        return { ...l, punches: newPunches, updatedAt: Date.now() };
-      }
-      return l;
+    // 1. Update Lists State & Storage safely
+    setPlLists(prevLists => {
+      const nextLists = prevLists.map(l => {
+        if (l.id === plActiveListId) {
+          const newPunches = (l.punches || []).filter(p => !plSelectedPunches.has(p.id));
+          return { ...l, punches: newPunches, updatedAt: Date.now() };
+        }
+        return l;
+      });
+      localStorage.setItem('cew_pl_punchlists', JSON.stringify(nextLists));
+      return nextLists;
     });
-    setPlLists(nextLists);
 
-    // Update local UI
-    const currentList = nextLists.find(l => l.id === plActiveListId);
-    if (currentList) setPlPunches(currentList.punches);
+    // 2. Update Active Punches View
+    setPlPunches(prevPunches => prevPunches.filter(p => !plSelectedPunches.has(p.id)));
 
+    // 3. Clear Selection & popup
     if (plEditingPunch && plSelectedPunches.has(plEditingPunch.id)) {
       setPlEditingPunch(null);
     }
     setPlSelectedPunches(new Set());
-
-    localStorage.setItem('cew_pl_punchlists', JSON.stringify(nextLists));
-  }, [plSelectedPunches, plEditingPunch, plLists, plActiveListId]);
+  }, [plSelectedPunches, plEditingPunch, plActiveListId]);
 
   // Delete single punch with legend sync
   const plDeleteSinglePunch = useCallback((punchId) => {
@@ -2136,6 +2145,8 @@ export default function BaseModule({
 
     localStorage.setItem('cew_pl_punchlists', JSON.stringify(nextLists));
   }, [plEditingPunch, plLists, plActiveListId]);
+
+
 
   // Mark punch as completed (done)
   const plMarkPunchCompleted = useCallback(async (punchId) => {
@@ -8490,7 +8501,7 @@ export default function BaseModule({
       }
 
       // Delete selected punches (PUNCH_LIST mode)
-      if (e.key === 'Delete' && isPL && noteMode && plSelectedPunches.size > 0) {
+      if (e.key === 'Delete' && isPL && plSelectedPunches.size > 0) {
         e.preventDefault();
         plDeleteSelectedPunches();
       }
@@ -12976,14 +12987,7 @@ export default function BaseModule({
 
       // PUNCH_LIST: box selection should not leak into Leaflet's own handlers.
       // When Leaflet also processes the same drag, canvas hover can get stuck after box select.
-      if (isPL && !noteMode) {
-        try {
-          e.preventDefault();
-          e.stopPropagation();
-        } catch (_e) {
-          void _e;
-        }
-      }
+
       try { map.dragging?.disable?.(); } catch (_e) { void _e; }
     };
 
@@ -13088,7 +13092,9 @@ export default function BaseModule({
         if (noteMode) {
           // PUNCH_LIST MODE: Select punches within bounds
           if (isPL) {
-            const punchesInBounds = plPunches.filter(punch => {
+            // Use ref to get current punches (avoid stale closure)
+            const currentPunches = plPunchesRef.current || [];
+            const punchesInBounds = currentPunches.filter(punch => {
               // Get punch position (handle isometric punches with random positions)
               let pLat = punch.lat;
               let pLng = punch.lng;
@@ -13565,6 +13571,29 @@ export default function BaseModule({
                   pushHistory(changes);
                 }
               }
+            }
+          } else if (isPL) {
+            // PUNCH LIST MODE: Box select punches
+            // Use ref to get current punches (avoid stale closure)
+            const punches = plPunchesRef.current || [];
+            const toSelect = [];
+
+            punches.forEach(p => {
+              if (Number.isFinite(p.lat) && Number.isFinite(p.lng) && bounds.contains(L.latLng(p.lat, p.lng))) {
+                toSelect.push(p.id);
+              }
+            });
+
+            if (toSelect.length > 0) {
+              setPlSelectedPunches(prev => {
+                const next = new Set(prev);
+                if (isRightClick) {
+                  toSelect.forEach(id => next.delete(id));
+                } else {
+                  toSelect.forEach(id => next.add(id));
+                }
+                return next;
+              });
             }
           } else if (isPTEP) {
             // PTEP MODE: Box select only the ACTIVE sub-mode dataset
@@ -14989,6 +15018,11 @@ export default function BaseModule({
       }
 
       draggingRef.current = null;
+      // Always clean up selection box overlay to prevent blocking map interactions
+      if (boxRectRef.current) {
+        boxRectRef.current.remove();
+        boxRectRef.current = null;
+      }
     };
 
     container.addEventListener('mousedown', onMouseDown);
@@ -17913,20 +17947,29 @@ export default function BaseModule({
                     <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-400">Completed</span>
                   </div>
                   {/* Contractor colors */}
-                  {plContractors.length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-slate-600">
-                      {plContractors.map((c) => (
-                        <div key={c.id} className="flex items-center gap-2 mt-1 first:mt-0">
-                          <span
-                            className="h-3 w-3 rounded-full border border-white/40"
-                            style={{ backgroundColor: c.color }}
-                            aria-hidden="true"
-                          />
-                          <span className="text-[11px] font-bold uppercase tracking-wide text-slate-300">{c.name}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  {(() => {
+                    // Refactor: Dynamic Legend based on active punches
+                    // ONLY contractors with > 0 punches in this list appear here.
+                    const activeIds = new Set(plPunches.map(p => p.contractorId));
+                    const activeContractors = plContractors.filter(c => activeIds.has(c.id));
+
+                    if (activeContractors.length === 0) return null;
+
+                    return (
+                      <div className="mt-2 pt-2 border-t border-slate-600">
+                        {activeContractors.map((c) => (
+                          <div key={c.id} className="flex items-center gap-2 mt-1 first:mt-0">
+                            <span
+                              className="h-3 w-3 rounded-full border border-white/40"
+                              style={{ backgroundColor: c.color }}
+                              aria-hidden="true"
+                            />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-slate-300">{c.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
