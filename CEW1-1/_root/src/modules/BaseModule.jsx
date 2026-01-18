@@ -770,6 +770,8 @@ export default function BaseModule({
     lvttSubTerminationBySubRef.current = lvttSubTerminationBySub || {};
   }, [lvttSubTerminationBySub]);
 
+
+
   // LVTT: load TX->max INV map from LV cable pulling CSV (public/LV_CABLE_PULLING _PROGRESS_TRACKING/lv_pulling.csv)
   useEffect(() => {
     if (!isLVTT) {
@@ -12920,6 +12922,8 @@ export default function BaseModule({
     });
   }, [isMVF, mvfActiveSegmentKeys, mvfSegments, mvfColorOfSegment, mvfDoneSegmentKeys]);
 
+
+
   // Box Selection event handlers - left click to select, right click to unselect
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
@@ -12986,8 +12990,7 @@ export default function BaseModule({
       };
 
       // PUNCH_LIST: box selection should not leak into Leaflet's own handlers.
-      // When Leaflet also processes the same drag, canvas hover can get stuck after box select.
-
+      // Disable dragging on mousedown to prevent pan during box selection.
       try { map.dragging?.disable?.(); } catch (_e) { void _e; }
     };
 
@@ -15023,6 +15026,8 @@ export default function BaseModule({
         boxRectRef.current.remove();
         boxRectRef.current = null;
       }
+
+
     };
 
     container.addEventListener('mousedown', onMouseDown);
