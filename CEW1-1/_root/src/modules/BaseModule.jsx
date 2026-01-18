@@ -2356,6 +2356,104 @@ export default function BaseModule({
     });
   }, [isPL, plPunches, plSelectedDisciplineFilter, plContractors, plGetContractor]);
 
+  // ─────────────────────────────────────────────────────────────────
+  // PUNCH LIST: CAD-like Table ID Labels (Geometric Scaling)
+  // ─────────────────────────────────────────────────────────────────
+  const plTableIdsLayerRef = useRef(null);
+
+  // Helper to get Table ID from feature properties (handles different naming conventions if any)
+  const getTableId = (props) => {
+    if (!props) return null;
+    // Common keys: tableId, TableID, name, ID
+    // Based on user request "Masa ID Metinleri" usually typically 'tableId' in this codebase.
+    return props.tableId || props.TableID || props.id || props.ID || null;
+  };
+
+  useEffect(() => {
+    // CLEANUP FIRST: If not PL or map not ready, clear generic layer
+    if (!isPL || !mapRef.current) {
+      if (plTableIdsLayerRef.current) {
+        try {
+          plTableIdsLayerRef.current.clearLayers();
+          plTableIdsLayerRef.current.remove();
+        } catch (_e) { void _e; }
+        plTableIdsLayerRef.current = null;
+      }
+      return;
+    }
+
+    // CREATE LAYER if missing
+    if (!plTableIdsLayerRef.current) {
+      // Use a custom pane if needed, or default 'overlayPane'. 
+      // Using standard overlayPane ensures it moves correctly with zoom/pan.
+      // We set zIndex low so it draws *below* the punch markers (which are usually higher).
+      // But standard map markers might just stack naturally.
+      plTableIdsLayerRef.current = L.layerGroup().addTo(mapRef.current);
+    }
+    const layerGroup = plTableIdsLayerRef.current;
+    layerGroup.clearLayers();
+
+    // RENDER LABELS
+    // Iterate all polygons (tables) currently on the map
+    const panels = polygonById.current || {};
+    Object.values(panels).forEach((entry) => {
+      // Entry is usually { layer: L.Path, ... } or just L.Path if simple
+      // Based on earlier analysis, polygonById values have .layer property or are layers?
+      // Re-reading code: "polygonById.current = {}; // uniqueId -> {layer, stringId}" (Line 641)
+      const layer = entry.layer || entry;
+      if (!layer || !layer.feature || !layer.feature.properties) return;
+
+      const tid = getTableId(layer.feature.properties);
+      if (!tid) return;
+
+      // Get Center
+      // For Polygons, getCenter() returns centroid.
+      if (typeof layer.getCenter !== 'function') return;
+      const center = layer.getCenter();
+
+      // Create CAD-style Label
+      // We want "Geometric Scaling": Text gets bigger when zooming in, smaller when zooming out.
+      // L.TextLabel logic: fontSize = options.textBaseSize * scale.
+      // To mimic "physical size on map" (CAD style), we want the text to roughly match the table width/height.
+      // Let's say a table is ~5-10 meters long.
+      // At Zoom 22 (very close), 1 meter ~ many pixels. 
+      // We start with a base size and let the map scale handle it?
+      // Actually L.TextLabel tries to keep text "readable" at a `refZoom`.
+      // If we want it to act like a map object, we want it to be *constant world size*.
+
+      // Configuration for "CAD-like" behavior:
+      // refZoom: 21 (High zoom, detailed view)
+      // textBaseSize: The pixel size at refZoom.
+      // minTextZoom: 16 (Hide when too far out, per "Zoom out -> simpler/disappear")
+
+      // Let's guess a good size. At zoom 21, the table is large. 
+      // We want the text to fit INSIDE the table.
+      // Start with textBaseSize = 100? No, that's huge.
+      // Let's try textBaseSize = 12 (standard text) at refZoom = 17 (standard view).
+      // If we want it to scale *up* significantly when zooming in:
+      // If we set refZoom=20 and size=20, then at zoom 21 (x2 scale), size=40. At zoom 22, size=80.
+      // At zoom 19, size=10. At zoom 16, size=1.25 (effectively invisible).
+      // This matches the user req: "Zoom in -> clear, Zoom out -> disappear".
+
+      const label = new L.TextLabel(center, {
+        text: String(tid),
+        textStyle: '500', // Medium weight
+        textColor: 'rgba(255, 255, 255, 0.5)', // Subtle white, not distracting
+        textStrokeColor: 'rgba(0,0,0,0.2)', // Very subtle shadow/stroke
+        textBaseSize: 20, // Base pixel size at refZoom
+        refZoom: 20,      // Reference zoom level
+        minTextZoom: 16,  // Hide below this zoom
+        interactive: false, // Click-through (Important!)
+        bgCornerRadius: 0,
+        bgColor: null, // No background box, just text like CAD
+        rotation: 0, // Could align with table angle if we calculated it, but horizontal is safe for now "Start simple"
+      });
+
+      layerGroup.addLayer(label);
+    });
+
+  }, [isPL, mapReady, status]); // Re-run if isPL changes or map finishes loading.
+
   // Photo lightbox state for enlarged view
   const [plPhotoLightbox, setPlPhotoLightbox] = useState(null); // { url, name, x, y }
 
