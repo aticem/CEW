@@ -1475,7 +1475,10 @@ export default function BaseModule({
   const [plDisciplines, setPlDisciplines] = useState([]);
 
   // Currently selected discipline for new punches
-  const [plSelectedDiscipline, setPlSelectedDiscipline] = useState('');
+  // Currently selected discipline for new punches
+  const [plSelectedDisciplineId, setPlSelectedDisciplineId] = useState(null);
+  const plSelectedDisciplineIdRef = useRef(null);
+  useEffect(() => { plSelectedDisciplineIdRef.current = plSelectedDisciplineId; }, [plSelectedDisciplineId]);
 
   // Discipline dropdown state (Live Filter)
   const [plDisciplineDropdownOpen, setPlDisciplineDropdownOpen] = useState(false);
@@ -1752,6 +1755,56 @@ export default function BaseModule({
     return plContractors.find(c => c.id === contractorId) || null;
   }, [plContractors]);
 
+  // Get discipline by ID
+  const plGetDiscipline = useCallback((disciplineId) => {
+    return plDisciplines.find(d => d.id === disciplineId) || null;
+  }, [plDisciplines]);
+
+  // Get punch location text (Table ID or "Nearby")
+  const plGetPunchLocationText = useCallback((punch) => {
+    if (punch.tableId) return punch.tableId;
+
+    // Calculate nearest table
+    const lat = Number(punch.lat);
+    const lng = Number(punch.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '-';
+
+    // Check if L is available (it should be)
+    if (typeof L === 'undefined') return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+
+    const p = L.latLng(lat, lng);
+    let minDist = Infinity;
+    let closestId = null;
+
+    // Use polygonById.current to iterate tables
+    const polygons = Object.values(polygonById.current || {});
+    for (const entry of polygons) {
+      if (!entry.layer || !entry.layer.feature || !entry.layer.feature.properties) continue;
+      // Only consider PL tables (which have tableId)
+      const tid = entry.layer.feature.properties.tableId;
+      if (!tid) continue;
+
+      // Use getCenter() from Leaflet layer
+      const center = entry.layer.getCenter ? entry.layer.getCenter() : null;
+      if (!center) continue;
+
+      try {
+        const d = p.distanceTo(center); // meters
+        if (d < minDist) {
+          minDist = d;
+          closestId = tid;
+        }
+      } catch (e) {
+        // Ignore distance errors
+      }
+    }
+
+    if (closestId) {
+      return `${closestId} nearby`;
+    }
+    return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  }, []);
+
   // Helper: Switch List
   const plSwitchList = useCallback(async (listId) => {
     // Punches derived from list
@@ -1914,8 +1967,7 @@ export default function BaseModule({
     localStorage.setItem('cew_pl_punchlists', JSON.stringify(nextLists));
 
     return punch;
-    return punch;
-  }, [plSelectedDiscipline, plActiveListId, plLists]);
+  }, [plActiveListId, plLists]);
 
   // Keep plCreatePunch ref in sync for map click handler (which has empty dependency array)
   const plCreatePunchRef = useRef(plCreatePunch);
@@ -10741,6 +10793,12 @@ export default function BaseModule({
 
                 // PUNCH_LIST MODE: clicking a table always opens isometric view
                 if (isPL) {
+                  // STRICT CLICK CHECK: Only open if click is strictly inside the polygon geometry.
+                  // This prevents "near-miss" clicks from triggering the view due to Leaflet/Canvas tolerance.
+                  if (!_isPointInsideFeature(e.latlng.lat, e.latlng.lng, feature.geometry)) {
+                    return;
+                  }
+
                   const tableId = featureLayer.feature?.properties?.tableId;
                   if (tableId) {
                     setPlIsometricTableId(tableId);
@@ -20134,6 +20192,23 @@ export default function BaseModule({
               </div>
             </div>
 
+            {/* Discipline Selector */}
+            <div className="px-3 py-2 border-b border-slate-700 bg-slate-800/50">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400 text-[10px] uppercase">Discipline:</span>
+                <select
+                  className="flex-1 border border-slate-600 bg-slate-800 px-2 py-1 text-[11px] text-white focus:outline-none focus:border-amber-400 rounded"
+                  value={plSelectedDisciplineId || ''}
+                  onChange={(e) => setPlSelectedDisciplineId(e.target.value || null)}
+                >
+                  <option value="">Select...</option>
+                  {plDisciplines.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             {/* Isometric content area with zoom/pan */}
             <div className="flex-1 overflow-hidden p-3 flex flex-col gap-2">
               {/* Isometric PNG with clickable punch points, zoom & pan support */}
@@ -20283,7 +20358,8 @@ export default function BaseModule({
                       isoX: x,
                       isoY: y,
                       createdAt: new Date().toISOString(),
-                      punchNumber: nextNumber // Permanent number - never changes
+                      punchNumber: nextNumber, // Permanent number - never changes
+                      discipline: plGetDiscipline(plSelectedDisciplineIdRef.current)?.name || '' // Store discipline NAME
                     };
                     setPlPunches(prev => [...prev, punch]);
                   }}
@@ -21166,6 +21242,7 @@ export default function BaseModule({
                         <thead>
                           <tr style={{ borderBottom: '2px solid #475569' }}>
                             <th style={{ padding: '6px 4px', textAlign: 'left', color: '#94a3b8', fontWeight: 'bold' }}>Punch No</th>
+                            <th style={{ padding: '6px 4px', textAlign: 'left', color: '#94a3b8', fontWeight: 'bold' }}>Location</th>
                             <th style={{ padding: '6px 4px', textAlign: 'left', color: '#94a3b8', fontWeight: 'bold' }}>Date</th>
                             <th style={{ padding: '6px 4px', textAlign: 'left', color: '#94a3b8', fontWeight: 'bold' }}>Discipline</th>
                             <th style={{ padding: '6px 4px', textAlign: 'left', color: '#94a3b8', fontWeight: 'bold', maxWidth: '120px' }}>Description</th>
@@ -21210,6 +21287,9 @@ export default function BaseModule({
                                     title="View on Map"
                                   >
                                     {punch.punchNumber || '-'}
+                                  </td>
+                                  <td style={{ padding: '6px 4px', color: '#cbd5e1', fontSize: '10px' }}>
+                                    {plGetPunchLocationText(punch)}
                                   </td>
                                   <td style={{ padding: '6px 4px', color: '#cbd5e1' }}>{formatDate(punch.createdAt)}</td>
                                   <td style={{ padding: '6px 4px', color: contractorColor, fontWeight: 'bold' }}>
